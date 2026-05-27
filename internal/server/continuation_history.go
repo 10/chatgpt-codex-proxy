@@ -40,19 +40,19 @@ func continuationInputItemFromResponseOutput(item map[string]any) (accounts.Cont
 	if len(item) == 0 {
 		return accounts.ContinuationInputItem{}, false
 	}
-	out := continuationInputItemBase(
-		jsonutil.StringValue(item["role"]),
-		jsonutil.StringValue(item["type"]),
-		jsonutil.StringValue(item["phase"]),
-		jsonutil.StringValue(item["call_id"]),
-		jsonutil.StringValue(item["name"]),
-		jsonutil.StringValue(item["input"]),
-		jsonutil.StringValue(item["arguments"]),
-		jsonutil.StringValue(item["output"]),
-		jsonutil.StringValue(item["id"]),
-		jsonutil.StringValue(item["status"]),
-		jsonutil.StringValue(item["encrypted_content"]),
-	)
+	out := accounts.ContinuationInputItem{
+		Role:             jsonutil.StringValue(item["role"]),
+		Type:             jsonutil.StringValue(item["type"]),
+		Phase:            jsonutil.StringValue(item["phase"]),
+		CallID:           jsonutil.StringValue(item["call_id"]),
+		Name:             jsonutil.StringValue(item["name"]),
+		Input:            jsonutil.StringValue(item["input"]),
+		Arguments:        jsonutil.StringValue(item["arguments"]),
+		OutputText:       jsonutil.StringValue(item["output"]),
+		ID:               jsonutil.StringValue(item["id"]),
+		Status:           jsonutil.StringValue(item["status"]),
+		EncryptedContent: jsonutil.StringValue(item["encrypted_content"]),
+	}
 	out.Summary = continuationSummaryPartsFromMaps(jsonutil.SliceOfMaps(item["summary"]))
 	out.Content = continuationContentPartsFromMaps(jsonutil.SliceOfMaps(item["content"]))
 	out.OutputContent = continuationContentPartsFromMaps(jsonutil.SliceOfMaps(item["output"]))
@@ -80,19 +80,19 @@ func continuationInputItemsToCodex(items []accounts.ContinuationInputItem) []cod
 }
 
 func continuationInputItemFromCodex(item codex.InputItem) accounts.ContinuationInputItem {
-	out := continuationInputItemBase(
-		item.Role,
-		item.Type,
-		item.Phase,
-		item.CallID,
-		item.Name,
-		item.Input,
-		item.Arguments,
-		item.OutputText,
-		item.ID,
-		item.Status,
-		item.EncryptedContent,
-	)
+	out := accounts.ContinuationInputItem{
+		Role:             item.Role,
+		Type:             item.Type,
+		Phase:            item.Phase,
+		CallID:           item.CallID,
+		Name:             item.Name,
+		Input:            item.Input,
+		Arguments:        item.Arguments,
+		OutputText:       item.OutputText,
+		ID:               item.ID,
+		Status:           item.Status,
+		EncryptedContent: item.EncryptedContent,
+	}
 	out.Summary = continuationSummaryPartsFromReasoning(item.Summary)
 	out.Content = continuationContentPartsFromCodex(item.Content)
 	out.OutputContent = continuationContentPartsFromCodex(item.OutputContent)
@@ -117,22 +117,6 @@ func continuationInputItemToCodex(item accounts.ContinuationInputItem) codex.Inp
 	out.Content = codexContentPartsFromContinuation(item.Content)
 	out.OutputContent = codexContentPartsFromContinuation(item.OutputContent)
 	return out
-}
-
-func continuationInputItemBase(role, itemType, phase, callID, name, input, arguments, outputText, id, status, encryptedContent string) accounts.ContinuationInputItem {
-	return accounts.ContinuationInputItem{
-		Role:             role,
-		Type:             itemType,
-		Phase:            phase,
-		CallID:           callID,
-		Name:             name,
-		Input:            input,
-		Arguments:        arguments,
-		OutputText:       outputText,
-		ID:               id,
-		Status:           status,
-		EncryptedContent: encryptedContent,
-	}
 }
 
 func continuationSummaryPartsFromMaps(parts []map[string]any) []accounts.ContinuationSummaryPart {

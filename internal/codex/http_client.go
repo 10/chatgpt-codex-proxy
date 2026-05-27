@@ -68,7 +68,7 @@ func (c *HTTPClient) GetUsage(ctx context.Context, record accounts.Record) (Usag
 		return UsageResponse{}, nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return UsageResponse{}, nil, NewUpstreamError("codex usage", resp.StatusCode, payload, toHTTPHeader(resp.Headers))
+		return UsageResponse{}, nil, NewUpstreamError("codex usage", resp.StatusCode, payload, CanonicalHeader(resp.Headers))
 	}
 
 	var decoded UsageResponse
@@ -99,7 +99,7 @@ func (c *HTTPClient) GetCodexModels(ctx context.Context, record accounts.Record)
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, NewUpstreamError("codex models", resp.StatusCode, payload, toHTTPHeader(resp.Headers))
+		return nil, NewUpstreamError("codex models", resp.StatusCode, payload, CanonicalHeader(resp.Headers))
 	}
 
 	models, err := parseCodexModelsResponse(payload)
@@ -142,14 +142,14 @@ func (c *HTTPClient) CompactResponse(ctx context.Context, record accounts.Record
 		return CompactResponse{}, nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return CompactResponse{}, nil, NewUpstreamError("codex compact response", resp.StatusCode, body, toHTTPHeader(resp.Headers))
+		return CompactResponse{}, nil, NewUpstreamError("codex compact response", resp.StatusCode, body, CanonicalHeader(resp.Headers))
 	}
 
 	decoded, err := parseCompactResponse(body)
 	if err != nil {
 		return CompactResponse{}, nil, err
 	}
-	return decoded, ParseQuotaFromHeaders(toHTTPHeader(resp.Headers)), nil
+	return decoded, ParseQuotaFromHeaders(CanonicalHeader(resp.Headers)), nil
 }
 
 func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record, req Request, turnState string) (*StreamReader, error) {
@@ -181,7 +181,7 @@ func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record,
 	}
 	if streamResp.StatusCode < 200 || streamResp.StatusCode >= 300 {
 		data := readLimitedErrorBody(streamResp)
-		headers := toHTTPHeader(streamResp.Headers)
+		headers := CanonicalHeader(streamResp.Headers)
 		streamResp.Close()
 		return nil, NewUpstreamError("codex response", streamResp.StatusCode, data, headers)
 	}
@@ -189,7 +189,7 @@ func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record,
 	return &StreamReader{
 		reader:  bufio.NewReader(streamResp),
 		closer:  streamResp,
-		headers: toHTTPHeader(streamResp.Headers),
+		headers: CanonicalHeader(streamResp.Headers),
 	}, nil
 }
 
@@ -281,8 +281,6 @@ func CanonicalHeader(headers map[string][]string) http.Header {
 	}
 	return out
 }
-
-func toHTTPHeader(headers map[string][]string) http.Header { return CanonicalHeader(headers) }
 
 // JoinURL trims trailing slashes from base and appends path.
 func JoinURL(base, path string) string {

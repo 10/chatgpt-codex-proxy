@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -242,10 +241,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 	prepareStreamResponse(c)
 
 	accumulator := translate.NewAccumulator(normalized)
-	toolCallIndex := make(map[string]int)
-	toolCallInitialized := make(map[string]bool)
-	toolCallArgumentsSent := make(map[string]int)
-	nextToolCallIndex := 0
+	toolCalls := newChatToolCallStreamer()
 	var tupleTextBuffer strings.Builder
 	writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk("", normalized.Model, map[string]any{"role": "assistant"}, "")))
 	c.Writer.Flush()
@@ -270,7 +266,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 		if state := accumulator.ToolCallStateForEvent(event); state != nil && (state.ToolType == "custom" || strings.HasPrefix(event.Type, "response.custom_tool_call_input.")) {
 			a.logCustomToolTrace(c, "chat_completions", "upstream_event", event.Type, state)
 		}
-		if emitted := streamChatToolCallChunk(c.Writer, accumulator, normalized, event, toolCallIndex, toolCallInitialized, toolCallArgumentsSent, &nextToolCallIndex); emitted {
+		if emitted := toolCalls.writeChunk(c.Writer, accumulator, normalized, event); emitted {
 			if state := accumulator.ToolCallStateForEvent(event); state != nil && state.ToolType == "custom" {
 				a.logCustomToolTrace(c, "chat_completions", "chat_chunk_emitted", event.Type, state)
 			}
@@ -433,7 +429,22 @@ func writeResponseStreamEvents(w io.Writer, responseID string, events []translat
 	}
 }
 
-func streamChatToolCallChunk(w io.Writer, accumulator *translate.Accumulator, normalized translate.NormalizedRequest, event *codex.StreamEvent, toolCallIndex map[string]int, toolCallInitialized map[string]bool, toolCallArgumentsSent map[string]int, nextToolCallIndex *int) bool {
+type chatToolCallStreamer struct {
+	indexByCallID map[string]int
+	initialized   map[string]bool
+	argumentsSent map[string]int
+	nextIndex     int
+}
+
+func newChatToolCallStreamer() *chatToolCallStreamer {
+	return &chatToolCallStreamer{
+		indexByCallID: make(map[string]int),
+		initialized:   make(map[string]bool),
+		argumentsSent: make(map[string]int),
+	}
+}
+
+func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *translate.Accumulator, normalized translate.NormalizedRequest, event *codex.StreamEvent) bool {
 	if event == nil {
 		return false
 	}
@@ -443,15 +454,15 @@ func streamChatToolCallChunk(w io.Writer, accumulator *translate.Accumulator, no
 	}
 	callID := state.CallID
 
-	idx, exists := toolCallIndex[callID]
+	idx, exists := s.indexByCallID[callID]
 	if !exists {
-		idx = *nextToolCallIndex
-		toolCallIndex[callID] = idx
-		*nextToolCallIndex = *nextToolCallIndex + 1
+		idx = s.nextIndex
+		s.indexByCallID[callID] = idx
+		s.nextIndex++
 	}
 
 	emitted := false
-	if !toolCallInitialized[callID] && strings.TrimSpace(state.Name) != "" {
+	if !s.initialized[callID] && strings.TrimSpace(state.Name) != "" {
 		// Chat Completions clients like Cursor reliably understand function-call
 		// deltas but may reject streamed custom-tool deltas. We expose every tool
 		// call as function-shaped here and map custom tools back upstream on replay.
@@ -467,11 +478,11 @@ func streamChatToolCallChunk(w io.Writer, accumulator *translate.Accumulator, no
 		writeSSE(w, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{
 			"tool_calls": []map[string]any{chunkToolCall},
 		}, "")))
-		toolCallInitialized[callID] = true
+		s.initialized[callID] = true
 		emitted = true
 	}
 
-	if !toolCallInitialized[callID] {
+	if !s.initialized[callID] {
 		return emitted
 	}
 
@@ -481,7 +492,7 @@ func streamChatToolCallChunk(w io.Writer, accumulator *translate.Accumulator, no
 	if state.ToolType == "custom" {
 		value = state.Input
 	}
-	sent := toolCallArgumentsSent[callID]
+	sent := s.argumentsSent[callID]
 	if sent >= len(value) {
 		return emitted
 	}
@@ -494,7 +505,7 @@ func streamChatToolCallChunk(w io.Writer, accumulator *translate.Accumulator, no
 			},
 		}},
 	}, "")))
-	toolCallArgumentsSent[callID] = len(value)
+	s.argumentsSent[callID] = len(value)
 	return true
 }
 
@@ -548,6 +559,7 @@ func (a *App) rememberContinuation(accountID string, accumulator *translate.Accu
 	if strings.TrimSpace(conversationKey) == "" {
 		conversationKey = resolutionConversationKey(accumulator.Normalized)
 	}
+	now := timeNowUTC()
 	a.continuations.Put(accounts.ContinuationRecord{
 		ResponseID:      accumulator.ResponseID,
 		AccountID:       accountID,
@@ -558,8 +570,8 @@ func (a *App) rememberContinuation(accountID string, accumulator *translate.Accu
 		Model:           jsonutil.FirstNonEmpty(accumulator.Model, accumulator.Normalized.Model),
 		InputHistory:    continuationInputHistory(accumulator),
 		FunctionCallIDs: functionCallIDs(accumulator),
-		CreatedAt:       timeNowUTC(),
-		ExpiresAt:       timeNowUTC().Add(a.cfg.ContinuationTTL),
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(a.cfg.ContinuationTTL),
 	})
 }
 
@@ -572,142 +584,6 @@ func websocketEndpoint(baseURL string) string {
 
 func timeNowUTC() time.Time {
 	return time.Now().UTC()
-}
-
-func upstreamEventError(event *codex.StreamEvent) error {
-	if event == nil {
-		return nil
-	}
-	if event.Type != "error" && event.Type != "response.failed" {
-		return nil
-	}
-	details := extractUpstreamEventDetails(event)
-	if details == nil {
-		return fmt.Errorf("upstream %s", event.Type)
-	}
-	return details
-}
-
-func extractUpstreamEventDetails(event *codex.StreamEvent) *codex.UpstreamError {
-	if event == nil || event.Raw == nil {
-		return nil
-	}
-
-	nested := jsonutil.MapValue(event.Raw, "error")
-	if nested == nil {
-		nested = jsonutil.PathMapValue(event.Raw, "response", "error")
-	}
-	message := jsonutil.FirstNonEmpty(
-		jsonutil.StringValue(nested["message"]),
-		jsonutil.StringValue(nested["detail"]),
-		jsonutil.StringValue(event.Raw["message"]),
-		jsonutil.StringValue(event.Raw["detail"]),
-	)
-	if message == "" {
-		message = fmt.Sprintf("upstream %s", event.Type)
-	}
-
-	code := jsonutil.FirstNonEmpty(
-		jsonutil.StringValue(nested["code"]),
-		jsonutil.StringValue(nested["type"]),
-		jsonutil.StringValue(event.Raw["code"]),
-		jsonutil.StringValue(event.Raw["type"]),
-	)
-	statusCode, ok := 0, false
-	if nested != nil {
-		statusCode, ok = serverIntValue(nested["status_code"])
-	}
-	if !ok {
-		if nested != nil {
-			statusCode, ok = serverIntValue(nested["status"])
-		}
-	}
-	if !ok {
-		statusCode, ok = serverIntValue(event.Raw["status_code"])
-	}
-	if !ok {
-		statusCode, _ = serverIntValue(event.Raw["status"])
-	}
-	if statusCode == 0 {
-		statusCode = upstreamStatusCodeFromCode(code)
-	}
-
-	return &codex.UpstreamError{
-		Op:         "codex stream",
-		StatusCode: statusCode,
-		Body:       message,
-		Code:       code,
-		RetryAfter: firstRetryAfterSeconds(nested, event.Raw),
-	}
-}
-
-func upstreamStatusCodeFromCode(code string) int {
-	switch normalized := strings.ToLower(strings.TrimSpace(code)); normalized {
-	case "rate_limited", "rate_limit_exceeded", "too_many_requests":
-		return http.StatusTooManyRequests
-	case "quota_exhausted", "usage_limit_reached", "payment_required", "subscription_required":
-		return http.StatusPaymentRequired
-	case "invalid_api_key", "unauthorized", "authentication_error", "invalid_token":
-		return http.StatusUnauthorized
-	default:
-		switch {
-		case strings.Contains(normalized, "rate_limit"), strings.Contains(normalized, "too_many"):
-			return http.StatusTooManyRequests
-		case strings.Contains(normalized, "quota"), strings.Contains(normalized, "usage_limit"), strings.Contains(normalized, "payment"):
-			return http.StatusPaymentRequired
-		case strings.Contains(normalized, "unauthorized"), strings.Contains(normalized, "auth"):
-			return http.StatusUnauthorized
-		default:
-			return 0
-		}
-	}
-}
-
-func firstRetryAfterSeconds(values ...map[string]any) int {
-	now := timeNowUTC()
-	for _, value := range values {
-		if value == nil {
-			continue
-		}
-		if seconds, ok := serverIntValue(value["resets_in_seconds"]); ok && seconds > 0 {
-			return seconds
-		}
-		if resetAt, ok := serverIntValue(value["resets_at"]); ok && resetAt > 0 {
-			diff := resetAt - int(now.Unix())
-			if diff > 0 {
-				return diff
-			}
-		}
-	}
-	return 0
-}
-
-func serverIntValue(value any) (int, bool) {
-	switch typed := value.(type) {
-	case int:
-		return typed, true
-	case int32:
-		return int(typed), true
-	case int64:
-		return int(typed), true
-	case float64:
-		return int(typed), true
-	case json.Number:
-		parsed, err := typed.Int64()
-		if err == nil {
-			return int(parsed), true
-		}
-		floatValue, floatErr := typed.Float64()
-		if floatErr == nil {
-			return int(floatValue), true
-		}
-		return 0, false
-	case string:
-		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
 }
 
 func captureRequestBody(c *gin.Context) ([]byte, error) {
@@ -864,10 +740,6 @@ func streamErrorPayload(message string, code string) gin.H {
 	}
 }
 
-func (a *App) acquireReadyAccount(ctx context.Context, preferredID, modelID string) (accounts.Record, error) {
-	return a.accountMgr.AcquireReadyForModel(ctx, preferredID, modelID)
-}
-
 func (a *App) acquireAccountForResolution(ctx context.Context, resolution *sessionResolution) (accounts.Record, error) {
 	if resolution == nil {
 		return accounts.Record{}, errContinuationAccountUnavailable
@@ -904,7 +776,7 @@ func (a *App) acquireAccountForResolution(ctx context.Context, resolution *sessi
 		}
 		return record, nil
 	}
-	return a.acquireReadyAccount(ctx, resolution.PreferredAccountID, resolution.Request.Model)
+	return a.accountMgr.AcquireReadyForModel(ctx, resolution.PreferredAccountID, resolution.Request.Model)
 }
 
 func (a *App) setRequestAccount(c *gin.Context, account accounts.Record) {

@@ -119,7 +119,7 @@ func (a *App) acquireAccountForCompact(ctx context.Context, preferredAccountID s
 		normalized.Model = modelID
 		return account, nil
 	}
-	return a.acquireReadyAccount(ctx, preferredAccountID, normalized.Model)
+	return a.accountMgr.AcquireReadyForModel(ctx, preferredAccountID, normalized.Model)
 }
 
 func compactResponseObject(upstream codex.CompactResponse) map[string]any {
