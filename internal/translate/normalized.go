@@ -5,9 +5,8 @@ import "chatgpt-codex-proxy/internal/codex"
 type Endpoint string
 
 const (
-	EndpointChat             Endpoint = "chat_completions"
-	EndpointResponses        Endpoint = "responses"
-	EndpointResponsesCompact Endpoint = "responses_compact"
+	EndpointChat      Endpoint = "chat_completions"
+	EndpointResponses Endpoint = "responses"
 )
 
 type CompatibilityWarning struct {
