@@ -28,6 +28,18 @@ func TestMapValueAndPathMapValue(t *testing.T) {
 	if got := PathMapValue(tree, "response", "error"); got == nil || StringValue(got["message"]) != "boom" {
 		t.Fatalf("PathMapValue() = %#v, want nested map", got)
 	}
+	if got := FirstMapValue(tree, "missing", "response"); got == nil || StringValue(got["error"].(map[string]any)["message"]) != "boom" {
+		t.Fatalf("FirstMapValue() = %#v, want first present nested map", got)
+	}
+}
+
+func TestFirstMapSkipsEmptyMaps(t *testing.T) {
+	t.Parallel()
+
+	want := map[string]any{"id": "value"}
+	if got := FirstMap(nil, map[string]any{}, want); StringValue(got["id"]) != "value" {
+		t.Fatalf("FirstMap() = %#v, want %#v", got, want)
+	}
 }
 
 func TestCloneMapDeepClonesNestedMaps(t *testing.T) {
@@ -45,6 +57,29 @@ func TestCloneMapDeepClonesNestedMaps(t *testing.T) {
 
 	if src["outer"].(map[string]any)["inner"] != "value" {
 		t.Fatal("CloneMap() did not isolate nested map mutations")
+	}
+}
+
+func TestCloneMapDeepClonesMapsInsideSlices(t *testing.T) {
+	t.Parallel()
+
+	src := map[string]any{
+		"items": []any{
+			map[string]any{
+				"nested": map[string]any{"name": "original"},
+			},
+		},
+	}
+
+	cloned := CloneMap(src)
+	clonedItems := cloned["items"].([]any)
+	clonedFirst := clonedItems[0].(map[string]any)
+	clonedFirst["nested"].(map[string]any)["name"] = "changed"
+
+	srcItems := src["items"].([]any)
+	srcFirst := srcItems[0].(map[string]any)
+	if srcFirst["nested"].(map[string]any)["name"] != "original" {
+		t.Fatal("CloneMap() did not isolate maps inside slices")
 	}
 }
 

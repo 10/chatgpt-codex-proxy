@@ -120,7 +120,7 @@ func reconvertTupleValues(data any, schema map[string]any, root map[string]any) 
 		return out
 	}
 
-	for _, key := range []string{"oneOf", "anyOf", "allOf"} {
+	for _, key := range schemaSliceChildKeys {
 		entries, ok := schema[key].([]any)
 		if !ok {
 			continue

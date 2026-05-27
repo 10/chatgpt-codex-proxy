@@ -93,7 +93,7 @@ func ParseQuotaFromEvent(event *StreamEvent, planType string) *accounts.QuotaSna
 
 	primary := parseEventRateWindow(jsonutil.MapValue(rateLimits, "primary"))
 	secondary := parseEventRateWindow(jsonutil.MapValue(rateLimits, "secondary"))
-	codeReview := parseEventRateWindow(firstMapValue(rateLimits, "code_review", "code_review_rate_limit"))
+	codeReview := parseEventRateWindow(jsonutil.FirstMapValue(rateLimits, "code_review", "code_review_rate_limit"))
 	if primary == nil && secondary == nil && codeReview == nil {
 		return nil
 	}
@@ -179,15 +179,6 @@ type eventRateWindowPayload struct {
 	ResetAt            *int64   `json:"reset_at,omitempty"`
 	WindowMinutes      *int     `json:"window_minutes,omitempty"`
 	LimitWindowSeconds *int     `json:"limit_window_seconds,omitempty"`
-}
-
-func firstMapValue(values map[string]any, keys ...string) map[string]any {
-	for _, key := range keys {
-		if value, ok := values[key].(map[string]any); ok {
-			return value
-		}
-	}
-	return nil
 }
 
 func parseCredits(headers http.Header, prefix string) *accounts.CreditsSnapshot {

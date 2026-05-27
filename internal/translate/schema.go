@@ -2,6 +2,12 @@ package translate
 
 import "encoding/json"
 
+var (
+	schemaMapChildKeys    = []string{"properties", "patternProperties", "$defs", "definitions"}
+	schemaSliceChildKeys  = []string{"oneOf", "anyOf", "allOf"}
+	schemaDirectChildKeys = []string{"if", "then", "else", "not"}
+)
+
 func PrepareSchema(schema map[string]any) (prepared map[string]any, tupleSchema map[string]any) {
 	cloned := cloneJSONMap(schema)
 	if cloned == nil {
@@ -128,51 +134,9 @@ func resolveLocalRefs(node map[string]any, defs map[string]map[string]any, resol
 }
 
 func resolveLocalRefChildren(node map[string]any, defs map[string]map[string]any, resolving map[string]bool) {
-	if node == nil {
-		return
-	}
-
-	for _, key := range []string{"properties", "patternProperties", "$defs", "definitions"} {
-		children, ok := node[key].(map[string]any)
-		if !ok {
-			continue
-		}
-		for name, raw := range children {
-			if child, ok := raw.(map[string]any); ok {
-				children[name] = resolveLocalRefs(child, defs, resolving)
-			}
-		}
-	}
-
-	if child, ok := node["items"].(map[string]any); ok {
-		node["items"] = resolveLocalRefs(child, defs, resolving)
-	}
-
-	if prefixItems, ok := node["prefixItems"].([]any); ok {
-		for index, raw := range prefixItems {
-			if child, ok := raw.(map[string]any); ok {
-				prefixItems[index] = resolveLocalRefs(child, defs, resolving)
-			}
-		}
-	}
-
-	for _, key := range []string{"oneOf", "anyOf", "allOf"} {
-		entries, ok := node[key].([]any)
-		if !ok {
-			continue
-		}
-		for index, raw := range entries {
-			if child, ok := raw.(map[string]any); ok {
-				entries[index] = resolveLocalRefs(child, defs, resolving)
-			}
-		}
-	}
-
-	for _, key := range []string{"if", "then", "else", "not"} {
-		if child, ok := node[key].(map[string]any); ok {
-			node[key] = resolveLocalRefs(child, defs, resolving)
-		}
-	}
+	updateSchemaChildren(node, func(child map[string]any) map[string]any {
+		return resolveLocalRefs(child, defs, resolving)
+	})
 }
 
 func cloneBoolMap(value map[string]bool) map[string]bool {
@@ -184,53 +148,58 @@ func cloneBoolMap(value map[string]bool) map[string]bool {
 }
 
 func forEachSchemaChild(node map[string]any, visit func(map[string]any)) {
-	if node == nil || visit == nil {
+	updateSchemaChildren(node, func(child map[string]any) map[string]any {
+		if visit != nil {
+			visit(child)
+		}
+		return child
+	})
+}
+
+func updateSchemaChildren(node map[string]any, update func(map[string]any) map[string]any) {
+	if node == nil || update == nil {
 		return
 	}
 
-	for _, key := range []string{"properties", "patternProperties", "$defs", "definitions"} {
+	for _, key := range schemaMapChildKeys {
 		children, ok := node[key].(map[string]any)
 		if !ok {
 			continue
 		}
-		for _, raw := range children {
-			child, ok := raw.(map[string]any)
-			if ok {
-				visit(child)
+		for name, raw := range children {
+			if child, ok := raw.(map[string]any); ok {
+				children[name] = update(child)
 			}
 		}
 	}
 
 	if items, ok := node["items"].(map[string]any); ok {
-		visit(items)
+		node["items"] = update(items)
 	}
 
 	if prefixItems, ok := node["prefixItems"].([]any); ok {
-		for _, raw := range prefixItems {
-			child, ok := raw.(map[string]any)
-			if ok {
-				visit(child)
+		for index, raw := range prefixItems {
+			if child, ok := raw.(map[string]any); ok {
+				prefixItems[index] = update(child)
 			}
 		}
 	}
 
-	for _, key := range []string{"oneOf", "anyOf", "allOf"} {
+	for _, key := range schemaSliceChildKeys {
 		entries, ok := node[key].([]any)
 		if !ok {
 			continue
 		}
-		for _, raw := range entries {
-			child, ok := raw.(map[string]any)
-			if ok {
-				visit(child)
+		for index, raw := range entries {
+			if child, ok := raw.(map[string]any); ok {
+				entries[index] = update(child)
 			}
 		}
 	}
 
-	for _, key := range []string{"if", "then", "else", "not"} {
-		child, ok := node[key].(map[string]any)
-		if ok {
-			visit(child)
+	for _, key := range schemaDirectChildKeys {
+		if child, ok := node[key].(map[string]any); ok {
+			node[key] = update(child)
 		}
 	}
 }

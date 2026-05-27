@@ -122,15 +122,10 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 	if err != nil {
 		return NormalizedRequest{}, err
 	}
-	if req.Reasoning != nil {
-		explicit := &codex.Reasoning{
-			Effort:  req.Reasoning.Effort,
-			Summary: req.Reasoning.Summary,
-		}
-		if explicit.Effort != "" && explicit.Summary == "" {
-			explicit.Summary = "auto"
-		}
-		reasoning = explicit
+	reasoning = normalizeResponsesReasoning(req.Reasoning, reasoning)
+	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input)
+	if err != nil {
+		return NormalizedRequest{}, err
 	}
 
 	out := newNormalizedRequest(
@@ -145,30 +140,10 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 		serviceTier,
 		req.PreviousResponseID,
 	)
-	var instructions []string
-	if text := strings.TrimSpace(req.Instructions); text != "" {
-		instructions = append(instructions, text)
-	}
-
-	out.Text, out.TupleSchema = normalizeResponsesText(req.Text)
-
-	if req.Input.String != "" {
-		out.Input = append(out.Input, codex.InputItem{
-			Role: "user",
-			Content: []codex.ContentPart{{
-				Type: "input_text",
-				Text: req.Input.String,
-			}},
-		})
-	}
-
-	for _, item := range req.Input.Items {
-		if err := appendResponsesInputItem(&out.Input, &instructions, item); err != nil {
-			return NormalizedRequest{}, err
-		}
-	}
-
-	out.Instructions = jsonutil.FirstNonEmpty(strings.TrimSpace(strings.Join(instructions, "\n\n")), defaultInstructions)
+	out.Instructions = payload.Instructions
+	out.Input = payload.Input
+	out.Text = payload.Text
+	out.TupleSchema = payload.TupleSchema
 	return out, nil
 }
 
@@ -177,45 +152,70 @@ func Compact(req openai.ResponsesCompactRequest, catalog ...*models.Catalog) (No
 	if err != nil {
 		return NormalizedCompactRequest{}, err
 	}
-	if req.Reasoning != nil {
-		explicit := &codex.Reasoning{
-			Effort:  req.Reasoning.Effort,
-			Summary: req.Reasoning.Summary,
-		}
-		if explicit.Effort != "" && explicit.Summary == "" {
-			explicit.Summary = "auto"
-		}
-		reasoning = explicit
+	reasoning = normalizeResponsesReasoning(req.Reasoning, reasoning)
+	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input)
+	if err != nil {
+		return NormalizedCompactRequest{}, err
 	}
 
 	out := NormalizedCompactRequest{
 		ModelExplicit:      modelExplicit,
 		PreviousResponseID: strings.TrimSpace(req.PreviousResponseID),
 		CompactRequest: codex.CompactRequest{
-			Model:     model,
-			Reasoning: reasoning,
+			Model:        model,
+			Instructions: payload.Instructions,
+			Input:        payload.Input,
+			Text:         payload.Text,
+			Reasoning:    reasoning,
 		},
+		TupleSchema: payload.TupleSchema,
 	}
+	return out, nil
+}
+
+type normalizedResponsesPayload struct {
+	Instructions string
+	Input        []codex.InputItem
+	Text         *codex.TextConfig
+	TupleSchema  map[string]any
+}
+
+func normalizeResponsesReasoning(explicit *openai.Reasoning, fallback *codex.Reasoning) *codex.Reasoning {
+	if explicit == nil {
+		return fallback
+	}
+	reasoning := &codex.Reasoning{
+		Effort:  explicit.Effort,
+		Summary: explicit.Summary,
+	}
+	if reasoning.Effort != "" && reasoning.Summary == "" {
+		reasoning.Summary = "auto"
+	}
+	return reasoning
+}
+
+func normalizeResponsesPayload(instructionsText string, textConfig *openai.ResponsesText, input openai.ResponsesInput) (normalizedResponsesPayload, error) {
+	var out normalizedResponsesPayload
 	var instructions []string
-	if text := strings.TrimSpace(req.Instructions); text != "" {
+	if text := strings.TrimSpace(instructionsText); text != "" {
 		instructions = append(instructions, text)
 	}
 
-	out.Text, out.TupleSchema = normalizeResponsesText(req.Text)
+	out.Text, out.TupleSchema = normalizeResponsesText(textConfig)
 
-	if req.Input.String != "" {
+	if input.String != "" {
 		out.Input = append(out.Input, codex.InputItem{
 			Role: "user",
 			Content: []codex.ContentPart{{
 				Type: "input_text",
-				Text: req.Input.String,
+				Text: input.String,
 			}},
 		})
 	}
 
-	for _, item := range req.Input.Items {
+	for _, item := range input.Items {
 		if err := appendResponsesInputItem(&out.Input, &instructions, item); err != nil {
-			return NormalizedCompactRequest{}, err
+			return normalizedResponsesPayload{}, err
 		}
 	}
 

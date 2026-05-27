@@ -44,20 +44,61 @@ func PathMapValue(raw map[string]any, keys ...string) map[string]any {
 	return nil
 }
 
-// CloneMap recursively clones nested map[string]any trees.
+// FirstMap returns the first non-empty map.
+func FirstMap(values ...map[string]any) map[string]any {
+	for _, value := range values {
+		if len(value) > 0 {
+			return value
+		}
+	}
+	return nil
+}
+
+// FirstMapValue returns the first map value found at any of keys.
+func FirstMapValue(raw map[string]any, keys ...string) map[string]any {
+	if raw == nil {
+		return nil
+	}
+	for _, key := range keys {
+		if value := MapValue(raw, key); value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+// CloneMap recursively clones decoded JSON map trees.
 func CloneMap(src map[string]any) map[string]any {
 	if src == nil {
 		return nil
 	}
 	dst := make(map[string]any, len(src))
 	for key, value := range src {
-		if mapped, ok := value.(map[string]any); ok {
-			dst[key] = CloneMap(mapped)
-			continue
-		}
-		dst[key] = value
+		dst[key] = CloneValue(value)
 	}
 	return dst
+}
+
+// CloneValue recursively clones decoded JSON map and slice values.
+func CloneValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return CloneMap(typed)
+	case []map[string]any:
+		out := make([]map[string]any, len(typed))
+		for i, item := range typed {
+			out[i] = CloneMap(item)
+		}
+		return out
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = CloneValue(item)
+		}
+		return out
+	default:
+		return value
+	}
 }
 
 // SliceOfMaps coerces a JSON-decoded value into []map[string]any, copying the

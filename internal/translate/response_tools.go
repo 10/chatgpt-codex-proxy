@@ -112,7 +112,7 @@ func (a *Accumulator) toolCallStateForEvent(event *codex.StreamEvent) *ToolCallS
 		callID := jsonutil.FirstNonEmpty(jsonutil.StringValue(event.Raw["call_id"]), itemID)
 		return firstToolCallState(a.toolCallByID[callID], a.toolCallByID[itemID])
 	case "response.output_item.added", "response.output_item.done":
-		item := firstMap(jsonutil.MapValue(event.Raw, "item"), jsonutil.MapValue(event.Raw, "output_item"))
+		item := jsonutil.FirstMap(jsonutil.MapValue(event.Raw, "item"), jsonutil.MapValue(event.Raw, "output_item"))
 		itemType := jsonutil.StringValue(item["type"])
 		if itemType != "function_call" && itemType != "custom_tool_call" {
 			return nil

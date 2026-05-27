@@ -157,7 +157,7 @@ func (a *Accumulator) applyToolEvent(event *codex.StreamEvent) {
 }
 
 func (a *Accumulator) applyOutputEvent(event *codex.StreamEvent) {
-	if item := firstMap(jsonutil.MapValue(event.Raw, "item"), jsonutil.MapValue(event.Raw, "output_item")); item != nil {
+	if item := jsonutil.FirstMap(jsonutil.MapValue(event.Raw, "item"), jsonutil.MapValue(event.Raw, "output_item")); item != nil {
 		a.captureOutputItem(item, outputIndexFromMap(event.Raw))
 	}
 	if output := jsonutil.SliceOfMaps(event.Raw["output"]); len(output) > 0 {
@@ -545,15 +545,6 @@ func outputItemKey(item map[string]any, outputIndex int) string {
 		return fmt.Sprintf("index:%d", outputIndex)
 	}
 	return fmt.Sprintf("anon:%p", item)
-}
-
-func firstMap(values ...map[string]any) map[string]any {
-	for _, value := range values {
-		if len(value) > 0 {
-			return value
-		}
-	}
-	return nil
 }
 
 func MustJSON(value any) []byte {
