@@ -225,7 +225,7 @@ func extractAccountID(raw oauthTokenResponse) string {
 		if token == "" {
 			continue
 		}
-		claims := parseJWTClaims(token)
+		claims, _ := jwtutil.DecodePayload[oauthClaims](token)
 		if accountID := claims.ChatGPTAccountID; accountID != "" {
 			return accountID
 		}
@@ -236,18 +236,10 @@ func extractAccountID(raw oauthTokenResponse) string {
 	return ""
 }
 
-func parseJWTClaims(token string) oauthClaims {
-	claims, ok := jwtutil.DecodePayload[oauthClaims](token)
-	if !ok {
-		return oauthClaims{}
-	}
-	return claims
-}
-
 func (s *OAuthService) defaultHeaders() http.Header {
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
-	headers.Set("User-Agent", userAgent(s.cfg))
+	headers.Set("User-Agent", desktopUserAgent)
 	return headers
 }
 

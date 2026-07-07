@@ -5,8 +5,17 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+)
 
-	"chatgpt-codex-proxy/internal/config"
+const (
+	desktopClientVersion = "26.409.61251"
+	desktopOriginator    = "Codex Desktop"
+	openAIBeta           = "responses_websockets=2026-02-06"
+	codexResidency       = "us"
+	desktopUserAgent     = "Codex Desktop/26.409.61251 (win32; x64)"
+	chromiumVersion      = "147"
+	clientHintPlatform   = "Windows"
+	acceptLanguage       = "en-US,en;q=0.9"
 )
 
 type HeaderOptions struct {
@@ -20,14 +29,14 @@ type HeaderOptions struct {
 	IncludeBeta    bool
 }
 
-func BuildHeaders(cfg config.Config, token string, opts HeaderOptions) http.Header {
+func BuildHeaders(token string, opts HeaderOptions) http.Header {
 	headers := make(http.Header)
 	headers.Set("Authorization", "Bearer "+token)
 	if opts.AccountID != "" {
 		headers.Set("ChatGPT-Account-Id", opts.AccountID)
 	}
-	headers.Set("originator", cfg.Originator)
-	headers.Set("x-openai-internal-codex-residency", cfg.Residency)
+	headers.Set("originator", desktopOriginator)
+	headers.Set("x-openai-internal-codex-residency", codexResidency)
 	if opts.RequestID != "" {
 		headers.Set("x-client-request-id", opts.RequestID)
 	}
@@ -35,18 +44,18 @@ func BuildHeaders(cfg config.Config, token string, opts HeaderOptions) http.Head
 		headers.Set("x-codex-turn-state", opts.TurnState)
 	}
 	if opts.IncludeBeta {
-		headers.Set("OpenAI-Beta", cfg.OpenAIBeta)
+		headers.Set("OpenAI-Beta", openAIBeta)
 	}
-	headers.Set("User-Agent", userAgent(cfg))
-	headers.Set("sec-ch-ua", fmt.Sprintf(`"Chromium";v="%s", "Not:A-Brand";v="24"`, cfg.ChromiumVersion))
+	headers.Set("User-Agent", desktopUserAgent)
+	headers.Set("sec-ch-ua", fmt.Sprintf(`"Chromium";v="%s", "Not:A-Brand";v="24"`, chromiumVersion))
 	headers.Set("sec-ch-ua-mobile", "?0")
-	headers.Set("sec-ch-ua-platform", fmt.Sprintf(`"%s"`, cfg.ClientHintPlatform))
+	headers.Set("sec-ch-ua-platform", fmt.Sprintf(`"%s"`, clientHintPlatform))
 	if opts.AcceptEncoding != "" {
 		headers.Set("Accept-Encoding", opts.AcceptEncoding)
 	} else {
 		headers.Set("Accept-Encoding", "gzip, deflate, br, zstd")
 	}
-	headers.Set("Accept-Language", cfg.DefaultAcceptLanguage)
+	headers.Set("Accept-Language", acceptLanguage)
 	headers.Set("sec-fetch-site", "same-origin")
 	headers.Set("sec-fetch-mode", "cors")
 	headers.Set("sec-fetch-dest", "empty")
@@ -62,40 +71,6 @@ func BuildHeaders(cfg config.Config, token string, opts HeaderOptions) http.Head
 	return headers
 }
 
-func OrderedHeaders(headers http.Header, order []string) map[string][]string {
-	out := make(map[string][]string, len(headers))
-	for key, values := range headers {
-		out[key] = append([]string(nil), values...)
-	}
-	if len(order) == 0 {
-		return out
-	}
-
-	ordered := make(map[string][]string, len(headers))
-	seen := make(map[string]struct{}, len(headers))
-	lowerKeys := make(map[string]string, len(headers))
-	for key := range headers {
-		lowerKeys[strings.ToLower(key)] = key
-	}
-	for _, key := range order {
-		if original, ok := lowerKeys[key]; ok {
-			ordered[original] = append([]string(nil), headers[original]...)
-			seen[original] = struct{}{}
-		}
-	}
-	keys := make([]string, 0, len(headers))
-	for key := range headers {
-		if _, ok := seen[key]; !ok {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		ordered[key] = append([]string(nil), headers[key]...)
-	}
-	return ordered
-}
-
 func cookieHeader(cookies map[string]string) string {
 	pairs := make([]string, 0, len(cookies))
 	keys := make([]string, 0, len(cookies))
@@ -107,11 +82,4 @@ func cookieHeader(cookies map[string]string) string {
 		pairs = append(pairs, fmt.Sprintf("%s=%s", key, cookies[key]))
 	}
 	return strings.Join(pairs, "; ")
-}
-
-func userAgent(cfg config.Config) string {
-	return strings.NewReplacer(
-		"{platform}", cfg.Platform,
-		"{arch}", cfg.Arch,
-	).Replace(cfg.UserAgentTemplate)
 }

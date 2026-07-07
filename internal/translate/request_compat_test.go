@@ -138,9 +138,6 @@ func TestChatCompletionsTranslationPreparesSchemaAndWarnings(t *testing.T) {
 				},
 			},
 		},
-		Temperature:   ptr(0.2),
-		MaxTokens:     ptr(42),
-		StreamOptions: json.RawMessage(`{"include_usage":true}`),
 	}
 
 	normalized, err := ChatCompletions(request)
@@ -164,9 +161,6 @@ func TestChatCompletionsTranslationPreparesSchemaAndWarnings(t *testing.T) {
 	itemProps, _ := items["properties"].(map[string]any)
 	if _, ok := itemProps["0"]; !ok {
 		t.Fatalf("tuple item properties = %#v, want numeric keys", itemProps)
-	}
-	if len(normalized.CompatibilityWarnings) != 3 {
-		t.Fatalf("warnings len = %d, want 3", len(normalized.CompatibilityWarnings))
 	}
 }
 
@@ -202,9 +196,6 @@ func TestResponsesTranslationPreparesSchemaAndWarnings(t *testing.T) {
 				},
 			},
 		},
-		TopP:              ptr(0.9),
-		ParallelToolCalls: ptr(true),
-		Metadata:          map[string]any{"request_id": "abc"},
 	}
 
 	normalized, err := Responses(request)
@@ -219,11 +210,4 @@ func TestResponsesTranslationPreparesSchemaAndWarnings(t *testing.T) {
 	if pair["type"] != "object" {
 		t.Fatalf("pair.type = %#v, want object", pair["type"])
 	}
-	if len(normalized.CompatibilityWarnings) != 3 {
-		t.Fatalf("warnings len = %d, want 3", len(normalized.CompatibilityWarnings))
-	}
-}
-
-func ptr[T any](value T) *T {
-	return &value
 }

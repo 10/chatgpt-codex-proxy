@@ -9,25 +9,13 @@ const (
 	EndpointResponses Endpoint = "responses"
 )
 
-type CompatibilityWarning struct {
-	Field    string
-	Endpoint Endpoint
-	Behavior string
-	Detail   string
-}
-
 // NormalizedRequest extends the canonical codex request with translation-only
 // metadata that the proxy needs while mapping OpenAI payloads.
 type NormalizedRequest struct {
 	Endpoint Endpoint
 	codex.Request
-	ModelExplicit         bool
-	TupleSchema           map[string]any
-	CompatibilityWarnings []CompatibilityWarning
-}
-
-func (n NormalizedRequest) ToCodexRequest() codex.Request {
-	return n.Request
+	ModelExplicit bool
+	TupleSchema   map[string]any
 }
 
 func (n NormalizedRequest) ToCodexWSCreatePayload() map[string]any {
@@ -63,12 +51,7 @@ func (n NormalizedRequest) ToCodexWSCreatePayload() map[string]any {
 
 type NormalizedCompactRequest struct {
 	codex.CompactRequest
-	ModelExplicit         bool
-	PreviousResponseID    string
-	TupleSchema           map[string]any
-	CompatibilityWarnings []CompatibilityWarning
-}
-
-func (n NormalizedCompactRequest) ToCodexCompactRequest() codex.CompactRequest {
-	return n.CompactRequest
+	ModelExplicit      bool
+	PreviousResponseID string
+	TupleSchema        map[string]any
 }

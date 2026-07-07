@@ -35,7 +35,7 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 			resolution.ConversationKey = key
 			resolution.Request.PromptCacheKey = key
 			resolution.Original.PromptCacheKey = key
-		} else if key := conversationkey.Derive(resolution.Request.ToCodexRequest()); key != "" {
+		} else if key := conversationkey.Derive(resolution.Request.Request); key != "" {
 			resolution.ConversationKey = key
 			resolution.Request.PromptCacheKey = key
 			resolution.Original.PromptCacheKey = key
@@ -50,7 +50,7 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 		return resolution, nil
 	}
 
-	if key := conversationkey.Derive(normalized.ToCodexRequest()); key != "" {
+	if key := conversationkey.Derive(normalized.Request); key != "" {
 		resolution.ConversationKey = key
 		resolution.Request.PromptCacheKey = key
 		resolution.Original.PromptCacheKey = key
@@ -243,5 +243,5 @@ func resolutionConversationKey(normalized translate.NormalizedRequest) string {
 	if key := strings.TrimSpace(normalized.PromptCacheKey); key != "" {
 		return key
 	}
-	return conversationkey.Derive(normalized.ToCodexRequest())
+	return conversationkey.Derive(normalized.Request)
 }

@@ -86,7 +86,7 @@ func TestHasTupleSchemasDetectsNestedLocations(t *testing.T) {
 		},
 	}
 
-	if !HasTupleSchemas(schema) {
+	if !hasTupleSchemas(schema) {
 		t.Fatal("expected tuple schema detection")
 	}
 }
@@ -102,7 +102,7 @@ func TestConvertTupleSchemasConvertsPrefixItemsToObjectShape(t *testing.T) {
 		},
 	}
 
-	converted := ConvertTupleSchemas(schema)
+	converted := convertTupleSchemas(schema)
 	if converted["type"] != "object" {
 		t.Fatalf("type = %#v, want object", converted["type"])
 	}

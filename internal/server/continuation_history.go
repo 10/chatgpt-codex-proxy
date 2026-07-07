@@ -4,7 +4,6 @@ import (
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
-	"chatgpt-codex-proxy/internal/openai"
 	"chatgpt-codex-proxy/internal/translate"
 )
 
@@ -93,9 +92,9 @@ func continuationInputItemFromCodex(item codex.InputItem) accounts.ContinuationI
 		Status:           item.Status,
 		EncryptedContent: item.EncryptedContent,
 	}
-	out.Summary = continuationSummaryPartsFromReasoning(item.Summary)
-	out.Content = continuationContentPartsFromCodex(item.Content)
-	out.OutputContent = continuationContentPartsFromCodex(item.OutputContent)
+	out.Summary = cloneParts(item.Summary)
+	out.Content = cloneParts(item.Content)
+	out.OutputContent = cloneParts(item.OutputContent)
 	return out
 }
 
@@ -113,9 +112,9 @@ func continuationInputItemToCodex(item accounts.ContinuationInputItem) codex.Inp
 		Status:           item.Status,
 		EncryptedContent: item.EncryptedContent,
 	}
-	out.Summary = reasoningPartsFromContinuation(item.Summary)
-	out.Content = codexContentPartsFromContinuation(item.Content)
-	out.OutputContent = codexContentPartsFromContinuation(item.OutputContent)
+	out.Summary = cloneParts(item.Summary)
+	out.Content = cloneParts(item.Content)
+	out.OutputContent = cloneParts(item.OutputContent)
 	return out
 }
 
@@ -126,14 +125,6 @@ func continuationSummaryPartsFromMaps(parts []map[string]any) []accounts.Continu
 			Text: jsonutil.StringValue(part["text"]),
 		}
 	})
-}
-
-func continuationSummaryPartsFromReasoning(parts []openai.ReasoningPart) []accounts.ContinuationSummaryPart {
-	return cloneParts(parts)
-}
-
-func reasoningPartsFromContinuation(parts []accounts.ContinuationSummaryPart) []openai.ReasoningPart {
-	return cloneParts(parts)
 }
 
 func continuationContentPartsFromMaps(parts []map[string]any) []accounts.ContinuationContentPart {
@@ -149,14 +140,6 @@ func continuationContentPartsFromMaps(parts []map[string]any) []accounts.Continu
 			Filename: jsonutil.StringValue(part["filename"]),
 		}
 	})
-}
-
-func continuationContentPartsFromCodex(parts []codex.ContentPart) []accounts.ContinuationContentPart {
-	return cloneParts(parts)
-}
-
-func codexContentPartsFromContinuation(parts []accounts.ContinuationContentPart) []codex.ContentPart {
-	return cloneParts(parts)
 }
 
 func mapParts[T any](parts []map[string]any, fn func(map[string]any) T) []T {

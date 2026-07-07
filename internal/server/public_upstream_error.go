@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
@@ -101,7 +102,7 @@ func upstreamStatusCodeFromCode(code string) int {
 }
 
 func firstRetryAfterSeconds(values ...map[string]any) int {
-	now := timeNowUTC()
+	now := time.Now().UTC()
 	for _, value := range values {
 		if value == nil {
 			continue

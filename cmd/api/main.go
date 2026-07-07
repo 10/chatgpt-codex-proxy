@@ -21,7 +21,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := observability.NewLogger(string(cfg.LogLevel))
+	logger := observability.NewLogger()
 	slog.SetDefault(logger)
 
 	app, err := server.New(cfg, logger)

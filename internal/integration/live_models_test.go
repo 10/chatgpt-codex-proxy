@@ -27,44 +27,9 @@ func TestLiveCodexModelsEndpoint(t *testing.T) {
 	if baseURL == "" {
 		baseURL = "https://chatgpt.com/backend-api"
 	}
-	clientVersion := os.Getenv("CODEX_CLIENT_VERSION")
-	if clientVersion == "" {
-		clientVersion = "26.409.61251"
-	}
-
 	cfg := config.Config{
-		CodexBaseURL:          baseURL,
-		ClientVersion:         clientVersion,
-		RequestTimeout:        120 * time.Second,
-		Originator:            "Codex Desktop",
-		Residency:             "us",
-		UserAgentTemplate:     "Codex Desktop/26.409.61251 ({platform}; {arch})",
-		ChromiumVersion:       "147",
-		Platform:              "win32",
-		ClientHintPlatform:    "Windows",
-		Arch:                  "x64",
-		DefaultAcceptLanguage: "en-US,en;q=0.9",
-		HeaderOrder: []string{
-			"authorization",
-			"chatgpt-account-id",
-			"originator",
-			"x-openai-internal-codex-residency",
-			"x-client-request-id",
-			"x-codex-turn-state",
-			"openai-beta",
-			"user-agent",
-			"sec-ch-ua",
-			"sec-ch-ua-mobile",
-			"sec-ch-ua-platform",
-			"accept-encoding",
-			"accept-language",
-			"sec-fetch-site",
-			"sec-fetch-mode",
-			"sec-fetch-dest",
-			"content-type",
-			"accept",
-			"cookie",
-		},
+		CodexBaseURL:   baseURL,
+		RequestTimeout: 120 * time.Second,
 	}
 
 	record := accounts.Record{

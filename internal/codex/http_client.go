@@ -49,13 +49,13 @@ func (c *HTTPClient) Close() error {
 
 func (c *HTTPClient) GetUsage(ctx context.Context, record accounts.Record) (UsageResponse, *accounts.QuotaSnapshot, error) {
 	session := c.sessionFor(record.ID)
-	headers := OrderedHeaders(BuildHeaders(c.cfg, record.Token.AccessToken, HeaderOptions{
+	headers := BuildHeaders(record.Token.AccessToken, HeaderOptions{
 		AccountID:      record.AccountID,
 		Cookies:        record.Cookies,
 		RequestID:      NewRequestID(),
 		Accept:         "application/json",
 		AcceptEncoding: "gzip, deflate",
-	}), c.cfg.HeaderOrder)
+	})
 
 	resp, err := session.Get(ctx, JoinURL(c.cfg.CodexBaseURL, "/codex/usage"), headers)
 	if err != nil {
@@ -80,13 +80,13 @@ func (c *HTTPClient) GetUsage(ctx context.Context, record accounts.Record) (Usag
 
 func (c *HTTPClient) GetCodexModels(ctx context.Context, record accounts.Record) ([]BackendModelEntry, error) {
 	session := c.sessionFor(record.ID)
-	headers := OrderedHeaders(BuildHeaders(c.cfg, record.Token.AccessToken, HeaderOptions{
+	headers := BuildHeaders(record.Token.AccessToken, HeaderOptions{
 		AccountID:      record.AccountID,
 		Cookies:        record.Cookies,
 		RequestID:      NewRequestID(),
 		Accept:         "application/json",
 		AcceptEncoding: "gzip, deflate",
-	}), c.cfg.HeaderOrder)
+	})
 
 	endpoint := c.codexModelsURL()
 	resp, err := session.Get(ctx, endpoint, headers)
@@ -111,7 +111,7 @@ func (c *HTTPClient) GetCodexModels(ctx context.Context, record accounts.Record)
 
 func (c *HTTPClient) CompactResponse(ctx context.Context, record accounts.Record, req CompactRequest) (CompactResponse, *accounts.QuotaSnapshot, error) {
 	session := c.sessionFor(record.ID)
-	headers := OrderedHeaders(BuildHeaders(c.cfg, record.Token.AccessToken, HeaderOptions{
+	headers := BuildHeaders(record.Token.AccessToken, HeaderOptions{
 		AccountID:      record.AccountID,
 		Cookies:        record.Cookies,
 		ContentType:    "application/json",
@@ -119,7 +119,7 @@ func (c *HTTPClient) CompactResponse(ctx context.Context, record accounts.Record
 		IncludeBeta:    true,
 		Accept:         "application/json",
 		AcceptEncoding: "gzip, deflate",
-	}), c.cfg.HeaderOrder)
+	})
 
 	payload, err := json.Marshal(req)
 	if err != nil {
@@ -154,7 +154,7 @@ func (c *HTTPClient) CompactResponse(ctx context.Context, record accounts.Record
 
 func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record, req Request, turnState string) (*StreamReader, error) {
 	session := c.sessionFor(record.ID)
-	headers := OrderedHeaders(BuildHeaders(c.cfg, record.Token.AccessToken, HeaderOptions{
+	headers := BuildHeaders(record.Token.AccessToken, HeaderOptions{
 		AccountID:   record.AccountID,
 		Cookies:     record.Cookies,
 		ContentType: "application/json",
@@ -162,7 +162,7 @@ func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record,
 		RequestID:   NewRequestID(),
 		IncludeBeta: true,
 		Accept:      "text/event-stream",
-	}), c.cfg.HeaderOrder)
+	})
 
 	bodyReq := StreamRequestPayload(req)
 	payload, err := json.Marshal(bodyReq)
@@ -309,15 +309,12 @@ func parseCompactResponse(payload string) (CompactResponse, error) {
 
 func (c *HTTPClient) codexModelsURL() string {
 	base := JoinURL(c.cfg.CodexBaseURL, "/codex/models")
-	if strings.TrimSpace(c.cfg.ClientVersion) == "" {
-		return base
-	}
 	parsed, err := url.Parse(base)
 	if err != nil {
 		return base
 	}
 	query := parsed.Query()
-	query.Set("client_version", c.cfg.ClientVersion)
+	query.Set("client_version", desktopClientVersion)
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
 }

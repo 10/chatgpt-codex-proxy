@@ -30,7 +30,7 @@ func (e *UnsupportedContentPartError) Error() string {
 }
 
 func ChatCompletions(req openai.ChatCompletionsRequest, catalog ...*models.Catalog) (NormalizedRequest, error) {
-	model, modelExplicit, reasoning, serviceTier, err := normalizeModel(req.Model, req.ReasoningEffort, req.ServiceTier, catalog...)
+	model, modelExplicit, reasoning, serviceTier, err := normalizeModel(req.Model, req.ReasoningEffort, req.ServiceTier, firstCatalog(catalog...))
 	if err != nil {
 		return NormalizedRequest{}, err
 	}
@@ -48,7 +48,6 @@ func ChatCompletions(req openai.ChatCompletionsRequest, catalog ...*models.Catal
 		EndpointChat,
 		model,
 		modelExplicit,
-		collectChatCompatibilityWarnings(req),
 		req.Stream,
 		normalizeTools(tools),
 		toolChoice,
@@ -118,7 +117,7 @@ func customToolInputFromFunctionArguments(arguments string) string {
 }
 
 func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (NormalizedRequest, error) {
-	model, modelExplicit, reasoning, serviceTier, err := normalizeModel(req.Model, "", req.ServiceTier, catalog...)
+	model, modelExplicit, reasoning, serviceTier, err := normalizeModel(req.Model, "", req.ServiceTier, firstCatalog(catalog...))
 	if err != nil {
 		return NormalizedRequest{}, err
 	}
@@ -132,7 +131,6 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 		EndpointResponses,
 		model,
 		modelExplicit,
-		collectResponsesCompatibilityWarnings(req),
 		req.Stream,
 		normalizeTools(req.Tools),
 		normalizeToolChoice(req.ToolChoice),
@@ -148,7 +146,7 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 }
 
 func Compact(req openai.ResponsesCompactRequest, catalog ...*models.Catalog) (NormalizedCompactRequest, error) {
-	model, modelExplicit, reasoning, _, err := normalizeModel(req.Model, "", "", catalog...)
+	model, modelExplicit, reasoning, _, err := normalizeModel(req.Model, "", "", firstCatalog(catalog...))
 	if err != nil {
 		return NormalizedCompactRequest{}, err
 	}
@@ -223,11 +221,10 @@ func normalizeResponsesPayload(instructionsText string, textConfig *openai.Respo
 	return out, nil
 }
 
-func newNormalizedRequest(endpoint Endpoint, model string, modelExplicit bool, warnings []CompatibilityWarning, stream bool, tools []codex.Tool, toolChoice json.RawMessage, reasoning *codex.Reasoning, serviceTier, previousResponseID string) NormalizedRequest {
+func newNormalizedRequest(endpoint Endpoint, model string, modelExplicit bool, stream bool, tools []codex.Tool, toolChoice json.RawMessage, reasoning *codex.Reasoning, serviceTier, previousResponseID string) NormalizedRequest {
 	return NormalizedRequest{
-		Endpoint:              endpoint,
-		ModelExplicit:         modelExplicit,
-		CompatibilityWarnings: warnings,
+		Endpoint:      endpoint,
+		ModelExplicit: modelExplicit,
 		Request: codex.Request{
 			Model:              model,
 			Stream:             stream,

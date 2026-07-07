@@ -224,7 +224,6 @@ func newCompactTestApp(t *testing.T, caller func(context.Context, accounts.Recor
 		DefaultModel:    "gpt-5.4",
 		ContinuationTTL: time.Minute,
 		RequestTimeout:  5 * time.Second,
-		OpenAIBeta:      "assistants=v2",
 	}
 	httpClient := codex.NewHTTPClient(cfg)
 	t.Cleanup(func() { _ = httpClient.Close() })

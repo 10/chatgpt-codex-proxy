@@ -29,7 +29,6 @@ type App struct {
 	deviceLogins   *admin.DeviceLoginService
 	accountMgr     *codex.AccountManager
 	httpClient     *codex.HTTPClient
-	wsClient       *codex.WSClient
 	compactCaller  func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
 	continuations  *accounts.ContinuationManager
 	models         *models.Catalog
@@ -54,7 +53,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	httpClient := codex.NewHTTPClient(cfg)
 	oauthSvc := codex.NewOAuthService(cfg)
 	accountMgr := codex.NewAccountManager(cfg, accountsSvc, oauthSvc, httpClient, modelCatalog)
-	deviceLogins := admin.NewDeviceLoginService(adminOAuthProvider{oauth: oauthSvc}, accountsSvc, cfg.LoginTimeout)
+	deviceLogins := admin.NewDeviceLoginService(oauthSvc, accountsSvc, cfg.LoginTimeout)
 	modelRefresher := models.NewFetcher(cfg, logger, accountsSvc, accountMgr, httpClient, modelCatalog)
 
 	engine := gin.New()
@@ -75,7 +74,6 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		deviceLogins:   deviceLogins,
 		accountMgr:     accountMgr,
 		httpClient:     httpClient,
-		wsClient:       codex.NewWSClient(),
 		continuations:  accounts.NewContinuationManager(cfg.ContinuationTTL),
 		models:         modelCatalog,
 		modelRefresher: modelRefresher,

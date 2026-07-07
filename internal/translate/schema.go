@@ -1,6 +1,6 @@
 package translate
 
-import "encoding/json"
+import "chatgpt-codex-proxy/internal/jsonutil"
 
 var (
 	schemaMapChildKeys    = []string{"properties", "patternProperties", "$defs", "definitions"}
@@ -9,16 +9,16 @@ var (
 )
 
 func PrepareSchema(schema map[string]any) (prepared map[string]any, tupleSchema map[string]any) {
-	cloned := cloneJSONMap(schema)
+	cloned := jsonutil.CloneMap(schema)
 	if cloned == nil {
 		return nil, nil
 	}
-	if !HasTupleSchemas(cloned) {
+	if !hasTupleSchemas(cloned) {
 		return injectAdditionalProperties(cloned), nil
 	}
 
-	original := cloneJSONMap(schema)
-	ConvertTupleSchemas(cloned)
+	original := jsonutil.CloneMap(schema)
+	convertTupleSchemas(cloned)
 	return injectAdditionalProperties(cloned), original
 }
 
@@ -26,7 +26,7 @@ func NormalizeSchema(schema map[string]any) map[string]any {
 	if len(schema) == 0 {
 		return schema
 	}
-	cloned := cloneJSONMap(schema)
+	cloned := jsonutil.CloneMap(schema)
 	if cloned == nil {
 		return schema
 	}
@@ -68,21 +68,6 @@ func normalizeObjectProperties(node map[string]any) map[string]any {
 	return node
 }
 
-func cloneJSONMap(value map[string]any) map[string]any {
-	if value == nil {
-		return nil
-	}
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return nil
-	}
-	var cloned map[string]any
-	if err := json.Unmarshal(payload, &cloned); err != nil {
-		return nil
-	}
-	return cloned
-}
-
 func schemaDefinitions(schema map[string]any) map[string]map[string]any {
 	defs := make(map[string]map[string]any)
 	for _, key := range []string{"$defs", "definitions"} {
@@ -115,7 +100,7 @@ func resolveLocalRefs(node map[string]any, defs map[string]map[string]any, resol
 		}
 		nextResolving := cloneBoolMap(resolving)
 		nextResolving[ref] = true
-		resolved := cloneJSONMap(definition)
+		resolved := jsonutil.CloneMap(definition)
 		if resolved == nil {
 			return node
 		}

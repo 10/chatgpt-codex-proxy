@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -47,7 +48,7 @@ func (a *App) handleResponsesCompact(c *gin.Context) {
 	}
 	a.setRequestAccount(c, account)
 
-	payload := normalized.ToCodexCompactRequest()
+	payload := normalized.CompactRequest
 	a.logUpstreamPayload(c, "responses_compact", "http", account.ID, payload)
 	caller := a.compactCaller
 	if caller == nil {
@@ -125,11 +126,11 @@ func (a *App) acquireAccountForCompact(ctx context.Context, preferredAccountID s
 func compactResponseObject(upstream codex.CompactResponse) map[string]any {
 	createdAt := upstream.CreatedAt
 	if createdAt == 0 {
-		createdAt = timeNowUTC().Unix()
+		createdAt = time.Now().UTC().Unix()
 	}
 
 	response := map[string]any{
-		"id":         jsonutil.FirstNonEmpty(strings.TrimSpace(upstream.ID), fmt.Sprintf("resp_compact_%d", timeNowUTC().UnixNano())),
+		"id":         jsonutil.FirstNonEmpty(strings.TrimSpace(upstream.ID), fmt.Sprintf("resp_compact_%d", time.Now().UTC().UnixNano())),
 		"object":     jsonutil.FirstNonEmpty(strings.TrimSpace(upstream.Object), "response.compaction"),
 		"created_at": createdAt,
 		"output":     compactOutput(upstream.Output),
