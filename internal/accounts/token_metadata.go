@@ -31,7 +31,7 @@ type jwtAuthClaims struct {
 }
 
 func metadataFromToken(token OAuthToken) tokenMetadata {
-	claims, ok := parseJWTClaims(token.AccessToken)
+	claims, ok := jwtutil.DecodePayload[jwtClaims](token.AccessToken)
 	if !ok {
 		return tokenMetadata{}
 	}
@@ -61,9 +61,4 @@ func metadataFromToken(token OAuthToken) tokenMetadata {
 	}
 
 	return metadata
-}
-
-func parseJWTClaims(token string) (jwtClaims, bool) {
-	claims, ok := jwtutil.DecodePayload[jwtClaims](token)
-	return claims, ok
 }

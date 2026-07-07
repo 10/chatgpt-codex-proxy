@@ -61,9 +61,6 @@ The translation-only fields are:
 - `Endpoint`
 - `ModelExplicit`
 - `TupleSchema`
-- `CompatibilityWarnings`
-
-`CompatibilityWarnings` are collected during normalization but are not surfaced to clients today.
 
 The canonical compact request is `codex.CompactRequest` plus translation metadata in `translate.NormalizedCompactRequest`.
 
@@ -80,7 +77,6 @@ The compact translation-only fields are:
 - `ModelExplicit`
 - `PreviousResponseID`
 - `TupleSchema`
-- `CompatibilityWarnings`
 
 ## Endpoint Entry Behavior
 

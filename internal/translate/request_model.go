@@ -7,8 +7,7 @@ import (
 	"chatgpt-codex-proxy/internal/models"
 )
 
-func normalizeModel(rawModel, reasoningEffort, serviceTier string, catalogs ...*models.Catalog) (string, bool, *codex.Reasoning, string, error) {
-	catalog := firstCatalog(catalogs...)
+func normalizeModel(rawModel, reasoningEffort, serviceTier string, catalog *models.Catalog) (string, bool, *codex.Reasoning, string, error) {
 	model := strings.TrimSpace(rawModel)
 	modelExplicit := model != ""
 	if modelExplicit {

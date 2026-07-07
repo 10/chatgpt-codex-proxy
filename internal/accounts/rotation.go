@@ -58,8 +58,8 @@ func compareLeastUsedQuota(a, b *Record) int {
 	aQuota := a.CachedQuota
 	bQuota := b.CachedQuota
 
-	aPrimary := quotaPercent(aQuota, primaryWindow)
-	bPrimary := quotaPercent(bQuota, primaryWindow)
+	aPrimary := primaryPercent(aQuota)
+	bPrimary := primaryPercent(bQuota)
 	switch {
 	case aPrimary < bPrimary:
 		return -1
@@ -90,19 +90,11 @@ func compareLeastUsedQuota(a, b *Record) int {
 	return 0
 }
 
-func primaryWindow(snapshot *QuotaSnapshot) *RateLimitWindow {
-	if snapshot == nil {
-		return nil
-	}
-	return &snapshot.RateLimit
-}
-
-func quotaPercent(snapshot *QuotaSnapshot, getter func(*QuotaSnapshot) *RateLimitWindow) float64 {
-	window := getter(snapshot)
-	if window == nil || window.UsedPercent == nil {
+func primaryPercent(snapshot *QuotaSnapshot) float64 {
+	if snapshot == nil || snapshot.RateLimit.UsedPercent == nil {
 		return 0
 	}
-	return *window.UsedPercent
+	return *snapshot.RateLimit.UsedPercent
 }
 
 func secondaryPercent(snapshot *QuotaSnapshot) (float64, bool) {

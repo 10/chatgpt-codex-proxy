@@ -68,13 +68,6 @@ func (c *Catalog) List() []Entry {
 	return cloneEntries(c.visible)
 }
 
-func (c *Catalog) ResolveDefault(configured string) string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	return c.resolveDefaultLocked(accounts.Record{}, strings.TrimSpace(configured), false)
-}
-
 func (c *Catalog) ResolveDefaultForRecord(record accounts.Record, configured string) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

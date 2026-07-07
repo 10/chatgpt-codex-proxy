@@ -183,7 +183,7 @@ func (a *App) openHTTPStream(c *gin.Context, ctx context.Context, endpoint strin
 	if err != nil {
 		return accounts.Record{}, nil, nil, err
 	}
-	request := resolution.Request.ToCodexRequest()
+	request := resolution.Request.Request
 	a.logUpstreamPayload(c, endpoint, "http", account.ID, codex.StreamRequestPayload(request))
 	stream, err := a.httpClient.StreamResponse(ctx, account, request, resolution.TurnState)
 	if err != nil {
@@ -197,7 +197,7 @@ func (a *App) openWSStream(c *gin.Context, ctx context.Context, endpoint string,
 	if err != nil {
 		return accounts.Record{}, nil, nil, err
 	}
-	headers := codex.BuildHeaders(a.cfg, account.Token.AccessToken, codex.HeaderOptions{
+	headers := codex.BuildHeaders(account.Token.AccessToken, codex.HeaderOptions{
 		AccountID:   account.AccountID,
 		Cookies:     account.Cookies,
 		TurnState:   resolution.TurnState,
@@ -207,7 +207,7 @@ func (a *App) openWSStream(c *gin.Context, ctx context.Context, endpoint string,
 	body := resolution.Request.ToCodexWSCreatePayload()
 	a.logUpstreamPayload(c, endpoint, "websocket", account.ID, body)
 	wsEndpoint := websocketEndpoint(a.cfg.CodexBaseURL)
-	stream, err := a.wsClient.Connect(ctx, wsEndpoint, headers, body)
+	stream, err := codex.ConnectWS(ctx, wsEndpoint, headers, body)
 	if err != nil {
 		return account, nil, nil, err
 	}
@@ -487,8 +487,6 @@ func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *translate.Ac
 	}
 
 	value := state.Arguments
-	fieldName := "arguments"
-	parentField := "function"
 	if state.ToolType == "custom" {
 		value = state.Input
 	}
@@ -500,8 +498,8 @@ func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *translate.Ac
 	writeSSE(w, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{
 		"tool_calls": []map[string]any{{
 			"index": idx,
-			parentField: map[string]any{
-				fieldName: value[sent:],
+			"function": map[string]any{
+				"arguments": value[sent:],
 			},
 		}},
 	}, "")))
@@ -559,7 +557,7 @@ func (a *App) rememberContinuation(accountID string, accumulator *translate.Accu
 	if strings.TrimSpace(conversationKey) == "" {
 		conversationKey = resolutionConversationKey(accumulator.Normalized)
 	}
-	now := timeNowUTC()
+	now := time.Now().UTC()
 	a.continuations.Put(accounts.ContinuationRecord{
 		ResponseID:      accumulator.ResponseID,
 		AccountID:       accountID,
@@ -580,10 +578,6 @@ func websocketEndpoint(baseURL string) string {
 	value = strings.Replace(value, "https://", "wss://", 1)
 	value = strings.Replace(value, "http://", "ws://", 1)
 	return value + "/codex/responses"
-}
-
-func timeNowUTC() time.Time {
-	return time.Now().UTC()
 }
 
 func captureRequestBody(c *gin.Context) ([]byte, error) {
@@ -769,7 +763,7 @@ func (a *App) acquireAccountForResolution(ctx context.Context, resolution *sessi
 		}
 		resolution.Request.Model = modelID
 		resolution.Original.Model = modelID
-		if key := conversationkey.Derive(resolution.Request.ToCodexRequest()); key != "" {
+		if key := conversationkey.Derive(resolution.Request.Request); key != "" {
 			resolution.ConversationKey = key
 			resolution.Request.PromptCacheKey = key
 			resolution.Original.PromptCacheKey = key

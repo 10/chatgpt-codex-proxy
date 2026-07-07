@@ -19,16 +19,6 @@ type ChatCompletionsRequest struct {
 	ResponseFormat     *ResponseFormat            `json:"response_format,omitempty"`
 	Functions          []LegacyFunctionDefinition `json:"functions,omitempty"`
 	FunctionCall       *LegacyFunctionCallChoice  `json:"function_call,omitempty"`
-	N                  *int                       `json:"n,omitempty"`
-	Temperature        *float64                   `json:"temperature,omitempty"`
-	TopP               *float64                   `json:"top_p,omitempty"`
-	MaxTokens          *int                       `json:"max_tokens,omitempty"`
-	PresencePenalty    *float64                   `json:"presence_penalty,omitempty"`
-	FrequencyPenalty   *float64                   `json:"frequency_penalty,omitempty"`
-	Stop               json.RawMessage            `json:"stop,omitempty"`
-	User               *string                    `json:"user,omitempty"`
-	ParallelToolCalls  *bool                      `json:"parallel_tool_calls,omitempty"`
-	StreamOptions      json.RawMessage            `json:"stream_options,omitempty"`
 }
 
 type ChatMessage struct {
@@ -76,16 +66,6 @@ func (l *LegacyFunctionCallChoice) UnmarshalJSON(data []byte) error {
 	}
 	l.Name = raw.Name
 	return nil
-}
-
-func (l *LegacyFunctionCallChoice) MarshalJSON() ([]byte, error) {
-	if l == nil {
-		return []byte("null"), nil
-	}
-	if l.Name != "" {
-		return json.Marshal(map[string]string{"name": l.Name})
-	}
-	return json.Marshal(l.Mode)
 }
 
 func (l *LegacyFunctionCallChoice) IsZero() bool {
@@ -248,15 +228,6 @@ type ResponsesRequest struct {
 	ServiceTier        string           `json:"service_tier,omitempty"`
 	Text               *ResponsesText   `json:"text,omitempty"`
 	Reasoning          *Reasoning       `json:"reasoning,omitempty"`
-	Temperature        *float64         `json:"temperature,omitempty"`
-	TopP               *float64         `json:"top_p,omitempty"`
-	MaxOutputTokens    *int             `json:"max_output_tokens,omitempty"`
-	ParallelToolCalls  *bool            `json:"parallel_tool_calls,omitempty"`
-	Store              *bool            `json:"store,omitempty"`
-	Background         *bool            `json:"background,omitempty"`
-	User               *string          `json:"user,omitempty"`
-	Metadata           map[string]any   `json:"metadata,omitempty"`
-	StreamOptions      json.RawMessage  `json:"stream_options,omitempty"`
 }
 
 type ResponsesCompactRequest struct {

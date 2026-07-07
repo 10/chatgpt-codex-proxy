@@ -15,10 +15,6 @@ const (
 	defaultListenPort            = 8080
 	defaultDataDir               = "data"
 	defaultDefaultModel          = "gpt-5.5"
-	defaultClientVersion         = "26.409.61251"
-	defaultOriginator            = "Codex Desktop"
-	defaultOpenAIBeta            = "responses_websockets=2026-02-06"
-	defaultResidency             = "us"
 	defaultRotationStrategy      = "least_used"
 	defaultCodexBaseURL          = "https://chatgpt.com/backend-api"
 	defaultAuthIssuer            = "https://auth.openai.com"
@@ -29,34 +25,20 @@ const (
 )
 
 type Config struct {
-	ListenAddr            string
-	DataDir               string
-	ProxyAPIKey           string
-	DebugLogPayloads      bool
-	DefaultModel          string
-	ClientVersion         string
-	Originator            string
-	OpenAIBeta            string
-	Residency             string
-	RotationStrategy      string
-	CodexBaseURL          string
-	AuthIssuer            string
-	OAuthClientID         string
-	LoginTimeout          time.Duration
-	ContinuationTTL       time.Duration
-	RequestTimeout        time.Duration
-	RefreshSkew           time.Duration
-	LogLevel              slogLevel
-	UserAgentTemplate     string
-	ChromiumVersion       string
-	Platform              string
-	ClientHintPlatform    string
-	Arch                  string
-	HeaderOrder           []string
-	DefaultAcceptLanguage string
+	ListenAddr       string
+	DataDir          string
+	ProxyAPIKey      string
+	DebugLogPayloads bool
+	DefaultModel     string
+	RotationStrategy string
+	CodexBaseURL     string
+	AuthIssuer       string
+	OAuthClientID    string
+	LoginTimeout     time.Duration
+	ContinuationTTL  time.Duration
+	RequestTimeout   time.Duration
+	RefreshSkew      time.Duration
 }
-
-type slogLevel string
 
 func Load() (Config, error) {
 	if err := loadDotEnv(); err != nil {
@@ -85,51 +67,19 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		ListenAddr:            listenAddr,
-		DataDir:               dataDir,
-		ProxyAPIKey:           strings.TrimSpace(os.Getenv("PROXY_API_KEY")),
-		DebugLogPayloads:      debugLogPayloads,
-		DefaultModel:          defaultDefaultModel,
-		ClientVersion:         defaultClientVersion,
-		Originator:            defaultOriginator,
-		OpenAIBeta:            defaultOpenAIBeta,
-		Residency:             defaultResidency,
-		RotationStrategy:      defaultRotationStrategy,
-		CodexBaseURL:          defaultCodexBaseURL,
-		AuthIssuer:            defaultAuthIssuer,
-		OAuthClientID:         defaultClientID,
-		LoginTimeout:          time.Duration(defaultLoginTimeoutSeconds) * time.Second,
-		ContinuationTTL:       time.Duration(defaultContinuationTTLMinute) * time.Minute,
-		RequestTimeout:        time.Duration(defaultRequestTimeoutSecond) * time.Second,
-		RefreshSkew:           60 * time.Second,
-		LogLevel:              slogLevel("info"),
-		UserAgentTemplate:     "Codex Desktop/26.409.61251 ({platform}; {arch})",
-		ChromiumVersion:       "147",
-		Platform:              "win32",
-		ClientHintPlatform:    "Windows",
-		Arch:                  "x64",
-		DefaultAcceptLanguage: "en-US,en;q=0.9",
-		HeaderOrder: []string{
-			"authorization",
-			"chatgpt-account-id",
-			"originator",
-			"x-openai-internal-codex-residency",
-			"x-client-request-id",
-			"x-codex-turn-state",
-			"openai-beta",
-			"user-agent",
-			"sec-ch-ua",
-			"sec-ch-ua-mobile",
-			"sec-ch-ua-platform",
-			"accept-encoding",
-			"accept-language",
-			"sec-fetch-site",
-			"sec-fetch-mode",
-			"sec-fetch-dest",
-			"content-type",
-			"accept",
-			"cookie",
-		},
+		ListenAddr:       listenAddr,
+		DataDir:          dataDir,
+		ProxyAPIKey:      strings.TrimSpace(os.Getenv("PROXY_API_KEY")),
+		DebugLogPayloads: debugLogPayloads,
+		DefaultModel:     defaultDefaultModel,
+		RotationStrategy: defaultRotationStrategy,
+		CodexBaseURL:     defaultCodexBaseURL,
+		AuthIssuer:       defaultAuthIssuer,
+		OAuthClientID:    defaultClientID,
+		LoginTimeout:     time.Duration(defaultLoginTimeoutSeconds) * time.Second,
+		ContinuationTTL:  time.Duration(defaultContinuationTTLMinute) * time.Minute,
+		RequestTimeout:   time.Duration(defaultRequestTimeoutSecond) * time.Second,
+		RefreshSkew:      60 * time.Second,
 	}
 
 	if cfg.ProxyAPIKey == "" {
@@ -168,23 +118,8 @@ func loadBoolEnv(key string, defaultValue bool) (bool, error) {
 }
 
 func loadDotEnv() error {
-	if _, err := os.Stat(".env"); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("stat .env: %w", err)
-	}
-	envMap, err := godotenv.Read(".env")
-	if err != nil {
+	if err := godotenv.Load(".env"); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("load .env: %w", err)
-	}
-	for key, value := range envMap {
-		if _, exists := os.LookupEnv(key); exists {
-			continue
-		}
-		if err := os.Setenv(key, value); err != nil {
-			return fmt.Errorf("set %s from .env: %w", key, err)
-		}
 	}
 	return nil
 }

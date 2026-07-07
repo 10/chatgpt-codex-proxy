@@ -5,10 +5,6 @@ import (
 	"strings"
 )
 
-func HasTupleSchemas(schema map[string]any) bool {
-	return hasTupleSchemas(schema)
-}
-
 func hasTupleSchemas(node map[string]any) bool {
 	if node == nil {
 		return false
@@ -17,10 +13,6 @@ func hasTupleSchemas(node map[string]any) bool {
 		return true
 	}
 	return anySchemaChild(node, hasTupleSchemas)
-}
-
-func ConvertTupleSchemas(node map[string]any) map[string]any {
-	return convertTupleSchemas(node)
 }
 
 func convertTupleSchemas(node map[string]any) map[string]any {
@@ -32,7 +24,7 @@ func convertTupleSchemas(node map[string]any) map[string]any {
 		properties := make(map[string]any, len(prefixItems))
 		required := make([]string, 0, len(prefixItems))
 		for i, raw := range prefixItems {
-			key := intString(i)
+			key := strconv.Itoa(i)
 			if child, ok := raw.(map[string]any); ok {
 				properties[key] = convertTupleSchemas(child)
 			} else {
@@ -78,7 +70,7 @@ func reconvertTupleValues(data any, schema map[string]any, root map[string]any) 
 		}
 		out := make([]any, 0, len(prefixItems))
 		for i, raw := range prefixItems {
-			key := intString(i)
+			key := strconv.Itoa(i)
 			value := mapped[key]
 			if child, ok := raw.(map[string]any); ok {
 				out = append(out, reconvertTupleValues(value, child, root))
@@ -153,8 +145,4 @@ func resolveTupleSchemaRef(ref string, root map[string]any) map[string]any {
 	}
 	resolved, _ := defs[parts[2]].(map[string]any)
 	return resolved
-}
-
-func intString(value int) string {
-	return strconv.Itoa(value)
 }

@@ -1,7 +1,6 @@
 package models
 
 import (
-	"sort"
 	"strings"
 
 	"chatgpt-codex-proxy/internal/codex"
@@ -25,16 +24,6 @@ func NormalizeBackendEntries(entries []codex.BackendModelEntry) []Entry {
 	normalized := make([]Entry, 0, len(modelsByID))
 	for _, id := range order {
 		normalized = append(normalized, modelsByID[id])
-	}
-	if len(order) == 0 {
-		keys := make([]string, 0, len(modelsByID))
-		for id := range modelsByID {
-			keys = append(keys, id)
-		}
-		sort.Strings(keys)
-		for _, id := range keys {
-			normalized = append(normalized, modelsByID[id])
-		}
 	}
 	return normalized
 }

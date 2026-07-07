@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -114,20 +113,5 @@ func TestLoadParsesDebugLogPayloads(t *testing.T) {
 				t.Fatalf("Load() debug log payloads = %v, want %v", cfg.DebugLogPayloads, tc.wantDebug)
 			}
 		})
-	}
-}
-
-func TestLoadRejectsInvalidDotEnv(t *testing.T) {
-	t.Setenv("PROXY_API_KEY", "test-key")
-	cwd := t.TempDir()
-	t.Chdir(cwd)
-
-	if err := os.WriteFile(filepath.Join(cwd, ".env"), []byte("INVALID LINE"), 0o600); err != nil {
-		t.Fatalf("write .env: %v", err)
-	}
-
-	_, err := Load()
-	if err == nil {
-		t.Fatal("Load() error = nil, want invalid .env error")
 	}
 }

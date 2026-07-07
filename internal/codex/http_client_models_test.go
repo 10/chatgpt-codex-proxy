@@ -106,19 +106,11 @@ func TestCodexModelsURL(t *testing.T) {
 		want string
 	}{
 		{
-			name: "includes client version",
-			cfg: config.Config{
-				CodexBaseURL:  "https://chatgpt.com/backend-api",
-				ClientVersion: "26.409.61251",
-			},
-			want: "https://chatgpt.com/backend-api/codex/models?client_version=26.409.61251",
-		},
-		{
-			name: "omits client version when blank",
+			name: "includes desktop client version",
 			cfg: config.Config{
 				CodexBaseURL: "https://chatgpt.com/backend-api",
 			},
-			want: "https://chatgpt.com/backend-api/codex/models",
+			want: "https://chatgpt.com/backend-api/codex/models?client_version=26.409.61251",
 		},
 	}
 

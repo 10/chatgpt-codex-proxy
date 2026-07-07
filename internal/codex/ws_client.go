@@ -10,21 +10,13 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// WSClient opens and initializes Codex websocket response streams.
-type WSClient struct{}
-
-// NewWSClient constructs a websocket client for Codex response streams.
-func NewWSClient() *WSClient {
-	return &WSClient{}
-}
-
 // WSStream wraps a websocket connection and exposes the event-stream interface used by the server package.
 type WSStream struct {
 	conn    *websocket.Conn
 	headers http.Header
 }
 
-func (c *WSClient) Connect(ctx context.Context, endpoint string, headers http.Header, body any) (*WSStream, error) {
+func ConnectWS(ctx context.Context, endpoint string, headers http.Header, body any) (*WSStream, error) {
 	dialer := websocket.Dialer{}
 	conn, resp, err := dialer.DialContext(ctx, endpoint, headers)
 	if err != nil {
@@ -41,7 +33,7 @@ func (c *WSClient) Connect(ctx context.Context, endpoint string, headers http.He
 	}
 	return &WSStream{
 		conn:    conn,
-		headers: cloneResponseHeaders(resp),
+		headers: resp.Header.Clone(),
 	}, nil
 }
 
@@ -70,11 +62,4 @@ func (s *WSStream) NextEvent() (*StreamEvent, error) {
 		return nil, io.EOF
 	}
 	return &StreamEvent{Type: eventType, Raw: raw}, nil
-}
-
-func cloneResponseHeaders(resp *http.Response) http.Header {
-	if resp == nil {
-		return make(http.Header)
-	}
-	return resp.Header.Clone()
 }

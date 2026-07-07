@@ -7,26 +7,6 @@ import (
 	"chatgpt-codex-proxy/internal/accounts"
 )
 
-func TestCatalogResolveDefaultPrefersVisibleDefaultAndFallsBackToFirstVisible(t *testing.T) {
-	t.Parallel()
-
-	catalog := NewCatalog(BootstrapEntries())
-	catalog.ApplyRouteModels("plan:plus", []Entry{
-		{ID: "gpt-visible-a", Source: SourceUpstream},
-		{ID: "gpt-visible-b", Source: SourceUpstream, IsDefault: true},
-	}, time.Now().UTC())
-
-	if got := catalog.ResolveDefault(""); got != "gpt-visible-b" {
-		t.Fatalf("ResolveDefault(empty) = %q, want gpt-visible-b", got)
-	}
-	if got := catalog.ResolveDefault("missing-model"); got != "gpt-visible-b" {
-		t.Fatalf("ResolveDefault(missing) = %q, want gpt-visible-b", got)
-	}
-	if got := catalog.ResolveDefault("gpt-visible-a"); got != "gpt-visible-a" {
-		t.Fatalf("ResolveDefault(existing) = %q, want gpt-visible-a", got)
-	}
-}
-
 func TestSupportsRecordRequiresKnownRouteSupportOnceSupportMapExists(t *testing.T) {
 	t.Parallel()
 
