@@ -19,7 +19,6 @@ func TestResolveSessionImplicitResumeTrimsHistoryAndSetsContinuationState(t *tes
 		continuations: accounts.NewContinuationManager(time.Minute),
 	}
 	normalized := translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:        "gpt-5.4",
 			Instructions: "Be concise.",
@@ -80,7 +79,6 @@ func TestResolveSessionSkipsImplicitResumeForUnknownToolOutputCallID(t *testing.
 		continuations: accounts.NewContinuationManager(time.Minute),
 	}
 	normalized := translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:        "gpt-5.4",
 			Instructions: "Be concise.",
@@ -125,7 +123,6 @@ func TestResolveSessionChoosesMatchingHistoryWithinConversationBucket(t *testing
 		continuations: accounts.NewContinuationManager(time.Minute),
 	}
 	normalized := translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:        "gpt-5.4",
 			Instructions: "Be concise.",
@@ -188,7 +185,6 @@ func TestResolveSessionImplicitResumeFallsBackForHostedToolReplayWithoutConversa
 		continuations: accounts.NewContinuationManager(time.Minute),
 	}
 	firstTurn := translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:        "gpt-5.4",
 			Instructions: "Be concise.",
@@ -229,7 +225,6 @@ func TestResolveSessionImplicitResumeFallsBackForHostedToolReplayWithoutConversa
 	})
 
 	secondTurn := translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:        "gpt-5.4",
 			Instructions: "Be concise.",
@@ -322,7 +317,6 @@ func TestAcquireAccountForResolutionOmittedModelUsesRouteScopedDefault(t *testin
 	}
 	resolution := sessionResolution{
 		Request: translate.NormalizedRequest{
-			Endpoint: translate.EndpointResponses,
 			Request: codex.Request{
 				Instructions: "Be concise.",
 				Input:        []codex.InputItem{userText("hello")},
@@ -330,7 +324,6 @@ func TestAcquireAccountForResolutionOmittedModelUsesRouteScopedDefault(t *testin
 			ModelExplicit: false,
 		},
 		Original: translate.NormalizedRequest{
-			Endpoint: translate.EndpointResponses,
 			Request: codex.Request{
 				Instructions: "Be concise.",
 				Input:        []codex.InputItem{userText("hello")},

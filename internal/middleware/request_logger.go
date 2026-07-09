@@ -7,14 +7,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type RequestLoggerOptions struct {
-	SkipPaths map[string]struct{}
-}
-
-func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) gin.HandlerFunc {
+func RequestLogger(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
-		if _, skip := opts.SkipPaths[path]; skip {
+		if path == "/health/live" {
 			c.Next()
 			return
 		}
@@ -41,10 +37,10 @@ func RequestLogger(logger *slog.Logger, opts RequestLoggerOptions) gin.HandlerFu
 		if query := c.Request.URL.RawQuery; query != "" {
 			attrs = append(attrs, "query", query)
 		}
-		if accountID := GetRequestAccountID(c); accountID != "" {
+		if accountID := c.GetString(RequestAccountIDKey); accountID != "" {
 			attrs = append(attrs, "account_id", accountID)
 		}
-		if upstreamAccountID := GetRequestUpstreamAccountID(c); upstreamAccountID != "" {
+		if upstreamAccountID := c.GetString(RequestUpstreamAccountIDKey); upstreamAccountID != "" {
 			attrs = append(attrs, "upstream_account_id", upstreamAccountID)
 		}
 

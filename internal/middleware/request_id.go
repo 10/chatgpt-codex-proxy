@@ -25,12 +25,7 @@ func RequestID() gin.HandlerFunc {
 }
 
 func GetRequestID(c *gin.Context) string {
-	value, ok := c.Get(RequestIDKey)
-	if !ok {
-		return ""
-	}
-	requestID, _ := value.(string)
-	return requestID
+	return c.GetString(RequestIDKey)
 }
 
 func nextRequestID() string {

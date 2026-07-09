@@ -5,11 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -86,7 +84,7 @@ func (a *App) handlePublicRequest(
 	buildResponse func(*translate.Accumulator) map[string]any,
 	patchTuple func(map[string]any, map[string]any) error,
 ) {
-	body, err := captureRequestBody(c)
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		a.respondOpenAIInvalidRequest(c, err)
 		return
@@ -557,19 +555,15 @@ func (a *App) rememberContinuation(accountID string, accumulator *translate.Accu
 	if strings.TrimSpace(conversationKey) == "" {
 		conversationKey = resolutionConversationKey(accumulator.Normalized)
 	}
-	now := time.Now().UTC()
 	a.continuations.Put(accounts.ContinuationRecord{
 		ResponseID:      accumulator.ResponseID,
 		AccountID:       accountID,
-		UpstreamID:      accumulator.ResponseID,
 		ConversationKey: conversationKey,
 		TurnState:       strings.TrimSpace(turnState),
 		Instructions:    strings.TrimSpace(accumulator.Normalized.Instructions),
 		Model:           jsonutil.FirstNonEmpty(accumulator.Model, accumulator.Normalized.Model),
 		InputHistory:    continuationInputHistory(accumulator),
 		FunctionCallIDs: functionCallIDs(accumulator),
-		CreatedAt:       now,
-		ExpiresAt:       now.Add(a.cfg.ContinuationTTL),
 	})
 }
 
@@ -578,18 +572,6 @@ func websocketEndpoint(baseURL string) string {
 	value = strings.Replace(value, "https://", "wss://", 1)
 	value = strings.Replace(value, "http://", "ws://", 1)
 	return value + "/codex/responses"
-}
-
-func captureRequestBody(c *gin.Context) ([]byte, error) {
-	if c == nil || c.Request == nil || c.Request.Body == nil {
-		return nil, fmt.Errorf("request body is unavailable")
-	}
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		return nil, err
-	}
-	c.Request.Body = io.NopCloser(bytes.NewReader(body))
-	return body, nil
 }
 
 func normalizeChatCompletionsBody(body []byte, catalog *models.Catalog) (translate.NormalizedRequest, error) {
@@ -630,7 +612,6 @@ func normalizeChatCompletionsBody(body []byte, catalog *models.Catalog) (transla
 	if err != nil {
 		return translate.NormalizedRequest{}, err
 	}
-	normalized.Endpoint = translate.EndpointChat
 	return normalized, nil
 }
 
@@ -714,24 +695,14 @@ func (a *App) respondOpenAIUpstreamStreamError(c *gin.Context, endpoint, account
 func (a *App) respondClassifiedStreamError(c *gin.Context, endpoint, accountID, responseID, eventName string, err error) {
 	_, code, message := a.classifyUpstreamError(accountID, err)
 	a.logUpstreamStreamFailure(c, endpoint, accountID, responseID, err)
-	writeSSE(c.Writer, eventName, translate.MustJSON(streamErrorPayload(message, code)))
+	writeSSE(c.Writer, eventName, translate.MustJSON(middleware.OpenAIErrorPayload(message, "api_error", code, "")))
 	c.Writer.Flush()
 }
 
 func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID, eventName string, err error) {
 	a.logUpstreamStreamFailure(c, endpoint, accountID, responseID, err)
-	writeSSE(c.Writer, eventName, translate.MustJSON(streamErrorPayload(err.Error(), "api_error")))
+	writeSSE(c.Writer, eventName, translate.MustJSON(middleware.OpenAIErrorPayload(err.Error(), "api_error", "api_error", "")))
 	c.Writer.Flush()
-}
-
-func streamErrorPayload(message string, code string) gin.H {
-	return gin.H{
-		"error": gin.H{
-			"message": message,
-			"type":    "api_error",
-			"code":    code,
-		},
-	}
 }
 
 func (a *App) acquireAccountForResolution(ctx context.Context, resolution *sessionResolution) (accounts.Record, error) {
@@ -777,5 +748,8 @@ func (a *App) setRequestAccount(c *gin.Context, account accounts.Record) {
 	if c == nil || account.ID == "" {
 		return
 	}
-	middleware.SetRequestAccount(c, account.ID, account.AccountID)
+	c.Set(middleware.RequestAccountIDKey, account.ID)
+	if account.AccountID != "" {
+		c.Set(middleware.RequestUpstreamAccountIDKey, account.AccountID)
+	}
 }

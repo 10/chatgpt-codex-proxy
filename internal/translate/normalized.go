@@ -2,17 +2,9 @@ package translate
 
 import "chatgpt-codex-proxy/internal/codex"
 
-type Endpoint string
-
-const (
-	EndpointChat      Endpoint = "chat_completions"
-	EndpointResponses Endpoint = "responses"
-)
-
 // NormalizedRequest extends the canonical codex request with translation-only
 // metadata that the proxy needs while mapping OpenAI payloads.
 type NormalizedRequest struct {
-	Endpoint Endpoint
 	codex.Request
 	ModelExplicit bool
 	TupleSchema   map[string]any

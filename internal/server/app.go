@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -22,18 +21,17 @@ import (
 )
 
 type App struct {
-	cfg            config.Config
-	logger         *slog.Logger
-	engine         *gin.Engine
-	accounts       *accounts.Service
-	deviceLogins   *admin.DeviceLoginService
-	accountMgr     *codex.AccountManager
-	httpClient     *codex.HTTPClient
-	compactCaller  func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
-	continuations  *accounts.ContinuationManager
-	models         *models.Catalog
-	modelRefresher *models.Fetcher
-	cancel         context.CancelFunc
+	cfg           config.Config
+	logger        *slog.Logger
+	engine        *gin.Engine
+	accounts      *accounts.Service
+	deviceLogins  *admin.DeviceLoginService
+	accountMgr    *codex.AccountManager
+	httpClient    *codex.HTTPClient
+	compactCaller func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
+	continuations *accounts.ContinuationManager
+	models        *models.Catalog
+	cancel        context.CancelFunc
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
@@ -59,31 +57,26 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	engine := gin.New()
 	engine.SetTrustedProxies(nil)
 	engine.Use(middleware.RequestID())
-	engine.Use(middleware.RequestLogger(logger, middleware.RequestLoggerOptions{
-		SkipPaths: map[string]struct{}{
-			"/health/live": {},
-		},
-	}))
+	engine.Use(middleware.RequestLogger(logger))
 	engine.Use(middleware.Recovery(logger))
 
 	app := &App{
-		cfg:            cfg,
-		logger:         logger,
-		engine:         engine,
-		accounts:       accountsSvc,
-		deviceLogins:   deviceLogins,
-		accountMgr:     accountMgr,
-		httpClient:     httpClient,
-		continuations:  accounts.NewContinuationManager(cfg.ContinuationTTL),
-		models:         modelCatalog,
-		modelRefresher: modelRefresher,
+		cfg:           cfg,
+		logger:        logger,
+		engine:        engine,
+		accounts:      accountsSvc,
+		deviceLogins:  deviceLogins,
+		accountMgr:    accountMgr,
+		httpClient:    httpClient,
+		continuations: accounts.NewContinuationManager(cfg.ContinuationTTL),
+		models:        modelCatalog,
 	}
 	app.routes()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	app.cancel = cancel
 	go app.housekeeping(ctx)
-	app.modelRefresher.Start(ctx)
+	go modelRefresher.Run(ctx)
 
 	return app, nil
 }
@@ -146,11 +139,11 @@ func (a *App) routes() {
 }
 
 func (a *App) writeOpenAIError(c *gin.Context, status int, code, message, errType string) {
-	middleware.AbortJSON(c, status, middleware.OpenAIErrorPayload(message, errType, code, ""))
+	c.AbortWithStatusJSON(status, middleware.OpenAIErrorPayload(message, errType, code, ""))
 }
 
 func (a *App) writeAdminError(c *gin.Context, status int, code, message string) {
-	middleware.AbortJSON(c, status, middleware.AdminErrorPayload(code, message))
+	c.AbortWithStatusJSON(status, middleware.AdminErrorPayload(code, message))
 }
 
 func (a *App) classifyUpstreamError(accountID string, err error) (int, string, string) {
@@ -239,32 +232,7 @@ func retryAfterFromError(err error) time.Duration {
 	if errors.As(err, &upstreamErr) && upstreamErr.RetryAfter > 0 {
 		return time.Duration(upstreamErr.RetryAfter) * time.Second
 	}
-	text := strings.ToLower(err.Error())
-	idx := strings.Index(text, "retry-after")
-	if idx < 0 {
-		return 0
-	}
-	fragment := text[idx:]
-	digits := strings.Builder{}
-	seenDigits := false
-	for _, ch := range fragment {
-		if ch >= '0' && ch <= '9' {
-			digits.WriteRune(ch)
-			seenDigits = true
-			continue
-		}
-		if seenDigits {
-			break
-		}
-	}
-	if digits.Len() == 0 {
-		return 0
-	}
-	seconds, err := strconv.Atoi(digits.String())
-	if err != nil || seconds <= 0 {
-		return 0
-	}
-	return time.Duration(seconds) * time.Second
+	return 0
 }
 
 func clampUpstreamStatus(status int) int {

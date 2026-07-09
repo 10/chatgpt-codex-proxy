@@ -3,6 +3,7 @@ package translate
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -479,9 +480,9 @@ func ChatChunkWithUsage(responseID, model string, delta map[string]any, finishRe
 }
 
 func ResponseEventJSON(eventType string, responseID string, payload map[string]any) []byte {
-	eventPayload := make(map[string]any, len(payload)+2)
-	for key, value := range payload {
-		eventPayload[key] = value
+	eventPayload := maps.Clone(payload)
+	if eventPayload == nil {
+		eventPayload = map[string]any{}
 	}
 	if responseID != "" {
 		eventPayload["response_id"] = responseID

@@ -44,37 +44,15 @@ func QuotaFromUsageResponse(payload UsageResponse) *accounts.QuotaSnapshot {
 		PlanType:  payload.PlanType,
 		Source:    "usage_endpoint",
 		FetchedAt: time.Now().UTC(),
-		RateLimit: accounts.RateLimitWindow{
-			Allowed:      payload.RateLimit.Allowed,
-			LimitReached: payload.RateLimit.LimitReached,
-			UsedPercent:  floatPtr(payload.RateLimit.PrimaryWindow, func(w *UsageWindow) float64 { return w.UsedPercent }),
-			ResetAt:      timePtr(payload.RateLimit.PrimaryWindow, func(w *UsageWindow) int64 { return w.ResetAt }),
-			LimitWindowSeconds: intPtr(payload.RateLimit.PrimaryWindow, func(w *UsageWindow) int {
-				return w.LimitWindowSeconds
-			}),
-		},
+		RateLimit: usageWindowRateLimit(payload.RateLimit.PrimaryWindow, payload.RateLimit.Allowed, payload.RateLimit.LimitReached),
 	}
 	if payload.RateLimit.SecondaryWindow != nil {
-		snapshot.SecondaryRateLimit = &accounts.RateLimitWindow{
-			Allowed:      true,
-			LimitReached: payload.RateLimit.SecondaryWindow.UsedPercent >= 100,
-			UsedPercent:  floatPtr(payload.RateLimit.SecondaryWindow, func(w *UsageWindow) float64 { return w.UsedPercent }),
-			ResetAt:      timePtr(payload.RateLimit.SecondaryWindow, func(w *UsageWindow) int64 { return w.ResetAt }),
-			LimitWindowSeconds: intPtr(payload.RateLimit.SecondaryWindow, func(w *UsageWindow) int {
-				return w.LimitWindowSeconds
-			}),
-		}
+		window := usageWindowRateLimit(payload.RateLimit.SecondaryWindow, true, payload.RateLimit.SecondaryWindow.UsedPercent >= 100)
+		snapshot.SecondaryRateLimit = &window
 	}
 	if payload.CodeReviewRateLimit != nil {
-		snapshot.CodeReviewRateLimit = &accounts.RateLimitWindow{
-			Allowed:      payload.CodeReviewRateLimit.Allowed,
-			LimitReached: payload.CodeReviewRateLimit.LimitReached,
-			UsedPercent:  floatPtr(payload.CodeReviewRateLimit.PrimaryWindow, func(w *UsageWindow) float64 { return w.UsedPercent }),
-			ResetAt:      timePtr(payload.CodeReviewRateLimit.PrimaryWindow, func(w *UsageWindow) int64 { return w.ResetAt }),
-			LimitWindowSeconds: intPtr(payload.CodeReviewRateLimit.PrimaryWindow, func(w *UsageWindow) int {
-				return w.LimitWindowSeconds
-			}),
-		}
+		window := usageWindowRateLimit(payload.CodeReviewRateLimit.PrimaryWindow, payload.CodeReviewRateLimit.Allowed, payload.CodeReviewRateLimit.LimitReached)
+		snapshot.CodeReviewRateLimit = &window
 	}
 	if payload.Credits != nil {
 		snapshot.Credits = parseCreditsFromUsage(payload.Credits)
@@ -151,34 +129,27 @@ func parseEventRateWindow(raw map[string]any) *accounts.RateLimitWindow {
 	if raw == nil {
 		return nil
 	}
-	payload, ok := decodeMapValue[eventRateWindowPayload](raw)
-	if !ok || payload.UsedPercent == nil {
+	usedPercent, ok := eventFloat(raw["used_percent"])
+	if !ok {
 		return nil
 	}
 	window := &accounts.RateLimitWindow{
 		Allowed:      true,
-		LimitReached: *payload.UsedPercent >= 100,
-		UsedPercent:  payload.UsedPercent,
+		LimitReached: usedPercent >= 100,
+		UsedPercent:  &usedPercent,
 	}
-	if payload.ResetAt != nil {
-		resetAt := time.Unix(*payload.ResetAt, 0).UTC()
+	if resetValue, ok := eventInt64(raw["reset_at"]); ok {
+		resetAt := time.Unix(resetValue, 0).UTC()
 		window.ResetAt = &resetAt
 	}
-	if payload.WindowMinutes != nil {
-		seconds := *payload.WindowMinutes * 60
+	if minutes, ok := eventInt(raw["window_minutes"]); ok {
+		seconds := minutes * 60
 		window.LimitWindowSeconds = &seconds
-	} else if payload.LimitWindowSeconds != nil {
-		seconds := *payload.LimitWindowSeconds
+	} else if limitSeconds, ok := eventInt(raw["limit_window_seconds"]); ok {
+		seconds := limitSeconds
 		window.LimitWindowSeconds = &seconds
 	}
 	return window
-}
-
-type eventRateWindowPayload struct {
-	UsedPercent        *float64 `json:"used_percent,omitempty"`
-	ResetAt            *int64   `json:"reset_at,omitempty"`
-	WindowMinutes      *int     `json:"window_minutes,omitempty"`
-	LimitWindowSeconds *int     `json:"limit_window_seconds,omitempty"`
 }
 
 func parseCredits(headers http.Header, prefix string) *accounts.CreditsSnapshot {
@@ -257,42 +228,63 @@ func parseFloatHeader(raw string) (float64, bool) {
 	return value, true
 }
 
-func decodeMapValue[T any](raw map[string]any) (T, bool) {
-	var zero T
-	if raw == nil {
-		return zero, false
+func usageWindowRateLimit(window *UsageWindow, allowed, limitReached bool) accounts.RateLimitWindow {
+	out := accounts.RateLimitWindow{
+		Allowed:      allowed,
+		LimitReached: limitReached,
 	}
-	payload, err := json.Marshal(raw)
-	if err != nil {
-		return zero, false
+	if window == nil {
+		return out
 	}
-	var decoded T
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return zero, false
-	}
-	return decoded, true
+	usedPercent := window.UsedPercent
+	resetAt := time.Unix(window.ResetAt, 0).UTC()
+	limitWindowSeconds := window.LimitWindowSeconds
+	out.UsedPercent = &usedPercent
+	out.ResetAt = &resetAt
+	out.LimitWindowSeconds = &limitWindowSeconds
+	return out
 }
 
-func floatPtr[T any](value *T, getter func(*T) float64) *float64 {
-	if value == nil {
-		return nil
+func eventFloat(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case float64:
+		return typed, true
+	case json.Number:
+		parsed, err := typed.Float64()
+		return parsed, err == nil
+	default:
+		return 0, false
 	}
-	result := getter(value)
-	return &result
 }
 
-func intPtr[T any](value *T, getter func(*T) int) *int {
-	if value == nil {
-		return nil
+func eventInt(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case json.Number:
+		parsed, err := typed.Int64()
+		return int(parsed), err == nil
+	default:
+		return 0, false
 	}
-	result := getter(value)
-	return &result
 }
 
-func timePtr[T any](value *T, getter func(*T) int64) *time.Time {
-	if value == nil {
-		return nil
+func eventInt64(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float64:
+		return int64(typed), true
+	case json.Number:
+		parsed, err := typed.Int64()
+		return parsed, err == nil
+	default:
+		return 0, false
 	}
-	ts := time.Unix(getter(value), 0).UTC()
-	return &ts
 }

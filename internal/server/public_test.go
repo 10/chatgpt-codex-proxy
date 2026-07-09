@@ -87,9 +87,6 @@ func TestNormalizeChatCompletionsBodyAcceptsResponsesShape(t *testing.T) {
 		t.Fatalf("normalizeChatCompletionsBody() error = %v", err)
 	}
 
-	if normalized.Endpoint != translate.EndpointChat {
-		t.Fatalf("endpoint = %q, want %q", normalized.Endpoint, translate.EndpointChat)
-	}
 	if normalized.Instructions != "Be concise." {
 		t.Fatalf("instructions = %q, want Be concise.", normalized.Instructions)
 	}
@@ -135,9 +132,6 @@ func TestNormalizeChatCompletionsBodyLiftsInstructionRolesFromResponsesShape(t *
 		t.Fatalf("normalizeChatCompletionsBody() error = %v", err)
 	}
 
-	if normalized.Endpoint != translate.EndpointChat {
-		t.Fatalf("endpoint = %q, want %q", normalized.Endpoint, translate.EndpointChat)
-	}
 	if normalized.Instructions != "You are GPT-5.4." {
 		t.Fatalf("instructions = %q, want lifted system instructions", normalized.Instructions)
 	}
@@ -314,7 +308,6 @@ func TestStreamChatCompletionClassifiesStructuredRateLimitFailureAndSetsCooldown
 	}
 
 	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointChat,
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -394,7 +387,6 @@ func TestStreamResponsesClassifiesStructuredQuotaFailureAndSetsCooldown(t *testi
 	}
 
 	app.streamResponses(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -462,7 +454,6 @@ func TestStreamResponsesClassifiesStructuredUnauthorizedFailure(t *testing.T) {
 	}
 
 	app.streamResponses(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -472,22 +463,6 @@ func TestStreamResponsesClassifiesStructuredUnauthorizedFailure(t *testing.T) {
 	updated := mustGetAccount(t, accountsSvc, "acct_unauthorized")
 	if updated.Status != accounts.StatusExpired {
 		t.Fatalf("status = %q, want expired", updated.Status)
-	}
-}
-
-func TestStreamErrorPayloadUsesOpenAIErrorEnvelope(t *testing.T) {
-	t.Parallel()
-
-	payload := streamErrorPayload("codex stream failed", "upstream_error")
-	errorValue, ok := payload["error"].(gin.H)
-	if !ok {
-		t.Fatalf("error = %#v, want object", payload["error"])
-	}
-	if errorValue["message"] != "codex stream failed" {
-		t.Fatalf("error.message = %#v", errorValue["message"])
-	}
-	if errorValue["code"] != "upstream_error" {
-		t.Fatalf("error.code = %#v", errorValue["code"])
 	}
 }
 
@@ -572,7 +547,6 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycle(t *testing.T) {
 	}
 
 	app.streamResponses(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -677,7 +651,6 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycleWithoutDeltas(t *testing
 	}
 
 	app.streamResponses(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -748,7 +721,6 @@ func TestStreamResponsesTextOnlyPassthroughRemainsUnchanged(t *testing.T) {
 	}
 
 	app.streamResponses(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -886,7 +858,6 @@ func TestStreamResponsesWebSearchPassthroughAndCompletedOutput(t *testing.T) {
 	}
 
 	app.streamResponses(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:  "gpt-5.5",
 			Stream: true,

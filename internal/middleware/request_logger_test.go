@@ -105,7 +105,8 @@ func TestRequestLoggerIncludesSelectedAccount(t *testing.T) {
 
 	engine, logs := newLoggedEngine(t)
 	engine.GET("/v1/responses", func(c *gin.Context) {
-		SetRequestAccount(c, "acct_123", "upstream_456")
+		c.Set(RequestAccountIDKey, "acct_123")
+		c.Set(RequestUpstreamAccountIDKey, "upstream_456")
 		c.Status(http.StatusOK)
 	})
 
@@ -211,11 +212,7 @@ func newLoggedEngine(t *testing.T) (*gin.Engine, *bytes.Buffer) {
 	engine := gin.New()
 	engine.SetTrustedProxies(nil)
 	engine.Use(RequestID())
-	engine.Use(RequestLogger(newTestLogger(logs), RequestLoggerOptions{
-		SkipPaths: map[string]struct{}{
-			"/health/live": {},
-		},
-	}))
+	engine.Use(RequestLogger(newTestLogger(logs)))
 	return engine, logs
 }
 

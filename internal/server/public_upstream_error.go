@@ -33,7 +33,7 @@ func extractUpstreamEventDetails(event *codex.StreamEvent) *codex.UpstreamError 
 
 	nested := jsonutil.MapValue(event.Raw, "error")
 	if nested == nil {
-		nested = jsonutil.PathMapValue(event.Raw, "response", "error")
+		nested = jsonutil.MapValue(jsonutil.MapValue(event.Raw, "response"), "error")
 	}
 	message := jsonutil.FirstNonEmpty(
 		jsonutil.StringValue(nested["message"]),

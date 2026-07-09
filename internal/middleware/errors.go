@@ -1,11 +1,5 @@
 package middleware
 
-import "github.com/gin-gonic/gin"
-
-func AbortJSON(c *gin.Context, status int, payload any) {
-	c.AbortWithStatusJSON(status, payload)
-}
-
 type OpenAIErrorResponse struct {
 	Error OpenAIErrorBody `json:"error"`
 }

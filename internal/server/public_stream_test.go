@@ -171,7 +171,6 @@ func TestStreamChatCompletionEmitsReasoningContentAndStrictUsage(t *testing.T) {
 	}
 
 	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointChat,
 		Request: codex.Request{
 			Model:     "gpt-5.4",
 			Stream:    true,
@@ -285,7 +284,6 @@ func TestStreamChatCompletionDoesNotSynthesizeReasoningContentFromCompletedOutpu
 	}
 
 	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointChat,
 		Request: codex.Request{
 			Model:     "gpt-5.4",
 			Stream:    true,
@@ -384,7 +382,6 @@ func TestStreamChatCompletionUsesToolNameFromOutputItemWhenArgumentEventsOmitIt(
 	}
 
 	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointChat,
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -509,7 +506,6 @@ func TestStreamChatCompletionSupportsCustomToolCalls(t *testing.T) {
 	}
 
 	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointChat,
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -653,7 +649,6 @@ func TestStreamResponsesPreservesReasoningItemsAndEvents(t *testing.T) {
 	}
 
 	app.streamResponses(ctx, record, translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -689,7 +684,6 @@ func TestContinuationInputHistoryIncludesReasoningReplay(t *testing.T) {
 	t.Parallel()
 
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{
-		Endpoint: translate.EndpointResponses,
 		Request: codex.Request{
 			Input: []codex.InputItem{{
 				Role: "user",

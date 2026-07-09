@@ -154,7 +154,19 @@ func (a *App) handleAdminAccountUsage(c *gin.Context) {
 		a.writeAdminError(c, http.StatusInternalServerError, "usage_lookup_failed", err.Error())
 		return
 	}
-	effectiveQuota := firstQuota(quota, record.CachedQuota)
+	effectiveQuota := quota
+	if effectiveQuota == nil {
+		effectiveQuota = record.CachedQuota
+	}
+	quotaSource := ""
+	var quotaFetchedAt *time.Time
+	if effectiveQuota != nil {
+		quotaSource = effectiveQuota.Source
+		if !effectiveQuota.FetchedAt.IsZero() {
+			ts := effectiveQuota.FetchedAt.UTC()
+			quotaFetchedAt = &ts
+		}
+	}
 	c.JSON(http.StatusOK, adminAccountUsageResponse{
 		AccountID:      record.ID,
 		UpstreamID:     record.AccountID,
@@ -165,8 +177,8 @@ func (a *App) handleAdminAccountUsage(c *gin.Context) {
 		LastError:      record.LastError,
 		CachedQuota:    record.CachedQuota,
 		QuotaRuntime:   quota,
-		QuotaSource:    quotaSource(effectiveQuota),
-		QuotaFetchedAt: quotaFetchedAt(effectiveQuota),
+		QuotaSource:    quotaSource,
+		QuotaFetchedAt: quotaFetchedAt,
 		OauthExpires:   record.Token.ExpiresAt,
 	})
 }
@@ -204,26 +216,4 @@ func (a *App) handleAdminRotationPut(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, rotationResponse{Strategy: strategy})
-}
-
-func quotaSource(snapshot *accounts.QuotaSnapshot) string {
-	if snapshot == nil {
-		return ""
-	}
-	return snapshot.Source
-}
-
-func quotaFetchedAt(snapshot *accounts.QuotaSnapshot) *time.Time {
-	if snapshot == nil || snapshot.FetchedAt.IsZero() {
-		return nil
-	}
-	ts := snapshot.FetchedAt.UTC()
-	return &ts
-}
-
-func firstQuota(runtime, cached *accounts.QuotaSnapshot) *accounts.QuotaSnapshot {
-	if runtime != nil {
-		return runtime
-	}
-	return cached
 }

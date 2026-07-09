@@ -59,7 +59,11 @@ func (a *Accumulator) ensureToolCallState(itemID, callID string, explicitIndex i
 		return nil
 	}
 
-	if existing := firstToolCallState(a.toolCallByID[callID], a.toolCallByID[itemID]); existing != nil {
+	existing := a.toolCallByID[callID]
+	if existing == nil {
+		existing = a.toolCallByID[itemID]
+	}
+	if existing != nil {
 		if explicitIndex >= 0 {
 			existing.OutputIndex = a.resolveOutputIndex(explicitIndex)
 		}
@@ -110,7 +114,10 @@ func (a *Accumulator) toolCallStateForEvent(event *codex.StreamEvent) *ToolCallS
 	case "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.custom_tool_call_input.delta", "response.custom_tool_call_input.done":
 		itemID := jsonutil.StringValue(event.Raw["item_id"])
 		callID := jsonutil.FirstNonEmpty(jsonutil.StringValue(event.Raw["call_id"]), itemID)
-		return firstToolCallState(a.toolCallByID[callID], a.toolCallByID[itemID])
+		if state := a.toolCallByID[callID]; state != nil {
+			return state
+		}
+		return a.toolCallByID[itemID]
 	case "response.output_item.added", "response.output_item.done":
 		item := jsonutil.FirstMap(jsonutil.MapValue(event.Raw, "item"), jsonutil.MapValue(event.Raw, "output_item"))
 		itemType := jsonutil.StringValue(item["type"])
@@ -119,7 +126,10 @@ func (a *Accumulator) toolCallStateForEvent(event *codex.StreamEvent) *ToolCallS
 		}
 		itemID := jsonutil.FirstNonEmpty(jsonutil.StringValue(item["id"]), jsonutil.StringValue(event.Raw["item_id"]))
 		callID := jsonutil.FirstNonEmpty(jsonutil.StringValue(item["call_id"]), itemID)
-		return firstToolCallState(a.toolCallByID[callID], a.toolCallByID[itemID])
+		if state := a.toolCallByID[callID]; state != nil {
+			return state
+		}
+		return a.toolCallByID[itemID]
 	default:
 		return nil
 	}
@@ -226,13 +236,4 @@ func (t *ToolCallState) responseOutputItem(status string) map[string]any {
 		"arguments": t.Arguments,
 		"status":    itemStatus,
 	}
-}
-
-func firstToolCallState(values ...*ToolCallState) *ToolCallState {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
 }

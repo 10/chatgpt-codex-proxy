@@ -38,11 +38,7 @@ func NewFetcher(cfg config.Config, logger *slog.Logger, accountsSvc *accounts.Se
 	}
 }
 
-func (f *Fetcher) Start(ctx context.Context) {
-	go f.run(ctx)
-}
-
-func (f *Fetcher) run(ctx context.Context) {
+func (f *Fetcher) Run(ctx context.Context) {
 	timer := time.NewTimer(initialFetchDelay)
 	defer timer.Stop()
 

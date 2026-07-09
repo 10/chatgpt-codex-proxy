@@ -11,7 +11,7 @@ func TestFirstNonEmptySkipsWhitespaceOnlyStrings(t *testing.T) {
 	}
 }
 
-func TestMapValueAndPathMapValue(t *testing.T) {
+func TestMapValueAndFirstMapValue(t *testing.T) {
 	t.Parallel()
 
 	tree := map[string]any{
@@ -24,9 +24,6 @@ func TestMapValueAndPathMapValue(t *testing.T) {
 
 	if got := MapValue(tree, "response"); got == nil {
 		t.Fatalf("MapValue() = %#v, want nested map", got)
-	}
-	if got := PathMapValue(tree, "response", "error"); got == nil || StringValue(got["message"]) != "boom" {
-		t.Fatalf("PathMapValue() = %#v, want nested map", got)
 	}
 	if got := FirstMapValue(tree, "missing", "response"); got == nil || StringValue(got["error"].(map[string]any)["message"]) != "boom" {
 		t.Fatalf("FirstMapValue() = %#v, want first present nested map", got)

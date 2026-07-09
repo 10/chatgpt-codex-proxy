@@ -28,22 +28,6 @@ func MapValue(raw map[string]any, key string) map[string]any {
 	return value
 }
 
-// PathMapValue returns the nested map at the end of keys, or nil if any step is missing.
-func PathMapValue(raw map[string]any, keys ...string) map[string]any {
-	current := raw
-	for idx, key := range keys {
-		if current == nil {
-			return nil
-		}
-		value, _ := current[key].(map[string]any)
-		if idx == len(keys)-1 {
-			return value
-		}
-		current = value
-	}
-	return nil
-}
-
 // FirstMap returns the first non-empty map.
 func FirstMap(values ...map[string]any) map[string]any {
 	for _, value := range values {

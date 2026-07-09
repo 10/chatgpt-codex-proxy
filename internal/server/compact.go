@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ import (
 )
 
 func (a *App) handleResponsesCompact(c *gin.Context) {
-	body, err := captureRequestBody(c)
+	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		a.respondOpenAIInvalidRequest(c, err)
 		return
@@ -133,21 +134,14 @@ func compactResponseObject(upstream codex.CompactResponse) map[string]any {
 		"id":         jsonutil.FirstNonEmpty(strings.TrimSpace(upstream.ID), fmt.Sprintf("resp_compact_%d", time.Now().UTC().UnixNano())),
 		"object":     jsonutil.FirstNonEmpty(strings.TrimSpace(upstream.Object), "response.compaction"),
 		"created_at": createdAt,
-		"output":     compactOutput(upstream.Output),
 	}
+	output := make([]map[string]any, 0, len(upstream.Output))
+	for _, item := range upstream.Output {
+		output = append(output, jsonutil.CloneMap(item))
+	}
+	response["output"] = output
 	if len(upstream.Usage) > 0 {
 		response["usage"] = upstream.Usage
 	}
 	return response
-}
-
-func compactOutput(items []map[string]any) []map[string]any {
-	if len(items) == 0 {
-		return []map[string]any{}
-	}
-	out := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		out = append(out, jsonutil.CloneMap(item))
-	}
-	return out
 }

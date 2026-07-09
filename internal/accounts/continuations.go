@@ -33,7 +33,6 @@ type ContinuationSummaryPart = conversation.ReasoningPart
 type ContinuationRecord struct {
 	ResponseID      string
 	AccountID       string
-	UpstreamID      string
 	ConversationKey string
 	TurnState       string
 	Instructions    string

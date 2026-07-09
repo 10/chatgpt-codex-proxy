@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -144,7 +145,8 @@ func (s *OAuthService) DeviceAuthURL() string {
 func (s *OAuthService) RequestDeviceCode(ctx context.Context) (DeviceCodeResponse, error) {
 	endpoint := strings.TrimRight(s.cfg.AuthIssuer, "/") + deviceUserCodePath
 	body := map[string]string{"client_id": s.cfg.OAuthClientID}
-	return doJSON[DeviceCodeResponse](ctx, s.client, http.MethodPost, endpoint, body, s.defaultHeaders())
+	result, _, err := doJSONAllowPending[DeviceCodeResponse](ctx, s.client, http.MethodPost, endpoint, body, s.defaultHeaders(), nil)
+	return result, err
 }
 
 func (s *OAuthService) PollDeviceCode(ctx context.Context, deviceAuthID, userCode string) (*DevicePollResponse, error) {
@@ -243,18 +245,13 @@ func (s *OAuthService) defaultHeaders() http.Header {
 	return headers
 }
 
-func doJSON[T any](ctx context.Context, client *http.Client, method, endpoint string, body any, headers http.Header) (T, error) {
-	result, _, err := doJSONAllowPending[T](ctx, client, method, endpoint, body, headers, nil)
-	return result, err
-}
-
 func doJSONAllowPending[T any](ctx context.Context, client *http.Client, method, endpoint string, body any, headers http.Header, pendingStatuses map[int]struct{}) (T, bool, error) {
 	var zero T
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return zero, false, err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, strings.NewReader(string(payload)))
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return zero, false, err
 	}

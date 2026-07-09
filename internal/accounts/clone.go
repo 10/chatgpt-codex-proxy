@@ -1,10 +1,16 @@
 package accounts
 
-import "time"
+import (
+	"maps"
+	"time"
+)
 
 func cloneRecord(record *Record) Record {
 	cloned := *record
-	cloned.Cookies = cloneCookies(record.Cookies)
+	cloned.Cookies = maps.Clone(record.Cookies)
+	if cloned.Cookies == nil {
+		cloned.Cookies = map[string]string{}
+	}
 	cloned.CooldownUntil = cloneTime(record.CooldownUntil)
 	if record.CachedQuota != nil {
 		quota := cloneQuotaSnapshot(record.CachedQuota)
@@ -60,15 +66,4 @@ func cloneTime(value *time.Time) *time.Time {
 	}
 	ts := value.UTC()
 	return &ts
-}
-
-func cloneCookies(cookies map[string]string) map[string]string {
-	if len(cookies) == 0 {
-		return map[string]string{}
-	}
-	out := make(map[string]string, len(cookies))
-	for key, value := range cookies {
-		out[key] = value
-	}
-	return out
 }

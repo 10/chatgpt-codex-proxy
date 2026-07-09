@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"chatgpt-codex-proxy/internal/config"
-	"chatgpt-codex-proxy/internal/observability"
 	"chatgpt-codex-proxy/internal/server"
 )
 
@@ -21,7 +20,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger := observability.NewLogger()
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
 	app, err := server.New(cfg, logger)

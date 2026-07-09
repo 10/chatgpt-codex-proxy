@@ -1,6 +1,7 @@
 package models
 
 import (
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -71,7 +72,7 @@ func (c *Catalog) List() []Entry {
 func (c *Catalog) ResolveDefaultForRecord(record accounts.Record, configured string) string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.resolveDefaultLocked(record, strings.TrimSpace(configured), true)
+	return c.resolveDefaultLocked(record, strings.TrimSpace(configured))
 }
 
 func (c *Catalog) SupportsRecord(record accounts.Record, modelID string) bool {
@@ -199,7 +200,7 @@ func (c *Catalog) rebuildVisibleLocked() {
 
 	if len(visibleIDs) == 0 {
 		c.visible = cloneEntries(c.bootstrap)
-		c.visibleIDs = cloneSet(c.bootstrapIDs)
+		c.visibleIDs = maps.Clone(c.bootstrapIDs)
 		for _, entry := range c.bootstrap {
 			c.entriesByID[entry.ID] = entry
 		}
@@ -253,30 +254,25 @@ func (c *Catalog) supportsRecordLocked(record accounts.Record, modelID string) b
 	return false
 }
 
-func (c *Catalog) resolveDefaultLocked(record accounts.Record, configured string, scoped bool) string {
-	if configured != "" {
-		if !scoped && c.visibleContainsLocked(configured) {
-			return configured
-		}
-		if scoped && c.supportsRecordLocked(record, configured) {
-			return configured
-		}
+func (c *Catalog) resolveDefaultLocked(record accounts.Record, configured string) string {
+	if configured != "" && c.supportsRecordLocked(record, configured) {
+		return configured
 	}
 	for _, entry := range c.visible {
 		if !entry.IsDefault {
 			continue
 		}
-		if !scoped || c.supportsRecordLocked(record, entry.ID) {
+		if c.supportsRecordLocked(record, entry.ID) {
 			return entry.ID
 		}
 	}
 	for _, entry := range c.visible {
-		if !scoped || c.supportsRecordLocked(record, entry.ID) {
+		if c.supportsRecordLocked(record, entry.ID) {
 			return entry.ID
 		}
 	}
 	for _, entry := range c.bootstrap {
-		if !scoped || c.supportsRecordLocked(record, entry.ID) {
+		if c.supportsRecordLocked(record, entry.ID) {
 			return entry.ID
 		}
 	}
@@ -309,12 +305,4 @@ func cloneEntry(entry Entry) Entry {
 		cloned.SupportedReasoningEfforts = append([]ReasoningEffort(nil), entry.SupportedReasoningEfforts...)
 	}
 	return cloned
-}
-
-func cloneSet(values map[string]struct{}) map[string]struct{} {
-	out := make(map[string]struct{}, len(values))
-	for key := range values {
-		out[key] = struct{}{}
-	}
-	return out
 }

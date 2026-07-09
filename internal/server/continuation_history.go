@@ -1,6 +1,8 @@
 package server
 
 import (
+	"slices"
+
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
@@ -92,9 +94,9 @@ func continuationInputItemFromCodex(item codex.InputItem) accounts.ContinuationI
 		Status:           item.Status,
 		EncryptedContent: item.EncryptedContent,
 	}
-	out.Summary = cloneParts(item.Summary)
-	out.Content = cloneParts(item.Content)
-	out.OutputContent = cloneParts(item.OutputContent)
+	out.Summary = slices.Clone(item.Summary)
+	out.Content = slices.Clone(item.Content)
+	out.OutputContent = slices.Clone(item.OutputContent)
 	return out
 }
 
@@ -112,24 +114,33 @@ func continuationInputItemToCodex(item accounts.ContinuationInputItem) codex.Inp
 		Status:           item.Status,
 		EncryptedContent: item.EncryptedContent,
 	}
-	out.Summary = cloneParts(item.Summary)
-	out.Content = cloneParts(item.Content)
-	out.OutputContent = cloneParts(item.OutputContent)
+	out.Summary = slices.Clone(item.Summary)
+	out.Content = slices.Clone(item.Content)
+	out.OutputContent = slices.Clone(item.OutputContent)
 	return out
 }
 
 func continuationSummaryPartsFromMaps(parts []map[string]any) []accounts.ContinuationSummaryPart {
-	return mapParts(parts, func(part map[string]any) accounts.ContinuationSummaryPart {
-		return accounts.ContinuationSummaryPart{
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]accounts.ContinuationSummaryPart, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, accounts.ContinuationSummaryPart{
 			Type: jsonutil.StringValue(part["type"]),
 			Text: jsonutil.StringValue(part["text"]),
-		}
-	})
+		})
+	}
+	return out
 }
 
 func continuationContentPartsFromMaps(parts []map[string]any) []accounts.ContinuationContentPart {
-	return mapParts(parts, func(part map[string]any) accounts.ContinuationContentPart {
-		return accounts.ContinuationContentPart{
+	if len(parts) == 0 {
+		return nil
+	}
+	out := make([]accounts.ContinuationContentPart, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, accounts.ContinuationContentPart{
 			Type:     jsonutil.StringValue(part["type"]),
 			Text:     jsonutil.StringValue(part["text"]),
 			ImageURL: jsonutil.StringValue(part["image_url"]),
@@ -138,24 +149,7 @@ func continuationContentPartsFromMaps(parts []map[string]any) []accounts.Continu
 			FileData: jsonutil.StringValue(part["file_data"]),
 			FileID:   jsonutil.StringValue(part["file_id"]),
 			Filename: jsonutil.StringValue(part["filename"]),
-		}
-	})
-}
-
-func mapParts[T any](parts []map[string]any, fn func(map[string]any) T) []T {
-	if len(parts) == 0 {
-		return nil
-	}
-	out := make([]T, 0, len(parts))
-	for _, part := range parts {
-		out = append(out, fn(part))
+		})
 	}
 	return out
-}
-
-func cloneParts[T any](parts []T) []T {
-	if len(parts) == 0 {
-		return nil
-	}
-	return append([]T(nil), parts...)
 }

@@ -45,7 +45,6 @@ func ChatCompletions(req openai.ChatCompletionsRequest, catalog ...*models.Catal
 		toolChoice = choice
 	}
 	out := newNormalizedRequest(
-		EndpointChat,
 		model,
 		modelExplicit,
 		req.Stream,
@@ -128,7 +127,6 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 	}
 
 	out := newNormalizedRequest(
-		EndpointResponses,
 		model,
 		modelExplicit,
 		req.Stream,
@@ -221,9 +219,8 @@ func normalizeResponsesPayload(instructionsText string, textConfig *openai.Respo
 	return out, nil
 }
 
-func newNormalizedRequest(endpoint Endpoint, model string, modelExplicit bool, stream bool, tools []codex.Tool, toolChoice json.RawMessage, reasoning *codex.Reasoning, serviceTier, previousResponseID string) NormalizedRequest {
+func newNormalizedRequest(model string, modelExplicit bool, stream bool, tools []codex.Tool, toolChoice json.RawMessage, reasoning *codex.Reasoning, serviceTier, previousResponseID string) NormalizedRequest {
 	return NormalizedRequest{
-		Endpoint:      endpoint,
 		ModelExplicit: modelExplicit,
 		Request: codex.Request{
 			Model:              model,

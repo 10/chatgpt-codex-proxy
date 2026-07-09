@@ -12,7 +12,6 @@ import (
 	"chatgpt-codex-proxy/internal/translate"
 )
 
-
 func (a *App) logUpstreamRequestFailure(c *gin.Context, endpoint, accountID string, status int, code string, err error) {
 	if a == nil || a.logger == nil || err == nil {
 		return
@@ -22,7 +21,7 @@ func (a *App) logUpstreamRequestFailure(c *gin.Context, endpoint, accountID stri
 	attrs = append(attrs,
 		"status", status,
 		"error_code", code,
-		"error", logErrorText(err),
+		"error", strings.TrimSpace(err.Error()),
 	)
 	attrs = appendStringAttr(attrs, "account_id", accountID)
 
@@ -35,18 +34,11 @@ func (a *App) logUpstreamStreamFailure(c *gin.Context, endpoint, accountID, resp
 	}
 
 	attrs := contextLogAttrs(c, endpoint)
-	attrs = append(attrs, "error", logErrorText(err))
+	attrs = append(attrs, "error", strings.TrimSpace(err.Error()))
 	attrs = appendStringAttr(attrs, "account_id", accountID)
 	attrs = appendStringAttr(attrs, "response_id", responseID)
 
 	a.logger.Error("upstream stream failed", attrs...)
-}
-
-func logErrorText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return strings.TrimSpace(err.Error())
 }
 
 func (a *App) logTupleReconversionWarning(c *gin.Context, endpoint, responseID string, err error) {
@@ -55,7 +47,7 @@ func (a *App) logTupleReconversionWarning(c *gin.Context, endpoint, responseID s
 	}
 
 	attrs := contextLogAttrs(c, endpoint)
-	attrs = append(attrs, "error", logErrorText(err))
+	attrs = append(attrs, "error", strings.TrimSpace(err.Error()))
 	attrs = appendStringAttr(attrs, "response_id", responseID)
 	a.logger.Warn("tuple reconversion failed", attrs...)
 }

@@ -1,6 +1,10 @@
 package translate
 
-import "chatgpt-codex-proxy/internal/jsonutil"
+import (
+	"maps"
+
+	"chatgpt-codex-proxy/internal/jsonutil"
+)
 
 var (
 	schemaMapChildKeys    = []string{"properties", "patternProperties", "$defs", "definitions"}
@@ -98,7 +102,10 @@ func resolveLocalRefs(node map[string]any, defs map[string]map[string]any, resol
 		if !ok {
 			return node
 		}
-		nextResolving := cloneBoolMap(resolving)
+		nextResolving := maps.Clone(resolving)
+		if nextResolving == nil {
+			nextResolving = map[string]bool{}
+		}
 		nextResolving[ref] = true
 		resolved := jsonutil.CloneMap(definition)
 		if resolved == nil {
@@ -122,14 +129,6 @@ func resolveLocalRefChildren(node map[string]any, defs map[string]map[string]any
 	updateSchemaChildren(node, func(child map[string]any) map[string]any {
 		return resolveLocalRefs(child, defs, resolving)
 	})
-}
-
-func cloneBoolMap(value map[string]bool) map[string]bool {
-	cloned := make(map[string]bool, len(value)+1)
-	for key, item := range value {
-		cloned[key] = item
-	}
-	return cloned
 }
 
 func forEachSchemaChild(node map[string]any, visit func(map[string]any)) {

@@ -25,7 +25,6 @@ RUN apk add --no-cache ca-certificates && \
     chown -R app:app /app
 
 COPY --from=build /out/chatgpt-codex-proxy /usr/local/bin/chatgpt-codex-proxy
-RUN chown app:app /usr/local/bin/chatgpt-codex-proxy
 
 ENV PORT=8080
 ENV DATA_DIR=/app/data

@@ -11,7 +11,7 @@ import (
 func APIKey(required string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if required == "" {
-			AbortJSON(c, http.StatusInternalServerError, OpenAIErrorPayload("internal_server_error", "server_error", "internal_server_error", ""))
+			c.AbortWithStatusJSON(http.StatusInternalServerError, OpenAIErrorPayload("internal_server_error", "server_error", "internal_server_error", ""))
 			return
 		}
 
@@ -28,6 +28,6 @@ func APIKey(required string) gin.HandlerFunc {
 			return
 		}
 
-		AbortJSON(c, http.StatusUnauthorized, OpenAIErrorPayload("invalid_api_key", "authentication_error", "invalid_api_key", ""))
+		c.AbortWithStatusJSON(http.StatusUnauthorized, OpenAIErrorPayload("invalid_api_key", "authentication_error", "invalid_api_key", ""))
 	}
 }

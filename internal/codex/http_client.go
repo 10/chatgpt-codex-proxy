@@ -145,8 +145,8 @@ func (c *HTTPClient) CompactResponse(ctx context.Context, record accounts.Record
 		return CompactResponse{}, nil, NewUpstreamError("codex compact response", resp.StatusCode, body, CanonicalHeader(resp.Headers))
 	}
 
-	decoded, err := parseCompactResponse(body)
-	if err != nil {
+	var decoded CompactResponse
+	if err := json.Unmarshal([]byte(body), &decoded); err != nil {
 		return CompactResponse{}, nil, err
 	}
 	return decoded, ParseQuotaFromHeaders(CanonicalHeader(resp.Headers)), nil
@@ -297,14 +297,6 @@ func StreamRequestPayload(req Request) Request {
 	bodyReq.Store = false
 	bodyReq.PreviousResponseID = ""
 	return bodyReq
-}
-
-func parseCompactResponse(payload string) (CompactResponse, error) {
-	var decoded CompactResponse
-	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
-		return CompactResponse{}, err
-	}
-	return decoded, nil
 }
 
 func (c *HTTPClient) codexModelsURL() string {

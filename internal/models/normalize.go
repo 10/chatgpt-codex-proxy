@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"chatgpt-codex-proxy/internal/codex"
+	"chatgpt-codex-proxy/internal/jsonutil"
 )
 
 func NormalizeBackendEntries(entries []codex.BackendModelEntry) []Entry {
@@ -29,13 +30,13 @@ func NormalizeBackendEntries(entries []codex.BackendModelEntry) []Entry {
 }
 
 func normalizeBackendEntry(raw codex.BackendModelEntry) (Entry, bool) {
-	id := strings.TrimSpace(firstNonEmpty(raw.Slug, raw.ID, raw.Name))
+	id := strings.TrimSpace(jsonutil.FirstNonEmpty(raw.Slug, raw.ID, raw.Name))
 	if id == "" {
 		return Entry{}, false
 	}
 
 	efforts := normalizeEfforts(raw)
-	defaultEffort := strings.TrimSpace(firstNonEmpty(raw.DefaultReasoningEffort, raw.DefaultReasoningLevel))
+	defaultEffort := strings.TrimSpace(jsonutil.FirstNonEmpty(raw.DefaultReasoningEffort, raw.DefaultReasoningLevel))
 	if defaultEffort == "" && len(efforts) > 0 {
 		defaultEffort = efforts[0].ReasoningEffort
 	}
@@ -45,7 +46,7 @@ func normalizeBackendEntry(raw codex.BackendModelEntry) (Entry, bool) {
 
 	return Entry{
 		ID:                        id,
-		DisplayName:               firstNonEmpty(strings.TrimSpace(raw.DisplayName), strings.TrimSpace(raw.Name), id),
+		DisplayName:               jsonutil.FirstNonEmpty(strings.TrimSpace(raw.DisplayName), strings.TrimSpace(raw.Name), id),
 		Description:               strings.TrimSpace(raw.Description),
 		IsDefault:                 raw.IsDefault,
 		DefaultReasoningEffort:    defaultEffort,
@@ -57,7 +58,7 @@ func normalizeBackendEntry(raw codex.BackendModelEntry) (Entry, bool) {
 func normalizeEfforts(raw codex.BackendModelEntry) []ReasoningEffort {
 	out := make([]ReasoningEffort, 0)
 	for _, effort := range raw.SupportedReasoningEfforts {
-		name := firstNonEmpty(effort.ReasoningEffort, effort.ReasoningEffortAlt, effort.Effort)
+		name := jsonutil.FirstNonEmpty(effort.ReasoningEffort, effort.ReasoningEffortAlt, effort.Effort)
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
@@ -100,13 +101,4 @@ func dedupeEfforts(efforts []ReasoningEffort) []ReasoningEffort {
 		out = append(out, effort)
 	}
 	return out
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }

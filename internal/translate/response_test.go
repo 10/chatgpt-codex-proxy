@@ -91,7 +91,6 @@ func TestEnsureResponseToolCallCompletedIncludesCallID(t *testing.T) {
 	t.Parallel()
 
 	accumulator := NewAccumulator(NormalizedRequest{
-		Endpoint: EndpointResponses,
 		Request: codex.Request{
 			Model: "gpt-5.4",
 		},
@@ -123,7 +122,6 @@ func TestApplyUpgradesPlaceholderToolCallIDWhenOutputItemProvidesCallID(t *testi
 	t.Parallel()
 
 	accumulator := NewAccumulator(NormalizedRequest{
-		Endpoint: EndpointResponses,
 		Request: codex.Request{
 			Model: "gpt-5.4",
 		},
@@ -179,7 +177,6 @@ func TestResponsesObjectMergesFunctionCallsWithExistingOutputInOrder(t *testing.
 	t.Parallel()
 
 	accumulator := NewAccumulator(NormalizedRequest{
-		Endpoint: EndpointResponses,
 		Request: codex.Request{
 			Model: "gpt-5.4",
 		},
@@ -253,7 +250,6 @@ func TestChatCompletionObjectIncludesReasoningContentAndStrictUsage(t *testing.T
 	t.Parallel()
 
 	accumulator := NewAccumulator(NormalizedRequest{
-		Endpoint: EndpointChat,
 		Request: codex.Request{
 			Model:     "gpt-5.4",
 			Reasoning: &codex.Reasoning{Effort: "high"},
@@ -317,7 +313,6 @@ func TestAccumulatorReasoningSummaryDoesNotUseCompletedOutputFallback(t *testing
 	t.Parallel()
 
 	accumulator := NewAccumulator(NormalizedRequest{
-		Endpoint: EndpointChat,
 		Request: codex.Request{
 			Model:     "gpt-5.4",
 			Reasoning: &codex.Reasoning{Effort: "high"},
@@ -368,7 +363,6 @@ func TestResponsesObjectUsageIncludesDetailFields(t *testing.T) {
 	t.Parallel()
 
 	accumulator := NewAccumulator(NormalizedRequest{
-		Endpoint: EndpointResponses,
 		Request: codex.Request{
 			Model: "gpt-5.4",
 		},

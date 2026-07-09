@@ -58,7 +58,6 @@ The Codex request fields used by the proxy are:
 
 The translation-only fields are:
 
-- `Endpoint`
 - `ModelExplicit`
 - `TupleSchema`
 
@@ -88,7 +87,7 @@ The compact translation-only fields are:
 - Otherwise, if the body has Responses-style fields like `input`, `instructions`, `previous_response_id`, `text`, or `reasoning`, it is accepted as a compatibility path and parsed as a Responses request.
 - If neither shape has meaningful content, the proxy returns `400` with `request body must include chat messages or responses input`.
 
-When the compatibility path is used, the request is normalized with `translate.Responses(...)` and then relabeled as `EndpointChat` so the downstream response shaping still uses Chat Completions output rules.
+When the compatibility path is used, the request is normalized with `translate.Responses(...)`; the `/v1/chat/completions` handler still selects Chat Completions response shaping.
 
 If both `messages` and Responses-style fields are present, `messages` wins.
 
