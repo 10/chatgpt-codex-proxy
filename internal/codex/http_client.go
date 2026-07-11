@@ -200,7 +200,7 @@ func (c *HTTPClient) sessionFor(accountID string) *httpcloak.Client {
 		return existing
 	}
 	session := httpcloak.NewSession(
-		"chrome-latest",
+		chromiumPreset,
 		httpcloak.WithTimeout(c.cfg.RequestTimeout),
 		httpcloak.WithoutRetry(),
 	)

@@ -8,22 +8,33 @@ var bootstrapReasoningEfforts = []ReasoningEffort{
 }
 
 var bootstrapEntries = []Entry{
-	bootstrapEntry("gpt-5.5", true),
-	bootstrapEntry("gpt-5.4", false),
-	bootstrapEntry("gpt-5.4-mini", false),
-	bootstrapEntry("gpt-5.3-codex", false),
-	bootstrapEntry("gpt-5.2-codex", false),
-	bootstrapEntry("gpt-5.2", false),
+	bootstrapEntry("gpt-5.6-sol", true, "medium",
+		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
+		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
+	),
+	bootstrapEntry("gpt-5.6-terra", false, "medium",
+		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
+		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
+	),
+	bootstrapEntry("gpt-5.6-luna", false, "medium",
+		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
+	),
+	bootstrapEntry("gpt-5.5", false, "medium"),
+	bootstrapEntry("gpt-5.4", false, "medium"),
+	bootstrapEntry("gpt-5.4-mini", false, "medium"),
+	bootstrapEntry("gpt-5.3-codex-spark", false, "high"),
 }
 
-func bootstrapEntry(id string, isDefault bool) Entry {
+func bootstrapEntry(id string, isDefault bool, defaultReasoningEffort string, additionalEfforts ...ReasoningEffort) Entry {
+	efforts := append([]ReasoningEffort(nil), bootstrapReasoningEfforts...)
+	efforts = append(efforts, additionalEfforts...)
 	return Entry{
 		ID:                        id,
 		DisplayName:               id,
 		Description:               "Bootstrap fallback model catalog entry",
 		IsDefault:                 isDefault,
-		DefaultReasoningEffort:    "medium",
-		SupportedReasoningEfforts: bootstrapReasoningEfforts,
+		DefaultReasoningEffort:    defaultReasoningEffort,
+		SupportedReasoningEfforts: efforts,
 		Source:                    SourceBootstrap,
 	}
 }

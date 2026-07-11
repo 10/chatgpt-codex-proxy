@@ -8,12 +8,13 @@ import (
 )
 
 const (
-	desktopClientVersion = "26.409.61251"
+	desktopClientVersion = "26.707.31428"
 	desktopOriginator    = "Codex Desktop"
 	openAIBeta           = "responses_websockets=2026-02-06"
 	codexResidency       = "us"
-	desktopUserAgent     = "Codex Desktop/26.409.61251 (win32; x64)"
-	chromiumVersion      = "147"
+	desktopUserAgent     = "Codex Desktop/" + desktopClientVersion + " (win32; x64)"
+	chromiumPreset       = "chrome-149"
+	chromiumVersion      = "149"
 	clientHintPlatform   = "Windows"
 	acceptLanguage       = "en-US,en;q=0.9"
 )

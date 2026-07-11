@@ -76,8 +76,8 @@ The proxy intentionally mimics a desktop Codex client. These headers are always 
 Authorization: Bearer <access_token>
 originator: Codex Desktop
 x-openai-internal-codex-residency: us
-User-Agent: Codex Desktop/26.409.61251 (win32; x64)
-sec-ch-ua: "Chromium";v="147", "Not:A-Brand";v="24"
+User-Agent: Codex Desktop/26.707.31428 (win32; x64)
+sec-ch-ua: "Chromium";v="149", "Not:A-Brand";v="24"
 sec-ch-ua-mobile: ?0
 sec-ch-ua-platform: "Windows"
 Accept-Encoding: gzip, deflate, br, zstd
@@ -113,7 +113,7 @@ This is the canonical request shape the proxy sends to the HTTP Codex responses 
 
 ```json
 {
-  "model": "gpt-5.5",
+  "model": "gpt-5.6-sol",
   "instructions": "You are a helpful assistant.",
   "input": [],
   "stream": true,
@@ -168,7 +168,7 @@ This is the canonical request shape the proxy sends to the JSON compact endpoint
 
 ```json
 {
-  "model": "gpt-5.5",
+  "model": "gpt-5.6-sol",
   "instructions": "Summarize the thread state.",
   "input": [
     {
@@ -441,7 +441,7 @@ x-openai-internal-codex-residency: us
 x-client-request-id: req_<...>
 x-codex-turn-state: <turn_state>
 OpenAI-Beta: responses_websockets=2026-02-06
-User-Agent: Codex Desktop/26.409.61251 (win32; x64)
+User-Agent: Codex Desktop/26.707.31428 (win32; x64)
 Content-Type: application/json
 Accept: text/event-stream
 ```
@@ -454,7 +454,7 @@ Example:
 
 ```json
 {
-  "model": "gpt-5.5",
+  "model": "gpt-5.6-sol",
   "instructions": "Be concise.",
   "input": [
     {
@@ -471,7 +471,7 @@ Example with tool calls:
 
 ```json
 {
-  "model": "gpt-5.5",
+  "model": "gpt-5.6-sol",
   "instructions": "Be concise.",
   "input": [
     {
@@ -515,7 +515,7 @@ curl -sS -N "${CODEX_BASE_URL}/codex/responses" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
   -d '{
-    "model": "gpt-5.5",
+    "model": "gpt-5.6-sol",
     "instructions": "Be concise.",
     "input": [
       {
@@ -772,7 +772,7 @@ Observed payload:
   "type": "response.completed",
   "response": {
     "id": "resp_123",
-    "model": "gpt-5.5",
+    "model": "gpt-5.6-sol",
     "status": "completed",
     "output": [],
     "output_text": "final text",
@@ -899,7 +899,7 @@ originator: Codex Desktop
 x-openai-internal-codex-residency: us
 x-client-request-id: req_<...>
 OpenAI-Beta: responses_websockets=2026-02-06
-User-Agent: Codex Desktop/26.409.61251 (win32; x64)
+User-Agent: Codex Desktop/26.707.31428 (win32; x64)
 Content-Type: application/json
 Accept: application/json
 ```
@@ -912,7 +912,7 @@ Example:
 
 ```json
 {
-  "model": "gpt-5.5",
+  "model": "gpt-5.6-sol",
   "input": [
     {
       "role": "assistant",
@@ -936,7 +936,7 @@ Example with an existing compaction artifact:
 
 ```json
 {
-  "model": "gpt-5.5",
+  "model": "gpt-5.6-sol",
   "input": [
     {
       "type": "compaction",
@@ -959,7 +959,7 @@ curl -sS "${CODEX_BASE_URL}/codex/responses/compact" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   -d '{
-    "model": "gpt-5.5",
+    "model": "gpt-5.6-sol",
     "input": [
       {
         "role": "assistant",
@@ -1029,7 +1029,7 @@ The proxy sends one JSON message immediately after connecting:
 ```json
 {
   "type": "response.create",
-  "model": "gpt-5.5",
+  "model": "gpt-5.6-sol",
   "input": [],
   "instructions": "Be concise.",
   "tools": [],
@@ -1084,7 +1084,7 @@ ChatGPT-Account-Id: <account_id>
 originator: Codex Desktop
 x-openai-internal-codex-residency: us
 x-client-request-id: req_<...>
-User-Agent: Codex Desktop/26.409.61251 (win32; x64)
+User-Agent: Codex Desktop/26.707.31428 (win32; x64)
 Accept: application/json
 Accept-Encoding: gzip, deflate
 ```
@@ -1167,7 +1167,7 @@ Model-catalog endpoint used by this repository.
 ### URL
 
 ```http
-GET https://chatgpt.com/backend-api/codex/models?client_version=26.409.61251
+GET https://chatgpt.com/backend-api/codex/models?client_version=26.707.31428
 ```
 
 The `client_version` query parameter is currently only attached to `/codex/models`.
@@ -1182,7 +1182,7 @@ ChatGPT-Account-Id: <account_id>
 originator: Codex Desktop
 x-openai-internal-codex-residency: us
 x-client-request-id: req_<...>
-User-Agent: Codex Desktop/26.409.61251 (win32; x64)
+User-Agent: Codex Desktop/26.707.31428 (win32; x64)
 Accept: application/json
 Accept-Encoding: gzip, deflate
 ```
@@ -1195,8 +1195,8 @@ The proxy now accepts only the Codex-specific top-level shape observed in live t
 {
   "models": [
     {
-      "slug": "gpt-5.5",
-      "display_name": "gpt-5.5",
+      "slug": "gpt-5.6-sol",
+      "display_name": "GPT-5.6-Sol",
       "description": "Model description",
       "default_reasoning_level": "medium",
       "supported_reasoning_levels": [
@@ -1237,7 +1237,7 @@ If `/codex/models` returns anything outside that shape, the proxy treats the res
 - `description`
 
 ```bash
-curl -sS "${CODEX_BASE_URL}/codex/models?client_version=26.409.61251" \
+curl -sS "${CODEX_BASE_URL}/codex/models?client_version=26.707.31428" \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -H "ChatGPT-Account-Id: ${ACCOUNT_ID}" \
   -H "Accept: application/json"
@@ -1322,7 +1322,7 @@ POST https://auth.openai.com/api/accounts/deviceauth/usercode
 
 ```http
 Content-Type: application/json
-User-Agent: Codex Desktop/26.409.61251 (win32; x64)
+User-Agent: Codex Desktop/26.707.31428 (win32; x64)
 ```
 
 ### Request body
@@ -1371,7 +1371,7 @@ POST https://auth.openai.com/api/accounts/deviceauth/token
 
 ```http
 Content-Type: application/json
-User-Agent: Codex Desktop/26.409.61251 (win32; x64)
+User-Agent: Codex Desktop/26.707.31428 (win32; x64)
 ```
 
 ### Request body
@@ -1424,7 +1424,7 @@ POST https://auth.openai.com/oauth/token
 
 ```http
 Content-Type: application/x-www-form-urlencoded
-User-Agent: Codex Desktop/26.409.61251 (win32; x64)
+User-Agent: Codex Desktop/26.707.31428 (win32; x64)
 ```
 
 ### Authorization-code exchange request

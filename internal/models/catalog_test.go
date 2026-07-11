@@ -1,11 +1,70 @@
 package models
 
 import (
+	"slices"
 	"testing"
 	"time"
 
 	"chatgpt-codex-proxy/internal/accounts"
 )
+
+func TestBootstrapEntriesMatchSupportedModels(t *testing.T) {
+	t.Parallel()
+
+	entries := make(map[string]Entry)
+	var modelIDs []string
+	var defaults []string
+	for _, entry := range BootstrapEntries() {
+		entries[entry.ID] = entry
+		modelIDs = append(modelIDs, entry.ID)
+		if entry.IsDefault {
+			defaults = append(defaults, entry.ID)
+		}
+	}
+	wantModelIDs := []string{
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+		"gpt-5.6-luna",
+		"gpt-5.5",
+		"gpt-5.4",
+		"gpt-5.4-mini",
+		"gpt-5.3-codex-spark",
+	}
+	if !slices.Equal(modelIDs, wantModelIDs) {
+		t.Errorf("BootstrapEntries() model IDs = %v, want %v", modelIDs, wantModelIDs)
+	}
+
+	tests := []struct {
+		modelID string
+		efforts []string
+	}{
+		{modelID: "gpt-5.6-sol", efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
+		{modelID: "gpt-5.6-terra", efforts: []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
+		{modelID: "gpt-5.6-luna", efforts: []string{"low", "medium", "high", "xhigh", "max"}},
+	}
+
+	for _, tc := range tests {
+		entry, ok := entries[tc.modelID]
+		if !ok {
+			t.Errorf("BootstrapEntries() missing %q", tc.modelID)
+			continue
+		}
+		gotEfforts := make([]string, 0, len(entry.SupportedReasoningEfforts))
+		for _, effort := range entry.SupportedReasoningEfforts {
+			gotEfforts = append(gotEfforts, effort.ReasoningEffort)
+		}
+		if !slices.Equal(gotEfforts, tc.efforts) {
+			t.Errorf("BootstrapEntries() %q efforts = %v, want %v", tc.modelID, gotEfforts, tc.efforts)
+		}
+	}
+
+	if !slices.Equal(defaults, []string{"gpt-5.6-sol"}) {
+		t.Errorf("BootstrapEntries() defaults = %v, want [gpt-5.6-sol]", defaults)
+	}
+	if got := entries["gpt-5.3-codex-spark"].DefaultReasoningEffort; got != "high" {
+		t.Errorf("BootstrapEntries() gpt-5.3-codex-spark default reasoning effort = %q, want high", got)
+	}
+}
 
 func TestSupportsRecordRequiresKnownRouteSupportOnceSupportMapExists(t *testing.T) {
 	t.Parallel()

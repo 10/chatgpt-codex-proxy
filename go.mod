@@ -6,7 +6,7 @@ require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
-	github.com/sardanioss/httpcloak v1.6.5
+	github.com/sardanioss/httpcloak v1.6.7
 )
 
 require (
@@ -36,7 +36,7 @@ require (
 	github.com/sardanioss/http v1.2.0 // indirect
 	github.com/sardanioss/net v1.2.6 // indirect
 	github.com/sardanioss/qpack v0.6.3 // indirect
-	github.com/sardanioss/quic-go v1.2.24 // indirect
+	github.com/sardanioss/quic-go v1.2.25 // indirect
 	github.com/sardanioss/udpbara v1.1.0 // indirect
 	github.com/sardanioss/utls v1.10.3 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect

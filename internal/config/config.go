@@ -14,7 +14,7 @@ import (
 const (
 	defaultListenPort            = 8080
 	defaultDataDir               = "data"
-	defaultDefaultModel          = "gpt-5.5"
+	defaultDefaultModel          = "gpt-5.6-sol"
 	defaultRotationStrategy      = "least_used"
 	defaultCodexBaseURL          = "https://chatgpt.com/backend-api"
 	defaultAuthIssuer            = "https://auth.openai.com"
