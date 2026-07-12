@@ -134,6 +134,20 @@ curl -sS "${PROXY_URL}/v1/responses/compact" \
   }'
 ```
 
+Image generation:
+
+```bash
+curl -sS "${PROXY_URL}/v1/images/generations" \
+  -H "Authorization: Bearer ${PROXY_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image-2",
+    "prompt": "A blue circle on a white background",
+    "size": "1024x1024",
+    "quality": "low"
+  }'
+```
+
 ### 5. Point an OpenAI client at it
 
 - Base URL: `http://localhost:8080/v1`
@@ -157,6 +171,8 @@ Routes:
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
 - `POST /v1/responses/compact`
+- `POST /v1/images/generations`
+- `POST /v1/images/edits`
 - `GET /v1/models`
 - `GET /v1/models/:model_id`
 - `GET /health/live`
@@ -175,6 +191,9 @@ Supported behavior:
 - Explicit OpenAI-style `response.compaction` support on `/v1/responses/compact`
 - Guarded implicit continuation when prior assistant or tool history is replayed
 - Runtime model catalog backed by the upstream Codex model list
+- Codex-backed image generation and editing with `gpt-image-1.5` and `gpt-image-2`
+- JSON image references and multipart image/mask uploads for edits
+- Images API partial-image streaming
 
 Important notes:
 
@@ -182,6 +201,10 @@ Important notes:
 - `/v1/responses/compact` follows the public OpenAI contract and returns `object: "response.compaction"` instead of raw Codex JSON.
 - `/v1/responses/compact` supports explicit `previous_response_id` by expanding locally stored continuation history before calling the private compact backend.
 - Compact requests currently support the same text, image, file, reasoning, tool-call, tool-output, and compaction input items used elsewhere in the proxy. Audio input parts are rejected with `unsupported_content_part`.
+- Image requests default to `gpt-image-2`. The image model is sent to Codex's `image_generation` tool while the proxy resolves a route-valid text model for the enclosing Responses request.
+- Image responses default to `b64_json`. `response_format: "url"` returns a data URL because Codex returns image bytes rather than a hosted URL.
+- Image options are forwarded rather than emulated. The current Codex `gpt-image-2-codex` backend rejects `input_fidelity`, and it may report a different output size or partial-image count than requested.
+- The Codex image tool currently produces one image per request; `n` does not fan out into multiple upstream requests.
 - Continuations are pinned to the original account when possible.
 - When the proxy can derive a stable conversation key, it sets `prompt_cache_key` upstream automatically.
 - Some OpenAI compatibility fields are accepted and ignored. See [docs/TRANSLATION.md](docs/TRANSLATION.md) for exact behavior.

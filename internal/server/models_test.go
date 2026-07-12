@@ -42,6 +42,34 @@ func TestHandleModelsIncludesCreatedTimestamp(t *testing.T) {
 	}
 }
 
+func TestHandleModelsIncludesCodexImageModels(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+
+	app := &App{cfg: config.Config{DefaultModel: "gpt-5.4"}}
+	app.handleModels(ctx)
+
+	var body struct {
+		Data []modelResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	ids := make(map[string]bool, len(body.Data))
+	for _, model := range body.Data {
+		ids[model.ID] = true
+	}
+	for _, id := range []string{"gpt-image-1.5", "gpt-image-2"} {
+		if !ids[id] {
+			t.Fatalf("model list missing %q", id)
+		}
+	}
+}
+
 func TestHandleModelByID(t *testing.T) {
 	t.Parallel()
 
@@ -67,6 +95,22 @@ func TestHandleModelByID(t *testing.T) {
 				}
 				if body["created"] != float64(modelCreatedTimestamp) {
 					t.Fatalf("created = %#v, want %d", body["created"], modelCreatedTimestamp)
+				}
+			},
+		},
+		{
+			name:       "returns image model",
+			modelID:    "gpt-image-2",
+			wantStatus: http.StatusOK,
+			assertBody: func(t *testing.T, bodyBytes []byte) {
+				t.Helper()
+
+				var body map[string]any
+				if err := json.Unmarshal(bodyBytes, &body); err != nil {
+					t.Fatalf("json.Unmarshal() error = %v", err)
+				}
+				if body["id"] != "gpt-image-2" {
+					t.Fatalf("id = %#v, want gpt-image-2", body["id"])
 				}
 			},
 		},
@@ -141,10 +185,16 @@ func TestHandleModelsUsesRuntimeCatalog(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if len(body.Data) != 1 {
-		t.Fatalf("len(data) = %d, want 1", len(body.Data))
+	if len(body.Data) != 3 {
+		t.Fatalf("len(data) = %d, want dynamic model plus two image models", len(body.Data))
 	}
-	if body.Data[0]["id"] != "gpt-dynamic-test" {
-		t.Fatalf("id = %#v, want gpt-dynamic-test", body.Data[0]["id"])
+	found := false
+	for _, model := range body.Data {
+		if model["id"] == "gpt-dynamic-test" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("model list missing gpt-dynamic-test")
 	}
 }

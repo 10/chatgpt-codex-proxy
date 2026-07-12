@@ -18,6 +18,7 @@ import (
 	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/store"
+	"chatgpt-codex-proxy/internal/translate"
 )
 
 type App struct {
@@ -29,6 +30,7 @@ type App struct {
 	accountMgr    *codex.AccountManager
 	httpClient    *codex.HTTPClient
 	compactCaller func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
+	imageOpener   func(*gin.Context, string, translate.NormalizedRequest) (openedRequest, bool)
 	continuations *accounts.ContinuationManager
 	models        *models.Catalog
 	cancel        context.CancelFunc
@@ -123,6 +125,8 @@ func (a *App) routes() {
 	protected.POST("/v1/chat/completions", a.handleChatCompletions)
 	protected.POST("/v1/responses", a.handleResponses)
 	protected.POST("/v1/responses/compact", a.handleResponsesCompact)
+	protected.POST("/v1/images/generations", a.handleImageGenerations)
+	protected.POST("/v1/images/edits", a.handleImageEdits)
 
 	adminGroup := protected.Group("/admin")
 	adminGroup.GET("/accounts", a.handleAdminAccounts)
