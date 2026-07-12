@@ -163,6 +163,37 @@ func TestResponsesTranslation(t *testing.T) {
 	}
 }
 
+func TestOpenAIServiceTierAutoUsesCodexDefault(t *testing.T) {
+	t.Parallel()
+
+	chat, err := ChatCompletions(openai.ChatCompletionsRequest{
+		Model:       "gpt-5.4",
+		ServiceTier: "auto",
+		Messages: []openai.ChatMessage{{
+			Role:    "user",
+			Content: openai.MessageContent{{Type: "text", Text: "Hello"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	if chat.ServiceTier != "default" {
+		t.Fatalf("ChatCompletions() service_tier = %q, want default", chat.ServiceTier)
+	}
+
+	response, err := Responses(openai.ResponsesRequest{
+		Model:       "gpt-5.4",
+		ServiceTier: "auto",
+		Input:       openai.ResponsesInput{String: "Hello"},
+	})
+	if err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
+	if response.ServiceTier != "default" {
+		t.Fatalf("Responses() service_tier = %q, want default", response.ServiceTier)
+	}
+}
+
 func TestResponsesTranslationUsesReasoningObject(t *testing.T) {
 	t.Parallel()
 

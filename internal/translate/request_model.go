@@ -27,7 +27,9 @@ func normalizeModel(rawModel, reasoningEffort, serviceTier string, catalog *mode
 		reasoning = &codex.Reasoning{Effort: effort, Summary: "auto"}
 	}
 	serviceTier = strings.TrimSpace(serviceTier)
-	if strings.EqualFold(serviceTier, "fast") {
+	if strings.EqualFold(serviceTier, "auto") {
+		serviceTier = "default"
+	} else if strings.EqualFold(serviceTier, "fast") {
 		serviceTier = "priority"
 	}
 	return model, modelExplicit, reasoning, serviceTier, nil
