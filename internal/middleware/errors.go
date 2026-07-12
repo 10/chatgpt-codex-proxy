@@ -21,15 +21,3 @@ func OpenAIErrorPayload(message, typ, code, param string) OpenAIErrorResponse {
 		},
 	}
 }
-
-type AdminErrorResponse struct {
-	Error   string `json:"error"`
-	Message string `json:"message"`
-}
-
-func AdminErrorPayload(code, message string) AdminErrorResponse {
-	return AdminErrorResponse{
-		Error:   code,
-		Message: message,
-	}
-}

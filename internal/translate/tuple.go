@@ -1,14 +1,12 @@
 package translate
 
 import (
+	"maps"
 	"strconv"
 	"strings"
 )
 
 func hasTupleSchemas(node map[string]any) bool {
-	if node == nil {
-		return false
-	}
 	if _, ok := node["prefixItems"].([]any); ok {
 		return true
 	}
@@ -16,10 +14,6 @@ func hasTupleSchemas(node map[string]any) bool {
 }
 
 func convertTupleSchemas(node map[string]any) map[string]any {
-	if node == nil {
-		return nil
-	}
-
 	if prefixItems, ok := node["prefixItems"].([]any); ok {
 		properties := make(map[string]any, len(prefixItems))
 		required := make([]string, 0, len(prefixItems))
@@ -53,9 +47,6 @@ func ReconvertTupleValues(data any, schema map[string]any) any {
 }
 
 func reconvertTupleValues(data any, schema map[string]any, root map[string]any) any {
-	if schema == nil {
-		return data
-	}
 	if ref, _ := schema["$ref"].(string); strings.TrimSpace(ref) != "" {
 		if resolved := resolveTupleSchemaRef(ref, root); resolved != nil {
 			return reconvertTupleValues(data, resolved, root)
@@ -86,10 +77,7 @@ func reconvertTupleValues(data any, schema map[string]any, root map[string]any) 
 		if !ok {
 			return data
 		}
-		out := make(map[string]any, len(mapped))
-		for key, value := range mapped {
-			out[key] = value
-		}
+		out := maps.Clone(mapped)
 		for key, raw := range properties {
 			if child, ok := raw.(map[string]any); ok {
 				if value, ok := out[key]; ok {
@@ -129,9 +117,6 @@ func reconvertTupleValues(data any, schema map[string]any, root map[string]any) 
 }
 
 func resolveTupleSchemaRef(ref string, root map[string]any) map[string]any {
-	if root == nil {
-		return nil
-	}
 	parts := strings.Split(ref, "/")
 	if len(parts) != 3 || parts[0] != "#" {
 		return nil

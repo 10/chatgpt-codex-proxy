@@ -36,9 +36,6 @@ func PatchChatCompletionObjectForTuple(object map[string]any, schema map[string]
 	}
 
 	message := jsonutil.MapValue(choices[0], "message")
-	if message == nil {
-		return nil
-	}
 	return patchTupleTextField(message, "content", schema)
 }
 
@@ -55,9 +52,6 @@ func PatchResponseCompletedPayloadForTuple(payload map[string]any, schema map[st
 	}
 
 	response := jsonutil.MapValue(payload, "response")
-	if response == nil {
-		return nil
-	}
 	return patchTupleResponseBody(response, schema)
 }
 

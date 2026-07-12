@@ -226,7 +226,7 @@ func newCompactTestApp(t *testing.T, caller func(context.Context, accounts.Recor
 		RequestTimeout:  5 * time.Second,
 	}
 	httpClient := codex.NewHTTPClient(cfg)
-	t.Cleanup(func() { _ = httpClient.Close() })
+	t.Cleanup(httpClient.Close)
 
 	modelCatalog := models.NewCatalog(models.BootstrapEntries())
 	app := &App{

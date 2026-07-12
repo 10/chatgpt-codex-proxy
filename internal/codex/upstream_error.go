@@ -113,9 +113,6 @@ func parseUpstreamErrorBody(body string) (string, int) {
 }
 
 func parseRetryAfterHeaders(headers http.Header) int {
-	if headers == nil {
-		return 0
-	}
 	raw := strings.TrimSpace(headers.Get("Retry-After"))
 	if raw == "" {
 		return 0

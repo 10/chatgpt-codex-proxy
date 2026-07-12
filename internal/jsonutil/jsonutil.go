@@ -21,9 +21,6 @@ func FirstNonEmpty(values ...string) string {
 
 // MapValue returns the nested map for key, or nil if the value is not a map.
 func MapValue(raw map[string]any, key string) map[string]any {
-	if raw == nil {
-		return nil
-	}
 	value, _ := raw[key].(map[string]any)
 	return value
 }
@@ -40,9 +37,6 @@ func FirstMap(values ...map[string]any) map[string]any {
 
 // FirstMapValue returns the first map value found at any of keys.
 func FirstMapValue(raw map[string]any, keys ...string) map[string]any {
-	if raw == nil {
-		return nil
-	}
 	for _, key := range keys {
 		if value := MapValue(raw, key); value != nil {
 			return value

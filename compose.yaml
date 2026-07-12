@@ -1,8 +1,6 @@
 services:
   chatgpt-codex-proxy:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     container_name: chatgpt-codex-proxy
     restart: unless-stopped
     environment:

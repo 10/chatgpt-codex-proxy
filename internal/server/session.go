@@ -14,7 +14,10 @@ import (
 	"chatgpt-codex-proxy/internal/translate"
 )
 
-var errContinuationAccountUnavailable = errors.New("continuation account unavailable")
+var (
+	errContinuationAccountUnavailable = errors.New("continuation account unavailable")
+	errInvalidPreviousResponseID      = errors.New("unknown or expired previous_response_id")
+)
 
 func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionResolution, error) {
 	resolution := sessionResolution{
@@ -25,7 +28,7 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 	if normalized.PreviousResponseID != "" {
 		record, ok := a.continuations.Get(normalized.PreviousResponseID)
 		if !ok {
-			return sessionResolution{}, invalidPreviousResponseIDError()
+			return sessionResolution{}, errInvalidPreviousResponseID
 		}
 		if strings.TrimSpace(resolution.Request.Model) == "" {
 			resolution.Request.Model = record.Model
@@ -79,29 +82,6 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 		return resolution, nil
 	}
 	return a.resolveImplicitResumeFallback(resolution, records), nil
-}
-
-func invalidPreviousResponseIDError() error {
-	return &upstreamLikeRequestError{
-		status:  http.StatusBadRequest,
-		code:    "invalid_previous_response_id",
-		message: "unknown or expired previous_response_id",
-		errType: "invalid_request_error",
-	}
-}
-
-type upstreamLikeRequestError struct {
-	status  int
-	code    string
-	message string
-	errType string
-}
-
-func (e *upstreamLikeRequestError) Error() string {
-	if e == nil {
-		return ""
-	}
-	return e.message
 }
 
 func canImplicitlyResume(record accounts.ContinuationRecord, normalized translate.NormalizedRequest) bool {
@@ -211,11 +191,10 @@ func trimmedContinuationInput(input []codex.InputItem, record accounts.Continuat
 }
 
 func (a *App) writeRequestError(c *gin.Context, err error) bool {
-	var requestErr *upstreamLikeRequestError
-	if !errors.As(err, &requestErr) {
+	if !errors.Is(err, errInvalidPreviousResponseID) {
 		return false
 	}
-	a.writeOpenAIError(c, requestErr.status, requestErr.code, requestErr.message, requestErr.errType)
+	a.writeOpenAIError(c, http.StatusBadRequest, "invalid_previous_response_id", errInvalidPreviousResponseID.Error(), "invalid_request_error")
 	return true
 }
 

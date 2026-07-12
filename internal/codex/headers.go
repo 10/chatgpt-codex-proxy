@@ -2,8 +2,9 @@ package codex
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -74,12 +75,7 @@ func BuildHeaders(token string, opts HeaderOptions) http.Header {
 
 func cookieHeader(cookies map[string]string) string {
 	pairs := make([]string, 0, len(cookies))
-	keys := make([]string, 0, len(cookies))
-	for key := range cookies {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
+	for _, key := range slices.Sorted(maps.Keys(cookies)) {
 		pairs = append(pairs, fmt.Sprintf("%s=%s", key, cookies[key]))
 	}
 	return strings.Join(pairs, "; ")

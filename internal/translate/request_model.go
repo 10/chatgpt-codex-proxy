@@ -1,6 +1,7 @@
 package translate
 
 import (
+	"slices"
 	"strings"
 
 	"chatgpt-codex-proxy/internal/codex"
@@ -15,7 +16,7 @@ func normalizeModel(rawModel, reasoningEffort, serviceTier string, catalog *mode
 			if !catalog.Has(model) {
 				return "", false, nil, "", &ModelNotFoundError{Model: model}
 			}
-		} else if !bootstrapModelSupported(model) {
+		} else if !slices.ContainsFunc(models.BootstrapEntries(), func(entry models.Entry) bool { return entry.ID == model }) {
 			return "", false, nil, "", &ModelNotFoundError{Model: model}
 		}
 	}
@@ -25,16 +26,11 @@ func normalizeModel(rawModel, reasoningEffort, serviceTier string, catalog *mode
 	if effort != "" {
 		reasoning = &codex.Reasoning{Effort: effort, Summary: "auto"}
 	}
-	return model, modelExplicit, reasoning, normalizeServiceTier(serviceTier), nil
-}
-
-func normalizeServiceTier(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "fast":
-		return "priority"
-	default:
-		return strings.TrimSpace(value)
+	serviceTier = strings.TrimSpace(serviceTier)
+	if strings.EqualFold(serviceTier, "fast") {
+		serviceTier = "priority"
 	}
+	return model, modelExplicit, reasoning, serviceTier, nil
 }
 
 func firstCatalog(catalogs ...*models.Catalog) *models.Catalog {
@@ -44,17 +40,4 @@ func firstCatalog(catalogs ...*models.Catalog) *models.Catalog {
 		}
 	}
 	return nil
-}
-
-func bootstrapModelSupported(model string) bool {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return false
-	}
-	for _, entry := range models.BootstrapEntries() {
-		if entry.ID == model {
-			return true
-		}
-	}
-	return false
 }

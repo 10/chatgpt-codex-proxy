@@ -85,11 +85,9 @@ func (a *App) Handler() http.Handler {
 	return a.engine
 }
 
-func (a *App) Close() error {
-	if a.cancel != nil {
-		a.cancel()
-	}
-	return a.httpClient.Close()
+func (a *App) Close() {
+	a.cancel()
+	a.httpClient.Close()
 }
 
 func (a *App) modelCatalog() *models.Catalog {
@@ -143,7 +141,7 @@ func (a *App) writeOpenAIError(c *gin.Context, status int, code, message, errTyp
 }
 
 func (a *App) writeAdminError(c *gin.Context, status int, code, message string) {
-	c.AbortWithStatusJSON(status, middleware.AdminErrorPayload(code, message))
+	c.AbortWithStatusJSON(status, gin.H{"error": code, "message": message})
 }
 
 func (a *App) classifyUpstreamError(accountID string, err error) (int, string, string) {
@@ -194,8 +192,9 @@ func (a *App) setAccountCooldown(accountID string, until *time.Time, cause error
 }
 
 func (a *App) rateLimitCooldownUntil(accountID string, cause error, now time.Time) *time.Time {
-	if retryAfter := retryAfterFromError(cause); retryAfter > 0 {
-		return fallbackUntil(now, retryAfter)
+	var upstreamErr *codex.UpstreamError
+	if errors.As(cause, &upstreamErr) && upstreamErr.RetryAfter > 0 {
+		return fallbackUntil(now, time.Duration(upstreamErr.RetryAfter)*time.Second)
 	}
 	record, ok, err := a.accounts.Get(accountID)
 	if err != nil {
@@ -222,17 +221,6 @@ func (a *App) quotaCooldownUntil(accountID string, now time.Time) *time.Time {
 		}
 	}
 	return fallbackUntil(now, accounts.DefaultQuotaFallback)
-}
-
-func retryAfterFromError(err error) time.Duration {
-	if err == nil {
-		return 0
-	}
-	var upstreamErr *codex.UpstreamError
-	if errors.As(err, &upstreamErr) && upstreamErr.RetryAfter > 0 {
-		return time.Duration(upstreamErr.RetryAfter) * time.Second
-	}
-	return 0
 }
 
 func clampUpstreamStatus(status int) int {

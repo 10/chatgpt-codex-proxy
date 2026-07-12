@@ -77,7 +77,7 @@ func normalizeToolChoice(raw json.RawMessage) json.RawMessage {
 	}
 	var mode string
 	if err := json.Unmarshal(raw, &mode); err == nil {
-		return mustJSONString(mode)
+		return json.RawMessage(strconv.Quote(mode))
 	}
 	var choice struct {
 		Type     string `json:"type"`
@@ -96,10 +96,10 @@ func normalizeToolChoice(raw json.RawMessage) json.RawMessage {
 			name = strings.TrimSpace(choice.Function.Name)
 		}
 		if name != "" {
-			return functionToolChoiceJSON(name)
+			return json.RawMessage(`{"type":"function","name":` + strconv.Quote(name) + `}`)
 		}
 	case "web_search", "web_search_preview":
-		return webSearchToolChoiceJSON()
+		return json.RawMessage(`{"type":"web_search"}`)
 	}
 	return append(json.RawMessage(nil), raw...)
 }
@@ -110,22 +110,10 @@ func normalizeLegacyFunctionChoice(choice *openai.LegacyFunctionCallChoice) json
 	}
 	switch strings.TrimSpace(choice.Mode) {
 	case "none", "auto":
-		return mustJSONString(choice.Mode)
+		return json.RawMessage(strconv.Quote(choice.Mode))
 	}
 	if name := strings.TrimSpace(choice.Name); name != "" {
-		return functionToolChoiceJSON(name)
+		return json.RawMessage(`{"type":"function","name":` + strconv.Quote(name) + `}`)
 	}
 	return nil
-}
-
-func mustJSONString(value string) json.RawMessage {
-	return json.RawMessage(strconv.Quote(value))
-}
-
-func functionToolChoiceJSON(name string) json.RawMessage {
-	return json.RawMessage(`{"type":"function","name":` + strconv.Quote(name) + `}`)
-}
-
-func webSearchToolChoiceJSON() json.RawMessage {
-	return json.RawMessage(`{"type":"web_search"}`)
 }

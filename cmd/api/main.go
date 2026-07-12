@@ -28,18 +28,13 @@ func main() {
 		logger.Error("failed to build server", "error", err)
 		os.Exit(1)
 	}
-	defer func() {
-		if closeErr := app.Close(); closeErr != nil {
-			logger.Error("shutdown error", "error", closeErr)
-		}
-	}()
+	defer app.Close()
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           app.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      0,
 		IdleTimeout:       120 * time.Second,
 	}
 

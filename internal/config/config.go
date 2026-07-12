@@ -11,19 +11,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-const (
-	defaultListenPort            = 8080
-	defaultDataDir               = "data"
-	defaultDefaultModel          = "gpt-5.6-sol"
-	defaultRotationStrategy      = "least_used"
-	defaultCodexBaseURL          = "https://chatgpt.com/backend-api"
-	defaultAuthIssuer            = "https://auth.openai.com"
-	defaultClientID              = "app_EMoamEEZ73f0CkXaXp7hrann"
-	defaultLoginTimeoutSeconds   = 900
-	defaultContinuationTTLMinute = 60
-	defaultRequestTimeoutSecond  = 1800
-)
-
 type Config struct {
 	ListenAddr       string
 	DataDir          string
@@ -41,13 +28,13 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	if err := loadDotEnv(); err != nil {
-		return Config{}, err
+	if err := godotenv.Load(".env"); err != nil && !os.IsNotExist(err) {
+		return Config{}, fmt.Errorf("load .env: %w", err)
 	}
 
 	dataDir := strings.TrimSpace(os.Getenv("DATA_DIR"))
 	if dataDir == "" {
-		dataDir = defaultDataDir
+		dataDir = "data"
 	}
 	if !filepath.IsAbs(dataDir) {
 		cwd, err := os.Getwd()
@@ -61,9 +48,13 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	debugLogPayloads, err := loadBoolEnv("DEBUG_LOG_PAYLOADS", false)
-	if err != nil {
-		return Config{}, err
+	debugLogPayloads := false
+	if raw := strings.TrimSpace(os.Getenv("DEBUG_LOG_PAYLOADS")); raw != "" {
+		var err error
+		debugLogPayloads, err = strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("DEBUG_LOG_PAYLOADS must be a boolean")
+		}
 	}
 
 	cfg := Config{
@@ -71,15 +62,15 @@ func Load() (Config, error) {
 		DataDir:          dataDir,
 		ProxyAPIKey:      strings.TrimSpace(os.Getenv("PROXY_API_KEY")),
 		DebugLogPayloads: debugLogPayloads,
-		DefaultModel:     defaultDefaultModel,
-		RotationStrategy: defaultRotationStrategy,
-		CodexBaseURL:     defaultCodexBaseURL,
-		AuthIssuer:       defaultAuthIssuer,
-		OAuthClientID:    defaultClientID,
-		LoginTimeout:     time.Duration(defaultLoginTimeoutSeconds) * time.Second,
-		ContinuationTTL:  time.Duration(defaultContinuationTTLMinute) * time.Minute,
-		RequestTimeout:   time.Duration(defaultRequestTimeoutSecond) * time.Second,
-		RefreshSkew:      60 * time.Second,
+		DefaultModel:     "gpt-5.6-sol",
+		RotationStrategy: "least_used",
+		CodexBaseURL:     "https://chatgpt.com/backend-api",
+		AuthIssuer:       "https://auth.openai.com",
+		OAuthClientID:    "app_EMoamEEZ73f0CkXaXp7hrann",
+		LoginTimeout:     15 * time.Minute,
+		ContinuationTTL:  time.Hour,
+		RequestTimeout:   30 * time.Minute,
+		RefreshSkew:      time.Minute,
 	}
 
 	if cfg.ProxyAPIKey == "" {
@@ -96,30 +87,11 @@ func Load() (Config, error) {
 func loadListenAddr() (string, error) {
 	raw := strings.TrimSpace(os.Getenv("PORT"))
 	if raw == "" {
-		return ":" + strconv.Itoa(defaultListenPort), nil
+		return ":8080", nil
 	}
 	port, err := strconv.Atoi(raw)
 	if err != nil || port <= 0 || port > 65535 {
 		return "", fmt.Errorf("PORT must be a valid TCP port")
 	}
 	return ":" + strconv.Itoa(port), nil
-}
-
-func loadBoolEnv(key string, defaultValue bool) (bool, error) {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return defaultValue, nil
-	}
-	value, err := strconv.ParseBool(raw)
-	if err != nil {
-		return false, fmt.Errorf("%s must be a boolean", key)
-	}
-	return value, nil
-}
-
-func loadDotEnv() error {
-	if err := godotenv.Load(".env"); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("load .env: %w", err)
-	}
-	return nil
 }

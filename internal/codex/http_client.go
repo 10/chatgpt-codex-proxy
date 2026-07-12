@@ -37,14 +37,13 @@ func NewHTTPClient(cfg config.Config) *HTTPClient {
 	}
 }
 
-func (c *HTTPClient) Close() error {
+func (c *HTTPClient) Close() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, session := range c.sessions {
 		session.Close()
 	}
 	c.sessions = make(map[string]*httpcloak.Client)
-	return nil
 }
 
 func (c *HTTPClient) GetUsage(ctx context.Context, record accounts.Record) (UsageResponse, *accounts.QuotaSnapshot, error) {

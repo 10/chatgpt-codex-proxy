@@ -25,10 +25,6 @@ type ToolCallState struct {
 	SawArgumentDelta bool
 }
 
-func (t *ToolCallState) Completed() bool {
-	return t != nil && strings.EqualFold(strings.TrimSpace(t.Status), "completed")
-}
-
 type ResponseStreamEvent struct {
 	Type    string
 	Payload map[string]any
@@ -471,14 +467,6 @@ func ChatChunk(responseID, model string, delta map[string]any, finishReason stri
 	}
 }
 
-func ChatChunkWithUsage(responseID, model string, delta map[string]any, finishReason string, usage map[string]any) map[string]any {
-	chunk := ChatChunk(responseID, model, delta, finishReason)
-	if usage != nil {
-		chunk["usage"] = usage
-	}
-	return chunk
-}
-
 func ResponseEventJSON(eventType string, responseID string, payload map[string]any) []byte {
 	eventPayload := maps.Clone(payload)
 	if eventPayload == nil {
@@ -529,9 +517,6 @@ func (a *Accumulator) sortedOutputItems() []map[string]any {
 }
 
 func outputIndexFromMap(raw map[string]any) int {
-	if raw == nil {
-		return -1
-	}
 	if value, ok := intValue(raw["output_index"]); ok {
 		return value
 	}

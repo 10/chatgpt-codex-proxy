@@ -51,18 +51,15 @@ func usageObject(usage *codex.Usage, inputKey, outputKey, inputDetailsKey, outpu
 }
 
 func usageFromRaw(value any) *codex.Usage {
-	if value == nil {
-		return nil
-	}
 	switch mapped := value.(type) {
 	case map[string]any:
 		cachedTokens := optionalInt64Value(mapped["cached_tokens"])
-		if details := jsonutil.MapValue(mapped, "input_tokens_details"); details != nil {
-			cachedTokens = firstInt64Ptr(cachedTokens, optionalInt64Value(details["cached_tokens"]))
+		if details := jsonutil.MapValue(mapped, "input_tokens_details"); cachedTokens == nil && details != nil {
+			cachedTokens = optionalInt64Value(details["cached_tokens"])
 		}
 		reasoningTokens := optionalInt64Value(mapped["reasoning_tokens"])
-		if details := jsonutil.MapValue(mapped, "output_tokens_details"); details != nil {
-			reasoningTokens = firstInt64Ptr(reasoningTokens, optionalInt64Value(details["reasoning_tokens"]))
+		if details := jsonutil.MapValue(mapped, "output_tokens_details"); reasoningTokens == nil && details != nil {
+			reasoningTokens = optionalInt64Value(details["reasoning_tokens"])
 		}
 		return &codex.Usage{
 			InputTokens:     int64(numberValue(mapped["input_tokens"])),
@@ -139,15 +136,6 @@ func optionalInt64Value(value any) *int64 {
 		parsed, err := json.Number(strings.TrimSpace(typed)).Int64()
 		if err == nil {
 			return &parsed
-		}
-	}
-	return nil
-}
-
-func firstInt64Ptr(values ...*int64) *int64 {
-	for _, value := range values {
-		if value != nil {
-			return value
 		}
 	}
 	return nil

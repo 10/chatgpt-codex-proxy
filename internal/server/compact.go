@@ -88,7 +88,7 @@ func (a *App) resolveCompactRequest(normalized translate.NormalizedCompactReques
 
 	record, ok := a.continuations.Get(normalized.PreviousResponseID)
 	if !ok {
-		return translate.NormalizedCompactRequest{}, "", invalidPreviousResponseIDError()
+		return translate.NormalizedCompactRequest{}, "", errInvalidPreviousResponseID
 	}
 	if strings.TrimSpace(normalized.Model) == "" {
 		normalized.Model = record.Model

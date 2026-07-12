@@ -65,9 +65,6 @@ func ParseQuotaFromEvent(event *StreamEvent, planType string) *accounts.QuotaSna
 		return nil
 	}
 	rateLimits := jsonutil.MapValue(event.Raw, "rate_limits")
-	if rateLimits == nil {
-		return nil
-	}
 
 	primary := parseEventRateWindow(jsonutil.MapValue(rateLimits, "primary"))
 	secondary := parseEventRateWindow(jsonutil.MapValue(rateLimits, "secondary"))
@@ -126,9 +123,6 @@ func parseRateWindow(headers http.Header, prefix string) *accounts.RateLimitWind
 }
 
 func parseEventRateWindow(raw map[string]any) *accounts.RateLimitWindow {
-	if raw == nil {
-		return nil
-	}
 	usedPercent, ok := eventFloat(raw["used_percent"])
 	if !ok {
 		return nil
@@ -142,11 +136,11 @@ func parseEventRateWindow(raw map[string]any) *accounts.RateLimitWindow {
 		resetAt := time.Unix(resetValue, 0).UTC()
 		window.ResetAt = &resetAt
 	}
-	if minutes, ok := eventInt(raw["window_minutes"]); ok {
-		seconds := minutes * 60
+	if minutes, ok := eventInt64(raw["window_minutes"]); ok {
+		seconds := int(minutes) * 60
 		window.LimitWindowSeconds = &seconds
-	} else if limitSeconds, ok := eventInt(raw["limit_window_seconds"]); ok {
-		seconds := limitSeconds
+	} else if limitSeconds, ok := eventInt64(raw["limit_window_seconds"]); ok {
+		seconds := int(limitSeconds)
 		window.LimitWindowSeconds = &seconds
 	}
 	return window
@@ -163,7 +157,7 @@ func parseCredits(headers http.Header, prefix string) *accounts.CreditsSnapshot 
 		credits.Unlimited = value
 		hasAny = true
 	}
-	if value, ok := parseFloatHeader(headers.Get(prefix + "-credits-balance")); ok {
+	if value, err := strconv.ParseFloat(headers.Get(prefix+"-credits-balance"), 64); err == nil {
 		credits.Balance = &value
 		hasAny = true
 	}
@@ -217,17 +211,6 @@ func parseBoolHeader(raw string) (bool, bool) {
 	return value, true
 }
 
-func parseFloatHeader(raw string) (float64, bool) {
-	if raw == "" {
-		return 0, false
-	}
-	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
-		return 0, false
-	}
-	return value, true
-}
-
 func usageWindowRateLimit(window *UsageWindow, allowed, limitReached bool) accounts.RateLimitWindow {
 	out := accounts.RateLimitWindow{
 		Allowed:      allowed,
@@ -252,22 +235,6 @@ func eventFloat(value any) (float64, bool) {
 	case json.Number:
 		parsed, err := typed.Float64()
 		return parsed, err == nil
-	default:
-		return 0, false
-	}
-}
-
-func eventInt(value any) (int, bool) {
-	switch typed := value.(type) {
-	case int:
-		return typed, true
-	case int64:
-		return int(typed), true
-	case float64:
-		return int(typed), true
-	case json.Number:
-		parsed, err := typed.Int64()
-		return int(parsed), err == nil
 	default:
 		return 0, false
 	}

@@ -2,7 +2,7 @@ package models
 
 import (
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -156,12 +156,7 @@ func (c *Catalog) Snapshot() CacheSnapshot {
 
 	support := make(map[string][]string, len(c.support))
 	for key, set := range c.support {
-		ids := make([]string, 0, len(set))
-		for id := range set {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		support[key] = ids
+		support[key] = slices.Sorted(maps.Keys(set))
 	}
 	return CacheSnapshot{
 		FetchedAt: c.fetchedAt,
@@ -207,11 +202,7 @@ func (c *Catalog) rebuildVisibleLocked() {
 		return
 	}
 
-	ids := make([]string, 0, len(visibleIDs))
-	for id := range visibleIDs {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+	ids := slices.Sorted(maps.Keys(visibleIDs))
 
 	visible := make([]Entry, 0, len(ids))
 	for _, id := range ids {
@@ -302,7 +293,7 @@ func cloneEntries(entries []Entry) []Entry {
 func cloneEntry(entry Entry) Entry {
 	cloned := entry
 	if len(entry.SupportedReasoningEfforts) > 0 {
-		cloned.SupportedReasoningEfforts = append([]ReasoningEffort(nil), entry.SupportedReasoningEfforts...)
+		cloned.SupportedReasoningEfforts = slices.Clone(entry.SupportedReasoningEfforts)
 	}
 	return cloned
 }

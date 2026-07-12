@@ -102,23 +102,15 @@ func (a *App) logCustomToolTrace(c *gin.Context, endpoint, phase string, eventTy
 		"name", state.Name,
 		"status", state.Status,
 		"input_len", len(state.Input),
-		"completed", state.Completed(),
+		"completed", strings.EqualFold(strings.TrimSpace(state.Status), "completed"),
 	)
 	a.logger.Info("custom tool debug", attrs...)
 }
 
 func contextLogAttrs(c *gin.Context, endpoint string) []any {
-	requestID := ""
-	path := ""
-	if c != nil {
-		requestID = middleware.GetRequestID(c)
-		if c.Request != nil && c.Request.URL != nil {
-			path = c.Request.URL.Path
-		}
-	}
 	return []any{
-		"request_id", requestID,
-		"path", path,
+		"request_id", middleware.GetRequestID(c),
+		"path", c.Request.URL.Path,
 		"endpoint", endpoint,
 	}
 }

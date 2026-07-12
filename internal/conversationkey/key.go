@@ -93,16 +93,10 @@ func serializeItem(item codex.InputItem, stripSystemReminder bool) string {
 	if text := serializeContent(item.OutputContent, false); text != "" {
 		fields = append(fields, "output_content="+text)
 	}
-	if len(fields) == 0 {
-		return ""
-	}
 	return strings.Join(fields, "\x1f")
 }
 
 func serializeContent(parts []codex.ContentPart, stripSystemReminder bool) string {
-	if len(parts) == 0 {
-		return ""
-	}
 	texts := make([]string, 0, len(parts))
 	for _, part := range parts {
 		var value string

@@ -1,6 +1,7 @@
 package accounts
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"sync"
@@ -113,14 +114,7 @@ func (m *ContinuationManager) ListByConversation(key string) []ContinuationRecor
 		records = append(records, record)
 	}
 	slices.SortFunc(records, func(a, b ContinuationRecord) int {
-		switch {
-		case a.CreatedAt.After(b.CreatedAt):
-			return -1
-		case a.CreatedAt.Before(b.CreatedAt):
-			return 1
-		default:
-			return strings.Compare(a.ResponseID, b.ResponseID)
-		}
+		return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(a.ResponseID, b.ResponseID))
 	})
 	return records
 }
@@ -139,14 +133,7 @@ func (m *ContinuationManager) ListAll() []ContinuationRecord {
 		records = append(records, record)
 	}
 	slices.SortFunc(records, func(a, b ContinuationRecord) int {
-		switch {
-		case a.CreatedAt.After(b.CreatedAt):
-			return -1
-		case a.CreatedAt.Before(b.CreatedAt):
-			return 1
-		default:
-			return strings.Compare(a.ResponseID, b.ResponseID)
-		}
+		return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(a.ResponseID, b.ResponseID))
 	})
 	return records
 }

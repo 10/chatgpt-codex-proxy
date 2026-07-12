@@ -216,14 +216,7 @@ func buildOAuthToken(raw oauthTokenResponse) accounts.OAuthToken {
 }
 
 func extractAccountID(raw oauthTokenResponse) string {
-	for _, key := range []string{"id_token", "access_token"} {
-		var token string
-		switch key {
-		case "id_token":
-			token = raw.IDToken
-		case "access_token":
-			token = raw.AccessToken
-		}
+	for _, token := range []string{raw.IDToken, raw.AccessToken} {
 		if token == "" {
 			continue
 		}

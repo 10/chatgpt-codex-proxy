@@ -14,9 +14,6 @@ var (
 
 func PrepareSchema(schema map[string]any) (prepared map[string]any, tupleSchema map[string]any) {
 	cloned := jsonutil.CloneMap(schema)
-	if cloned == nil {
-		return nil, nil
-	}
 	if !hasTupleSchemas(cloned) {
 		return injectAdditionalProperties(cloned), nil
 	}
@@ -31,9 +28,6 @@ func NormalizeSchema(schema map[string]any) map[string]any {
 		return schema
 	}
 	cloned := jsonutil.CloneMap(schema)
-	if cloned == nil {
-		return schema
-	}
 	defs := schemaDefinitions(cloned)
 	resolved := resolveLocalRefs(cloned, defs, nil)
 	delete(resolved, "$defs")
@@ -42,12 +36,10 @@ func NormalizeSchema(schema map[string]any) map[string]any {
 }
 
 func injectAdditionalProperties(node map[string]any) map[string]any {
-	if node == nil {
-		return nil
-	}
-
-	node = normalizeObjectProperties(node)
 	if node["type"] == "object" {
+		if _, ok := node["properties"]; !ok {
+			node["properties"] = map[string]any{}
+		}
 		if _, ok := node["additionalProperties"]; !ok {
 			node["additionalProperties"] = false
 		}
@@ -57,18 +49,6 @@ func injectAdditionalProperties(node map[string]any) map[string]any {
 		injectAdditionalProperties(child)
 	})
 
-	return node
-}
-
-func normalizeObjectProperties(node map[string]any) map[string]any {
-	if node == nil {
-		return nil
-	}
-	if node["type"] == "object" {
-		if _, ok := node["properties"]; !ok {
-			node["properties"] = map[string]any{}
-		}
-	}
 	return node
 }
 
@@ -90,9 +70,6 @@ func schemaDefinitions(schema map[string]any) map[string]map[string]any {
 }
 
 func resolveLocalRefs(node map[string]any, defs map[string]map[string]any, resolving map[string]bool) map[string]any {
-	if node == nil {
-		return nil
-	}
 	ref, _ := node["$ref"].(string)
 	if ref != "" {
 		if resolving[ref] {
@@ -120,15 +97,11 @@ func resolveLocalRefs(node map[string]any, defs map[string]map[string]any, resol
 		node = resolved
 	}
 
-	resolveLocalRefChildren(node, defs, resolving)
-
-	return node
-}
-
-func resolveLocalRefChildren(node map[string]any, defs map[string]map[string]any, resolving map[string]bool) {
 	updateSchemaChildren(node, func(child map[string]any) map[string]any {
 		return resolveLocalRefs(child, defs, resolving)
 	})
+
+	return node
 }
 
 func forEachSchemaChild(node map[string]any, visit func(map[string]any)) {

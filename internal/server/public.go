@@ -319,7 +319,11 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 
 	finalResponse := accumulator.ChatCompletionObject()
 	finalUsage, _ := finalResponse["usage"].(map[string]any)
-	writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunkWithUsage(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{}, chatStreamFinishReason(accumulator), finalUsage)))
+	finalChunk := translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{}, chatStreamFinishReason(accumulator))
+	if finalUsage != nil {
+		finalChunk["usage"] = finalUsage
+	}
+	writeSSE(c.Writer, "", translate.MustJSON(finalChunk))
 	_, _ = io.WriteString(c.Writer, "data: [DONE]\n\n")
 	c.Writer.Flush()
 }

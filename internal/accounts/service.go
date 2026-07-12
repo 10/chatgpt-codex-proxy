@@ -364,12 +364,9 @@ func (s *Service) AcquireMatching(preferredID string, allow func(Record) bool) (
 		if sticky := s.selectStickyLocked(candidates, now); sticky != nil {
 			return cloneRecord(sticky), nil
 		}
-		record := selectLeastUsed(candidates, &s.roundRobinIndex)
-		return cloneRecord(record), nil
-	default:
-		record := selectLeastUsed(candidates, &s.roundRobinIndex)
-		return cloneRecord(record), nil
 	}
+	record := selectLeastUsed(candidates, &s.roundRobinIndex)
+	return cloneRecord(record), nil
 }
 
 func (s *Service) RotationStrategy() RotationStrategy {

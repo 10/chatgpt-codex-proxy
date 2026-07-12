@@ -348,11 +348,16 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, it
 			Input:  item.Input,
 		})
 	case "function_call_output", "custom_tool_call_output":
-		output, err := normalizeOutputItem(item.Type, item.CallID, item.OutputText, item.OutputContent)
+		parts, err := normalizeContentPartsChecked(item.OutputContent)
 		if err != nil {
 			return err
 		}
-		*out = append(*out, output)
+		*out = append(*out, codex.InputItem{
+			Type:          item.Type,
+			CallID:        item.CallID,
+			OutputText:    item.OutputText,
+			OutputContent: parts,
+		})
 	case "reasoning":
 		parts, err := normalizeContentPartsChecked(item.Content)
 		if err != nil {
@@ -421,19 +426,6 @@ func appendRoleContentInputIfPresent(out *NormalizedRequest, role string, conten
 	return nil
 }
 
-func normalizeOutputItem(itemType, callID, outputText string, outputContent openai.MessageContent) (codex.InputItem, error) {
-	parts, err := normalizeContentPartsChecked(outputContent)
-	if err != nil {
-		return codex.InputItem{}, err
-	}
-	return codex.InputItem{
-		Type:          itemType,
-		CallID:        callID,
-		OutputText:    outputText,
-		OutputContent: parts,
-	}, nil
-}
-
 func normalizeContentPartsChecked(parts openai.MessageContent) ([]codex.ContentPart, error) {
 	if len(parts) == 0 {
 		return nil, nil
@@ -442,7 +434,7 @@ func normalizeContentPartsChecked(parts openai.MessageContent) ([]codex.ContentP
 	for _, part := range parts {
 		contentType, kind, ok := classifyContentPartType(part.Type)
 		if !ok {
-			return nil, unsupportedContentPartError(part.Type)
+			return nil, &UnsupportedContentPartError{PartType: part.Type}
 		}
 		switch kind {
 		case contentPartText:
@@ -481,7 +473,7 @@ func flattenContent(content openai.MessageContent) (string, error) {
 	for _, part := range content {
 		_, kind, ok := classifyContentPartType(part.Type)
 		if !ok || kind != contentPartText {
-			return "", unsupportedContentPartError(part.Type)
+			return "", &UnsupportedContentPartError{PartType: part.Type}
 		}
 		if strings.TrimSpace(part.Text) != "" {
 			parts = append(parts, part.Text)
@@ -513,8 +505,4 @@ func classifyContentPartType(partType string) (string, contentPartKind, bool) {
 	default:
 		return "", 0, false
 	}
-}
-
-func unsupportedContentPartError(partType string) error {
-	return &UnsupportedContentPartError{PartType: partType}
 }

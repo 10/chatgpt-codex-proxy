@@ -1,7 +1,8 @@
 package accounts
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,7 +20,7 @@ func (s *Service) selectStickyLocked(candidates []*Record, now time.Time) *Recor
 }
 
 func selectRoundRobin(candidates []*Record, index *int) *Record {
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].ID < candidates[j].ID })
+	slices.SortFunc(candidates, func(a, b *Record) int { return strings.Compare(a.ID, b.ID) })
 	selected := candidates[*index%len(candidates)]
 	*index = *index + 1
 	return selected
@@ -30,7 +31,6 @@ func selectLeastUsed(candidates []*Record, index *int) *Record {
 	for _, candidate := range candidates {
 		if hasUsableQuota(candidate) {
 			withQuota = append(withQuota, candidate)
-			continue
 		}
 	}
 
@@ -38,11 +38,8 @@ func selectLeastUsed(candidates []*Record, index *int) *Record {
 		return selectRoundRobin(candidates, index)
 	}
 
-	sort.Slice(withQuota, func(i, j int) bool {
-		if cmp := compareLeastUsedQuota(withQuota[i], withQuota[j]); cmp != 0 {
-			return cmp < 0
-		}
-		return withQuota[i].ID < withQuota[j].ID
+	slices.SortFunc(withQuota, func(a, b *Record) int {
+		return cmp.Or(compareLeastUsedQuota(a, b), strings.Compare(a.ID, b.ID))
 	})
 
 	tiedCount := 1
@@ -80,11 +77,8 @@ func compareLeastUsedQuota(a, b *Record) int {
 
 	aReset, aHasReset := primaryReset(aQuota)
 	bReset, bHasReset := primaryReset(bQuota)
-	if aHasReset && bHasReset && !aReset.Equal(bReset) {
-		if aReset.Before(bReset) {
-			return -1
-		}
-		return 1
+	if aHasReset && bHasReset {
+		return aReset.Compare(bReset)
 	}
 
 	return 0
@@ -119,17 +113,10 @@ func normalizeQuotaSnapshot(snapshot *QuotaSnapshot, now time.Time) bool {
 	if snapshot == nil {
 		return false
 	}
-	changed := false
-	if normalizeRateLimitWindow(&snapshot.RateLimit, now) {
-		changed = true
-	}
-	if normalizeRateLimitWindow(snapshot.SecondaryRateLimit, now) {
-		changed = true
-	}
-	if normalizeRateLimitWindow(snapshot.CodeReviewRateLimit, now) {
-		changed = true
-	}
-	return changed
+	primaryChanged := normalizeRateLimitWindow(&snapshot.RateLimit, now)
+	secondaryChanged := normalizeRateLimitWindow(snapshot.SecondaryRateLimit, now)
+	codeReviewChanged := normalizeRateLimitWindow(snapshot.CodeReviewRateLimit, now)
+	return primaryChanged || secondaryChanged || codeReviewChanged
 }
 
 func normalizeRateLimitWindow(window *RateLimitWindow, now time.Time) bool {
@@ -147,13 +134,9 @@ func quotaBlocksGeneralRouting(snapshot *QuotaSnapshot, now time.Time) bool {
 	if snapshot == nil {
 		return false
 	}
-	if windowAvailabilityBlocked(&snapshot.RateLimit, now) {
-		return true
-	}
-	if windowLimitActive(&snapshot.RateLimit, now) {
-		return true
-	}
-	return windowLimitActive(snapshot.SecondaryRateLimit, now)
+	return windowAvailabilityBlocked(&snapshot.RateLimit, now) ||
+		windowLimitActive(&snapshot.RateLimit, now) ||
+		windowLimitActive(snapshot.SecondaryRateLimit, now)
 }
 
 func windowAvailabilityBlocked(window *RateLimitWindow, now time.Time) bool {
