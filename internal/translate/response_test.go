@@ -246,6 +246,53 @@ func TestResponsesObjectMergesFunctionCallsWithExistingOutputInOrder(t *testing.
 	}
 }
 
+func TestResponsesObjectPreservesNativeResponseFields(t *testing.T) {
+	t.Parallel()
+
+	accumulator := NewAccumulator(NormalizedRequest{
+		Request: codex.Request{Model: "gpt-5.4"},
+	})
+	accumulator.Apply(&codex.StreamEvent{
+		Type: "response.completed",
+		Raw: map[string]any{
+			"response": map[string]any{
+				"id":         "resp_native",
+				"object":     "response",
+				"created_at": int64(1_700_000_000),
+				"model":      "gpt-5.4",
+				"status":     "completed",
+				"metadata":   map[string]any{"request_kind": "compatibility_test"},
+				"future_field": map[string]any{
+					"enabled": true,
+				},
+				"output_text": "done",
+				"usage": map[string]any{
+					"input_tokens":  3,
+					"output_tokens": 2,
+					"future_detail": "preserve-me",
+				},
+			},
+		},
+	})
+
+	response := accumulator.ResponsesObject()
+	if response["created_at"] != int64(1_700_000_000) {
+		t.Fatalf("created_at = %#v, want preserved timestamp", response["created_at"])
+	}
+	metadata, _ := response["metadata"].(map[string]any)
+	if metadata["request_kind"] != "compatibility_test" {
+		t.Fatalf("metadata = %#v, want preserved metadata", metadata)
+	}
+	futureField, _ := response["future_field"].(map[string]any)
+	if futureField["enabled"] != true {
+		t.Fatalf("future_field = %#v, want preserved unknown field", futureField)
+	}
+	usage, _ := response["usage"].(map[string]any)
+	if usage["future_detail"] != "preserve-me" {
+		t.Fatalf("usage.future_detail = %#v, want preserved unknown usage field", usage["future_detail"])
+	}
+}
+
 func TestChatCompletionObjectIncludesReasoningContentAndStrictUsage(t *testing.T) {
 	t.Parallel()
 
@@ -266,6 +313,7 @@ func TestChatCompletionObjectIncludesReasoningContentAndStrictUsage(t *testing.T
 		Raw: map[string]any{
 			"response": map[string]any{
 				"id":          "resp_reasoning",
+				"created_at":  int64(1_700_000_001),
 				"model":       "gpt-5.4",
 				"status":      "completed",
 				"output_text": "Final answer",
@@ -284,6 +332,9 @@ func TestChatCompletionObjectIncludesReasoningContentAndStrictUsage(t *testing.T
 	})
 
 	response := accumulator.ChatCompletionObject()
+	if response["created"] != int64(1_700_000_001) {
+		t.Fatalf("created = %#v, want upstream created_at", response["created"])
+	}
 	choices, _ := response["choices"].([]map[string]any)
 	message, _ := choices[0]["message"].(map[string]any)
 	if message["reasoning_content"] != "Reasoning summary" {

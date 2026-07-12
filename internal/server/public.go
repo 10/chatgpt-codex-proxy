@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -239,9 +240,10 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 	prepareStreamResponse(c)
 
 	accumulator := translate.NewAccumulator(normalized)
-	toolCalls := newChatToolCallStreamer()
+	createdAt := time.Now().UTC().Unix()
+	toolCalls := newChatToolCallStreamer(createdAt)
 	var tupleTextBuffer strings.Builder
-	writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk("", normalized.Model, map[string]any{"role": "assistant"}, "")))
+	writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk("", normalized.Model, map[string]any{"role": "assistant"}, "", createdAt)))
 	c.Writer.Flush()
 
 	for {
@@ -276,7 +278,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 			if normalized.Reasoning != nil {
 				delta := jsonutil.StringValue(event.Raw["delta"])
 				if delta != "" {
-					writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"reasoning_content": delta}, "")))
+					writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"reasoning_content": delta}, "", createdAt)))
 					c.Writer.Flush()
 				}
 			}
@@ -289,7 +291,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 				tupleTextBuffer.WriteString(delta)
 				continue
 			}
-			writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"content": delta}, "")))
+			writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"content": delta}, "", createdAt)))
 			c.Writer.Flush()
 		case "response.output_text.done":
 			if normalized.TupleSchema != nil {
@@ -306,7 +308,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 				} else {
 					reconverted = patched
 				}
-				writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"content": reconverted}, "")))
+				writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"content": reconverted}, "", createdAt)))
 				c.Writer.Flush()
 			}
 		}
@@ -319,7 +321,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 
 	finalResponse := accumulator.ChatCompletionObject()
 	finalUsage, _ := finalResponse["usage"].(map[string]any)
-	finalChunk := translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{}, chatStreamFinishReason(accumulator))
+	finalChunk := translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{}, chatStreamFinishReason(accumulator), createdAt)
 	if finalUsage != nil {
 		finalChunk["usage"] = finalUsage
 	}
@@ -436,13 +438,15 @@ type chatToolCallStreamer struct {
 	initialized   map[string]bool
 	argumentsSent map[string]int
 	nextIndex     int
+	createdAt     int64
 }
 
-func newChatToolCallStreamer() *chatToolCallStreamer {
+func newChatToolCallStreamer(createdAt int64) *chatToolCallStreamer {
 	return &chatToolCallStreamer{
 		indexByCallID: make(map[string]int),
 		initialized:   make(map[string]bool),
 		argumentsSent: make(map[string]int),
+		createdAt:     createdAt,
 	}
 }
 
@@ -479,7 +483,7 @@ func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *translate.Ac
 		}
 		writeSSE(w, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{
 			"tool_calls": []map[string]any{chunkToolCall},
-		}, "")))
+		}, "", s.createdAt)))
 		s.initialized[callID] = true
 		emitted = true
 	}
@@ -504,7 +508,7 @@ func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *translate.Ac
 				"arguments": value[sent:],
 			},
 		}},
-	}, "")))
+	}, "", s.createdAt)))
 	s.argumentsSent[callID] = len(value)
 	return true
 }

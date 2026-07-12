@@ -6,6 +6,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"time"
 
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
@@ -39,6 +40,7 @@ type outputItemState struct {
 type Accumulator struct {
 	Normalized              NormalizedRequest
 	ResponseID              string
+	CreatedAt               int64
 	Model                   string
 	TextBuilder             strings.Builder
 	ReasoningSummaryBuilder strings.Builder
@@ -81,6 +83,9 @@ func (a *Accumulator) applyResponseMetadata(response map[string]any) {
 	}
 	if id := jsonutil.StringValue(response["id"]); id != "" {
 		a.ResponseID = id
+	}
+	if createdAt, ok := intValue(response["created_at"]); ok && createdAt > 0 {
+		a.CreatedAt = int64(createdAt)
 	}
 	if model := jsonutil.StringValue(response["model"]); model != "" {
 		a.Model = model
@@ -351,6 +356,7 @@ func (a *Accumulator) ChatCompletionObject() map[string]any {
 	return map[string]any{
 		"id":      jsonutil.FirstNonEmpty(a.ResponseID, "chatcmpl_proxy"),
 		"object":  "chat.completion",
+		"created": a.createdAt(),
 		"model":   jsonutil.FirstNonEmpty(a.Model, a.Normalized.Model),
 		"choices": []map[string]any{{"index": 0, "message": message, "finish_reason": finishReason(a)}},
 		"usage":   a.ChatUsageObject(),
@@ -360,15 +366,46 @@ func (a *Accumulator) ChatCompletionObject() map[string]any {
 func (a *Accumulator) ResponsesObject() map[string]any {
 	text := a.Text()
 	output := a.responsesOutput(text)
-	return map[string]any{
-		"id":          jsonutil.FirstNonEmpty(a.ResponseID, "resp_proxy"),
-		"object":      "response",
-		"model":       jsonutil.FirstNonEmpty(a.Model, a.Normalized.Model),
-		"status":      jsonutil.FirstNonEmpty(a.Status, "completed"),
-		"output":      output,
-		"output_text": text,
-		"usage":       a.ResponsesUsageObject(),
+	response := jsonutil.CloneMap(jsonutil.MapValue(a.RawFinal, "response"))
+	if response == nil {
+		response = map[string]any{}
 	}
+	response["id"] = jsonutil.FirstNonEmpty(a.ResponseID, jsonutil.StringValue(response["id"]), "resp_proxy")
+	response["object"] = jsonutil.FirstNonEmpty(jsonutil.StringValue(response["object"]), "response")
+	response["model"] = jsonutil.FirstNonEmpty(a.Model, jsonutil.StringValue(response["model"]), a.Normalized.Model)
+	response["status"] = jsonutil.FirstNonEmpty(a.Status, jsonutil.StringValue(response["status"]), "completed")
+	response["output"] = output
+	response["output_text"] = text
+
+	if rebuiltUsage := a.ResponsesUsageObject(); rebuiltUsage != nil {
+		usage := jsonutil.CloneMap(jsonutil.MapValue(response, "usage"))
+		if usage == nil {
+			usage = map[string]any{}
+		}
+		for key, value := range rebuiltUsage {
+			if details, ok := value.(map[string]any); ok {
+				merged := jsonutil.CloneMap(jsonutil.MapValue(usage, key))
+				if merged == nil {
+					merged = map[string]any{}
+				}
+				for detailKey, detailValue := range details {
+					merged[detailKey] = detailValue
+				}
+				usage[key] = merged
+				continue
+			}
+			usage[key] = value
+		}
+		response["usage"] = usage
+	}
+	return response
+}
+
+func (a *Accumulator) createdAt() int64 {
+	if a != nil && a.CreatedAt > 0 {
+		return a.CreatedAt
+	}
+	return time.Now().UTC().Unix()
 }
 
 func (a *Accumulator) responsesOutput(text string) []map[string]any {
@@ -451,7 +488,7 @@ func responseTextContent(text string) []map[string]any {
 	}}
 }
 
-func ChatChunk(responseID, model string, delta map[string]any, finishReason string) map[string]any {
+func ChatChunk(responseID, model string, delta map[string]any, finishReason string, createdAt int64) map[string]any {
 	choice := map[string]any{
 		"index": 0,
 		"delta": delta,
@@ -462,6 +499,7 @@ func ChatChunk(responseID, model string, delta map[string]any, finishReason stri
 	return map[string]any{
 		"id":      jsonutil.FirstNonEmpty(responseID, "chatcmpl_proxy"),
 		"object":  "chat.completion.chunk",
+		"created": createdAt,
 		"model":   model,
 		"choices": []map[string]any{choice},
 	}

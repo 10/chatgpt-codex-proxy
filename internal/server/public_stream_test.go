@@ -182,6 +182,15 @@ func TestStreamChatCompletionEmitsReasoningContentAndStrictUsage(t *testing.T) {
 	if len(events) != 5 {
 		t.Fatalf("event count = %d, want 5", len(events))
 	}
+	created := events[0].Data["created"]
+	if created == nil {
+		t.Fatal("initial chat chunk missing created timestamp")
+	}
+	for index := 1; index < 4; index++ {
+		if events[index].Data["created"] != created {
+			t.Fatalf("event[%d].created = %#v, want stable %#v", index, events[index].Data["created"], created)
+		}
+	}
 	reasoningDelta := events[1].Data
 	choices := sliceOfMapsFromAny(reasoningDelta["choices"])
 	delta := nestedMapFromAny(choices[0]["delta"])
