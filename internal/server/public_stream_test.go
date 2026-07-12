@@ -766,6 +766,39 @@ func TestContinuationInputHistoryIncludesReasoningReplay(t *testing.T) {
 	}
 }
 
+func TestContinuationInputHistoryKeepsShortToolNameForUpstreamReplay(t *testing.T) {
+	t.Parallel()
+
+	shortName := "mcp__read_project_file"
+	originalName := "mcp__filesystem__read_project_file_with_a_name_longer_than_sixty_four_characters"
+	accumulator := translate.NewAccumulator(translate.NormalizedRequest{
+		Request: codex.Request{
+			Input: []codex.InputItem{userText("inspect the project")},
+		},
+		ToolNameAliases: map[string]string{shortName: originalName},
+	})
+	accumulator.Apply(&codex.StreamEvent{
+		Type: "response.completed",
+		Raw: map[string]any{
+			"response": map[string]any{
+				"id": "resp_long_tool",
+				"output": []any{map[string]any{
+					"type": "function_call", "id": "fc_1", "call_id": "call_1",
+					"name": shortName, "arguments": `{}`, "status": "completed",
+				}},
+			},
+		},
+	})
+
+	if accumulator.ToolCalls[0].Name != originalName {
+		t.Fatalf("client response name = %q, want original name", accumulator.ToolCalls[0].Name)
+	}
+	history := continuationInputHistory(accumulator)
+	if len(history) != 2 || history[1].Name != shortName {
+		t.Fatalf("continuation history = %#v, want shortened upstream name", history)
+	}
+}
+
 func TestClassifyUpstreamErrorBansGeneric403ButNotCloudflare403(t *testing.T) {
 	t.Parallel()
 

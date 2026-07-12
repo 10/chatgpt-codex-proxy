@@ -40,6 +40,7 @@ type ContinuationRecord struct {
 	Model           string
 	InputHistory    []ContinuationInputItem
 	FunctionCallIDs []string
+	ToolNameAliases map[string]string
 	CreatedAt       time.Time
 	ExpiresAt       time.Time
 }

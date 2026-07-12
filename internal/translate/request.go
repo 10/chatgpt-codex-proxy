@@ -38,22 +38,24 @@ func ChatCompletions(req openai.ChatCompletionsRequest, catalog ...*models.Catal
 	if len(tools) == 0 && len(req.Functions) > 0 {
 		tools = legacyFunctionsAsTools(req.Functions)
 	}
+	toolNames := newToolNameMapper(toolNamesForChat(req, tools))
 	toolChoice := json.RawMessage(nil)
 	if len(req.Tools) > 0 {
-		toolChoice = normalizeToolChoice(req.ToolChoice)
-	} else if choice := normalizeLegacyFunctionChoice(req.FunctionCall); choice != nil {
+		toolChoice = normalizeToolChoice(req.ToolChoice, toolNames)
+	} else if choice := normalizeLegacyFunctionChoice(req.FunctionCall, toolNames); choice != nil {
 		toolChoice = choice
 	}
 	out := newNormalizedRequest(
 		model,
 		modelExplicit,
 		req.Stream,
-		normalizeTools(tools),
+		normalizeTools(tools, toolNames),
 		toolChoice,
 		reasoning,
 		serviceTier,
 		req.PreviousResponseID,
 	)
+	out.ToolNameAliases = toolNames.aliases()
 	if req.ResponseFormat != nil {
 		text, tupleSchema, err := normalizeChatResponseFormat(req.ResponseFormat)
 		if err != nil {
@@ -67,7 +69,7 @@ func ChatCompletions(req openai.ChatCompletionsRequest, catalog ...*models.Catal
 	customToolNames := chatCustomToolNames(req.Tools)
 	toolCallTypes := make(map[string]string)
 	for _, message := range req.Messages {
-		if err := normalizeChatMessage(&out, &instructions, toolCallTypes, customToolNames, message); err != nil {
+		if err := normalizeChatMessage(&out, &instructions, toolCallTypes, customToolNames, toolNames, message); err != nil {
 			return NormalizedRequest{}, err
 		}
 	}
@@ -121,7 +123,8 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 		return NormalizedRequest{}, err
 	}
 	reasoning = normalizeResponsesReasoning(req.Reasoning, reasoning)
-	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input)
+	toolNames := newToolNameMapper(toolNamesForResponses(req.Tools, req.ToolChoice, req.Input))
+	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input, toolNames)
 	if err != nil {
 		return NormalizedRequest{}, err
 	}
@@ -130,8 +133,8 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 		model,
 		modelExplicit,
 		req.Stream,
-		normalizeTools(req.Tools),
-		normalizeToolChoice(req.ToolChoice),
+		normalizeTools(req.Tools, toolNames),
+		normalizeToolChoice(req.ToolChoice, toolNames),
 		reasoning,
 		serviceTier,
 		req.PreviousResponseID,
@@ -140,6 +143,7 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 	out.Input = payload.Input
 	out.Text = payload.Text
 	out.TupleSchema = payload.TupleSchema
+	out.ToolNameAliases = toolNames.aliases()
 	return out, nil
 }
 
@@ -149,7 +153,8 @@ func Compact(req openai.ResponsesCompactRequest, catalog ...*models.Catalog) (No
 		return NormalizedCompactRequest{}, err
 	}
 	reasoning = normalizeResponsesReasoning(req.Reasoning, reasoning)
-	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input)
+	toolNames := newToolNameMapper(toolNamesForResponses(nil, nil, req.Input))
+	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input, toolNames)
 	if err != nil {
 		return NormalizedCompactRequest{}, err
 	}
@@ -164,7 +169,8 @@ func Compact(req openai.ResponsesCompactRequest, catalog ...*models.Catalog) (No
 			Text:         payload.Text,
 			Reasoning:    reasoning,
 		},
-		TupleSchema: payload.TupleSchema,
+		TupleSchema:     payload.TupleSchema,
+		ToolNameAliases: toolNames.aliases(),
 	}
 	return out, nil
 }
@@ -190,7 +196,7 @@ func normalizeResponsesReasoning(explicit *openai.Reasoning, fallback *codex.Rea
 	return reasoning
 }
 
-func normalizeResponsesPayload(instructionsText string, textConfig *openai.ResponsesText, input openai.ResponsesInput) (normalizedResponsesPayload, error) {
+func normalizeResponsesPayload(instructionsText string, textConfig *openai.ResponsesText, input openai.ResponsesInput, toolNames *toolNameMapper) (normalizedResponsesPayload, error) {
 	var out normalizedResponsesPayload
 	var instructions []string
 	if text := strings.TrimSpace(instructionsText); text != "" {
@@ -210,7 +216,7 @@ func normalizeResponsesPayload(instructionsText string, textConfig *openai.Respo
 	}
 
 	for _, item := range input.Items {
-		if err := appendResponsesInputItem(&out.Input, &instructions, item); err != nil {
+		if err := appendResponsesInputItem(&out.Input, &instructions, toolNames, item); err != nil {
 			return normalizedResponsesPayload{}, err
 		}
 	}
@@ -235,7 +241,7 @@ func newNormalizedRequest(model string, modelExplicit bool, stream bool, tools [
 	}
 }
 
-func normalizeChatMessage(out *NormalizedRequest, instructions *[]string, toolCallTypes map[string]string, customToolNames map[string]bool, message openai.ChatMessage) error {
+func normalizeChatMessage(out *NormalizedRequest, instructions *[]string, toolCallTypes map[string]string, customToolNames map[string]bool, toolNames *toolNameMapper, message openai.ChatMessage) error {
 	switch message.Role {
 	case "system", "developer":
 		return appendInstructionText(instructions, message.Content)
@@ -247,21 +253,21 @@ func normalizeChatMessage(out *NormalizedRequest, instructions *[]string, toolCa
 			for _, call := range message.ToolCalls {
 				callType := normalizeChatToolCallType(call, customToolNames)
 				toolCallTypes[call.ID] = callType
-				out.Input = append(out.Input, chatToolCallInputItem(call, callType))
+				out.Input = append(out.Input, chatToolCallInputItem(call, callType, toolNames))
 			}
 			return nil
 		}
 		if message.FunctionCall != nil {
 			out.Input = append(out.Input, codex.InputItem{
 				Type:      "function_call",
-				Name:      message.FunctionCall.Name,
+				Name:      toolNames.shorten(message.FunctionCall.Name),
 				Arguments: message.FunctionCall.Arguments,
 			})
 			return nil
 		}
 		return appendRoleContentInput(&out.Input, message.Role, "", message.Content)
 	case "tool":
-		text, err := flattenContent(message.Content)
+		text, content, err := normalizeToolOutput(message.Content)
 		if err != nil {
 			return err
 		}
@@ -270,9 +276,10 @@ func normalizeChatMessage(out *NormalizedRequest, instructions *[]string, toolCa
 			itemType = "custom_tool_call_output"
 		}
 		out.Input = append(out.Input, codex.InputItem{
-			Type:       itemType,
-			CallID:     message.ToolCallID,
-			OutputText: text,
+			Type:          itemType,
+			CallID:        message.ToolCallID,
+			OutputText:    text,
+			OutputContent: content,
 		})
 		return nil
 	default:
@@ -291,12 +298,12 @@ func normalizeChatToolCallType(call openai.ToolCall, customToolNames map[string]
 	return callType
 }
 
-func chatToolCallInputItem(call openai.ToolCall, callType string) codex.InputItem {
+func chatToolCallInputItem(call openai.ToolCall, callType string, toolNames *toolNameMapper) codex.InputItem {
 	if callType != "custom" {
 		return codex.InputItem{
 			Type:      "function_call",
 			CallID:    call.ID,
-			Name:      call.Function.Name,
+			Name:      toolNames.shorten(call.Function.Name),
 			Arguments: call.Function.Arguments,
 		}
 	}
@@ -316,12 +323,12 @@ func chatToolCallInputItem(call openai.ToolCall, callType string) codex.InputIte
 	return codex.InputItem{
 		Type:   "custom_tool_call",
 		CallID: call.ID,
-		Name:   name,
+		Name:   toolNames.shorten(name),
 		Input:  input,
 	}
 }
 
-func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, item openai.ResponsesInputItem) error {
+func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, toolNames *toolNameMapper, item openai.ResponsesInputItem) error {
 	if item.Type == "" && (item.Role == "system" || item.Role == "developer") {
 		return appendInstructionText(instructions, item.Content)
 	}
@@ -337,14 +344,14 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, it
 		*out = append(*out, codex.InputItem{
 			Type:      "function_call",
 			CallID:    item.CallID,
-			Name:      item.Name,
+			Name:      toolNames.shorten(item.Name),
 			Arguments: item.Arguments,
 		})
 	case "custom_tool_call":
 		*out = append(*out, codex.InputItem{
 			Type:   "custom_tool_call",
 			CallID: item.CallID,
-			Name:   item.Name,
+			Name:   toolNames.shorten(item.Name),
 			Input:  item.Input,
 		})
 	case "function_call_output", "custom_tool_call_output":
@@ -426,6 +433,30 @@ func appendRoleContentInputIfPresent(out *NormalizedRequest, role string, conten
 	return nil
 }
 
+func normalizeToolOutput(content openai.MessageContent) (string, []codex.ContentPart, error) {
+	parts, err := normalizeContentPartsChecked(content)
+	if err != nil {
+		return "", nil, err
+	}
+	allText := true
+	for _, part := range parts {
+		if part.Type != "input_text" {
+			allText = false
+			break
+		}
+	}
+	if !allText {
+		return "", parts, nil
+	}
+	text := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part.Text) != "" {
+			text = append(text, part.Text)
+		}
+	}
+	return strings.Join(text, "\n"), nil, nil
+}
+
 func normalizeContentPartsChecked(parts openai.MessageContent) ([]codex.ContentPart, error) {
 	if len(parts) == 0 {
 		return nil, nil
@@ -443,25 +474,36 @@ func normalizeContentPartsChecked(parts openai.MessageContent) ([]codex.ContentP
 				Text: part.Text,
 			})
 		case contentPartImage:
-			if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" {
-				return nil, fmt.Errorf("image_url.url is required")
+			if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" && strings.TrimSpace(part.ImageURL.FileID) == "" {
+				return nil, fmt.Errorf("image_url.url or image_url.file_id is required")
 			}
 			out = append(out, codex.ContentPart{
 				Type:     "input_image",
 				ImageURL: strings.TrimSpace(part.ImageURL.URL),
-				Detail:   strings.TrimSpace(part.Detail),
+				FileID:   strings.TrimSpace(part.ImageURL.FileID),
+				Detail:   jsonutil.FirstNonEmpty(strings.TrimSpace(part.Detail), strings.TrimSpace(part.ImageURL.Detail)),
 			})
 		case contentPartFile:
-			if strings.TrimSpace(part.FileData) == "" && strings.TrimSpace(part.FileURL) == "" && strings.TrimSpace(part.FileID) == "" {
+			fileURL := strings.TrimSpace(part.FileURL)
+			fileData := strings.TrimSpace(part.FileData)
+			fileID := strings.TrimSpace(part.FileID)
+			filename := strings.TrimSpace(part.Filename)
+			if part.File != nil {
+				fileURL = jsonutil.FirstNonEmpty(fileURL, strings.TrimSpace(part.File.FileURL))
+				fileData = jsonutil.FirstNonEmpty(fileData, strings.TrimSpace(part.File.FileData))
+				fileID = jsonutil.FirstNonEmpty(fileID, strings.TrimSpace(part.File.FileID))
+				filename = jsonutil.FirstNonEmpty(filename, strings.TrimSpace(part.File.Filename))
+			}
+			if fileData == "" && fileURL == "" && fileID == "" {
 				return nil, fmt.Errorf("input_file requires file_data, file_url, or file_id")
 			}
 			out = append(out, codex.ContentPart{
 				Type:     "input_file",
 				Detail:   strings.TrimSpace(part.Detail),
-				FileURL:  strings.TrimSpace(part.FileURL),
-				FileData: strings.TrimSpace(part.FileData),
-				FileID:   strings.TrimSpace(part.FileID),
-				Filename: strings.TrimSpace(part.Filename),
+				FileURL:  fileURL,
+				FileData: fileData,
+				FileID:   fileID,
+				Filename: filename,
 			})
 		}
 	}
@@ -500,7 +542,7 @@ func classifyContentPartType(partType string) (string, contentPartKind, bool) {
 		return "reasoning_text", contentPartText, true
 	case "image_url", "input_image":
 		return "input_image", contentPartImage, true
-	case "input_file":
+	case "file", "input_file":
 		return "input_file", contentPartFile, true
 	default:
 		return "", 0, false

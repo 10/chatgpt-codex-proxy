@@ -99,6 +99,7 @@ type ContentPart struct {
 	Type     string         `json:"type"`
 	Text     string         `json:"text,omitempty"`
 	ImageURL *ImageURLValue `json:"image_url,omitempty"`
+	File     *FileValue     `json:"file,omitempty"`
 	Detail   string         `json:"detail,omitempty"`
 	FileURL  string         `json:"file_url,omitempty"`
 	FileData string         `json:"file_data,omitempty"`
@@ -107,7 +108,16 @@ type ContentPart struct {
 }
 
 type ImageURLValue struct {
-	URL string `json:"url"`
+	URL    string `json:"url"`
+	FileID string `json:"file_id,omitempty"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type FileValue struct {
+	FileURL  string `json:"file_url,omitempty"`
+	FileData string `json:"file_data,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
+	Filename string `json:"filename,omitempty"`
 }
 
 func (i *ImageURLValue) UnmarshalJSON(data []byte) error {

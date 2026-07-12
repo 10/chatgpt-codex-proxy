@@ -93,6 +93,7 @@ func (a *App) resolveCompactRequest(normalized translate.NormalizedCompactReques
 	if strings.TrimSpace(normalized.Model) == "" {
 		normalized.Model = record.Model
 	}
+	normalized.ToolNameAliases = translate.MergeToolNameAliases(normalized.ToolNameAliases, record.ToolNameAliases)
 
 	history := continuationInputItemsToCodex(record.InputHistory)
 	if len(history) > 0 {

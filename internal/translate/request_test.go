@@ -3,8 +3,10 @@ package translate
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
+	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/openai"
 )
 
@@ -775,6 +777,173 @@ func TestResponsesTranslationAcceptsInputFilePart(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsTranslationAcceptsCanonicalFilePart(t *testing.T) {
+	t.Parallel()
+
+	var request openai.ChatCompletionsRequest
+	err := json.Unmarshal([]byte(`{
+		"model":"gpt-5.4",
+		"messages":[{
+			"role":"user",
+			"content":[
+				{"type":"file","file":{"file_data":"data:text/plain;base64,SGVsbG8=","filename":"note.txt"}}
+			]
+		}]
+	}`), &request)
+	if err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	normalized, err := ChatCompletions(request)
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	parts := normalized.Input[0].Content
+	if len(parts) != 1 {
+		t.Fatalf("content = %#v, want one file part", parts)
+	}
+	if parts[0].Type != "input_file" || parts[0].FileData == "" || parts[0].Filename != "note.txt" {
+		t.Fatalf("file part = %#v", parts[0])
+	}
+}
+
+func TestChatCompletionsTranslationPreservesMultimodalToolOutput(t *testing.T) {
+	t.Parallel()
+
+	request := openai.ChatCompletionsRequest{
+		Model: "gpt-5.4",
+		Messages: []openai.ChatMessage{
+			{
+				Role: "assistant",
+				ToolCalls: []openai.ToolCall{{
+					ID:   "call_1",
+					Type: "function",
+					Function: openai.FunctionPayload{
+						Name:      "inspect_asset",
+						Arguments: `{}`,
+					},
+				}},
+			},
+			{
+				Role:       "tool",
+				ToolCallID: "call_1",
+				Content: openai.MessageContent{
+					{Type: "text", Text: "asset"},
+					{Type: "image_url", ImageURL: &openai.ImageURLValue{URL: "data:image/png;base64,aW1hZ2U="}},
+					{Type: "file", File: &openai.FileValue{FileData: "data:text/plain;base64,ZmlsZQ==", Filename: "asset.txt"}},
+				},
+			},
+		},
+	}
+
+	normalized, err := ChatCompletions(request)
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	if len(normalized.Input) != 2 {
+		t.Fatalf("input = %#v, want call and output", normalized.Input)
+	}
+	output := normalized.Input[1]
+	if output.Type != "function_call_output" || len(output.OutputContent) != 3 || output.OutputText != "" {
+		t.Fatalf("tool output = %#v", output)
+	}
+	if output.OutputContent[1].Type != "input_image" || output.OutputContent[2].Type != "input_file" {
+		t.Fatalf("tool output content = %#v", output.OutputContent)
+	}
+}
+
+func TestToolNamesAreShortenedConsistentlyAndRestored(t *testing.T) {
+	t.Parallel()
+
+	first := "mcp__filesystem__" + strings.Repeat("read_project_file_", 4)
+	second := "mcp__workspace__" + strings.Repeat("read_project_file_", 4)
+	choice, _ := json.Marshal(map[string]any{
+		"type":     "function",
+		"function": map[string]any{"name": second},
+	})
+	request := openai.ChatCompletionsRequest{
+		Model: "gpt-5.4",
+		Messages: []openai.ChatMessage{{
+			Role: "assistant",
+			ToolCalls: []openai.ToolCall{{
+				ID: "call_1", Type: "function",
+				Function: openai.FunctionPayload{Name: first, Arguments: `{}`},
+			}},
+		}},
+		Tools: []openai.ToolDefinition{
+			{Type: "function", Function: &openai.FunctionTool{Name: first, Parameters: map[string]any{"type": "object"}}},
+			{Type: "function", Function: &openai.FunctionTool{Name: second, Parameters: map[string]any{"type": "object"}}},
+		},
+		ToolChoice: choice,
+	}
+
+	normalized, err := ChatCompletions(request)
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	shortFirst := normalized.Tools[0].Name
+	shortSecond := normalized.Tools[1].Name
+	if len(shortFirst) > 64 || len(shortSecond) > 64 || shortFirst == shortSecond {
+		t.Fatalf("short names = %q, %q", shortFirst, shortSecond)
+	}
+	if normalized.Input[0].Name != shortFirst {
+		t.Fatalf("replayed call name = %q, want %q", normalized.Input[0].Name, shortFirst)
+	}
+	if string(normalized.ToolChoice) != `{"type":"function","name":"`+shortSecond+`"}` {
+		t.Fatalf("tool choice = %s", normalized.ToolChoice)
+	}
+	if normalized.ToolNameAliases[shortFirst] != first || normalized.ToolNameAliases[shortSecond] != second {
+		t.Fatalf("tool aliases = %#v", normalized.ToolNameAliases)
+	}
+
+	accumulator := NewAccumulator(normalized)
+	accumulator.Apply(&codex.StreamEvent{
+		Type: "response.output_item.added",
+		Raw: map[string]any{
+			"output_index": 0,
+			"item": map[string]any{
+				"id": "fc_1", "call_id": "call_2", "type": "function_call",
+				"name": shortFirst, "arguments": `{}`, "status": "in_progress",
+			},
+		},
+	})
+	if accumulator.ToolCalls[0].Name != first {
+		t.Fatalf("restored response tool name = %q, want %q", accumulator.ToolCalls[0].Name, first)
+	}
+}
+
+func TestResponsesShortensCustomToolNameAndChoice(t *testing.T) {
+	t.Parallel()
+
+	name := "custom_tool_with_a_name_that_is_deliberately_longer_than_sixty_four_characters_for_codex"
+	choice, _ := json.Marshal(map[string]any{"type": "custom", "name": name})
+	normalized, err := Responses(openai.ResponsesRequest{
+		Model: "gpt-5.4",
+		Input: openai.ResponsesInput{Items: []openai.ResponsesInputItem{{
+			Type: "custom_tool_call", CallID: "call_1", Name: name, Input: "input",
+		}}},
+		Tools:      []openai.ToolDefinition{{Type: "custom", Name: name}},
+		ToolChoice: choice,
+	})
+	if err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
+
+	shortName := normalized.Tools[0].Name
+	if len(shortName) > 64 || shortName == name {
+		t.Fatalf("short name = %q", shortName)
+	}
+	if normalized.Input[0].Name != shortName {
+		t.Fatalf("input name = %q, want %q", normalized.Input[0].Name, shortName)
+	}
+	if string(normalized.ToolChoice) != `{"type":"custom","name":"`+shortName+`"}` {
+		t.Fatalf("tool choice = %s", normalized.ToolChoice)
+	}
+	if normalized.ToolNameAliases[shortName] != name {
+		t.Fatalf("tool aliases = %#v", normalized.ToolNameAliases)
+	}
+}
+
 func TestResponsesTranslationAcceptsReasoningItemReplay(t *testing.T) {
 	t.Parallel()
 
@@ -869,8 +1038,8 @@ func TestChatCompletionsTranslationRejectsInvalidToolCallContent(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected invalid tool call content error")
 	}
-	if got := err.Error(); got != "image_url.url is required" {
-		t.Fatalf("error = %q, want image_url.url is required", got)
+	if got := err.Error(); got != "image_url.url or image_url.file_id is required" {
+		t.Fatalf("error = %q, want image_url URL or file ID requirement", got)
 	}
 }
 

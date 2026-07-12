@@ -45,6 +45,8 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 		}
 		resolution.PreferredAccountID = record.AccountID
 		resolution.TurnState = strings.TrimSpace(record.TurnState)
+		resolution.Request.ToolNameAliases = translate.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
+		resolution.Original.ToolNameAliases = translate.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
 		resolution.ExplicitPrevious = true
 		return resolution, nil
 	}
@@ -78,6 +80,8 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 		resolution.Original.Model = record.Model
 		resolution.PreferredAccountID = record.AccountID
 		resolution.TurnState = strings.TrimSpace(record.TurnState)
+		resolution.Request.ToolNameAliases = translate.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
+		resolution.Original.ToolNameAliases = translate.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
 		resolution.ImplicitResume = true
 		return resolution, nil
 	}
@@ -140,6 +144,8 @@ func (a *App) resolveImplicitResumeFallback(resolution sessionResolution, exclud
 		resolution.Original.Model = record.Model
 		resolution.PreferredAccountID = record.AccountID
 		resolution.TurnState = strings.TrimSpace(record.TurnState)
+		resolution.Request.ToolNameAliases = translate.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
+		resolution.Original.ToolNameAliases = translate.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
 		resolution.ImplicitResume = true
 		if key := strings.TrimSpace(record.ConversationKey); key != "" {
 			resolution.ConversationKey = key

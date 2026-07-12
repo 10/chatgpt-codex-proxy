@@ -295,7 +295,7 @@ func (a *Accumulator) captureOutputItem(item map[string]any, explicitIndex int) 
 			return
 		}
 		if name := jsonutil.StringValue(item["name"]); name != "" {
-			state.Name = name
+			state.Name = RestoreToolName(name, a.Normalized.ToolNameAliases)
 		}
 		switch itemType {
 		case "custom_tool_call":

@@ -19,7 +19,7 @@ func (a *Accumulator) applyToolArgumentEvent(event *codex.StreamEvent) {
 		return
 	}
 	if name := jsonutil.StringValue(event.Raw["name"]); name != "" {
-		state.Name = name
+		state.Name = RestoreToolName(name, a.Normalized.ToolNameAliases)
 	}
 
 	switch event.Type {

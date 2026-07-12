@@ -29,7 +29,7 @@ func continuationOutputHistory(accumulator *translate.Accumulator) []accounts.Co
 	}
 	history := make([]accounts.ContinuationInputItem, 0, len(output))
 	for _, item := range output {
-		converted, ok := continuationInputItemFromResponseOutput(item)
+		converted, ok := continuationInputItemFromResponseOutput(item, accumulator.Normalized.ToolNameAliases)
 		if ok {
 			history = append(history, converted)
 		}
@@ -37,7 +37,7 @@ func continuationOutputHistory(accumulator *translate.Accumulator) []accounts.Co
 	return history
 }
 
-func continuationInputItemFromResponseOutput(item map[string]any) (accounts.ContinuationInputItem, bool) {
+func continuationInputItemFromResponseOutput(item map[string]any, toolNameAliases map[string]string) (accounts.ContinuationInputItem, bool) {
 	if len(item) == 0 {
 		return accounts.ContinuationInputItem{}, false
 	}
@@ -57,6 +57,7 @@ func continuationInputItemFromResponseOutput(item map[string]any) (accounts.Cont
 	out.Summary = continuationSummaryPartsFromMaps(jsonutil.SliceOfMaps(item["summary"]))
 	out.Content = continuationContentPartsFromMaps(jsonutil.SliceOfMaps(item["content"]))
 	out.OutputContent = continuationContentPartsFromMaps(jsonutil.SliceOfMaps(item["output"]))
+	out.Name = translate.UpstreamToolName(out.Name, toolNameAliases)
 	if out.Type == "message" {
 		if out.Role == "" {
 			out.Role = "assistant"

@@ -72,6 +72,29 @@ func TestResolveSessionImplicitResumeTrimsHistoryAndSetsContinuationState(t *tes
 	}
 }
 
+func TestResolveSessionCarriesToolNameAliasesAcrossExplicitContinuation(t *testing.T) {
+	t.Parallel()
+
+	app := &App{continuations: accounts.NewContinuationManager(time.Minute)}
+	app.continuations.Put(accounts.ContinuationRecord{
+		ResponseID:      "resp_long_tool",
+		AccountID:       "acct_1",
+		Model:           "gpt-5.4",
+		ToolNameAliases: map[string]string{"mcp__short": "mcp__original_long_tool_name"},
+	})
+
+	resolution, err := app.resolveSession(translate.NormalizedRequest{Request: codex.Request{
+		Model:              "gpt-5.4",
+		PreviousResponseID: "resp_long_tool",
+	}})
+	if err != nil {
+		t.Fatalf("resolveSession() error = %v", err)
+	}
+	if resolution.Request.ToolNameAliases["mcp__short"] != "mcp__original_long_tool_name" {
+		t.Fatalf("tool aliases = %#v", resolution.Request.ToolNameAliases)
+	}
+}
+
 func TestResolveSessionSkipsImplicitResumeForUnknownToolOutputCallID(t *testing.T) {
 	t.Parallel()
 

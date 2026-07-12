@@ -200,7 +200,7 @@ Important notes:
 - `/v1/chat/completions` also accepts a Responses-shaped body when `messages` is omitted.
 - `/v1/responses/compact` follows the public OpenAI contract and returns `object: "response.compaction"` instead of raw Codex JSON.
 - `/v1/responses/compact` supports explicit `previous_response_id` by expanding locally stored continuation history before calling the private compact backend.
-- Compact requests currently support the same text, image, file, reasoning, tool-call, tool-output, and compaction input items used elsewhere in the proxy. Audio input parts are rejected with `unsupported_content_part`.
+- Compact requests currently support the same text, image, file, reasoning, tool-call, tool-output, and compaction input items used elsewhere in the proxy. Audio input is rejected locally because the current Codex upstream does not accept `input_audio` or audio MIME types as files.
 - Image requests default to `gpt-image-2`. The image model is sent to Codex's `image_generation` tool while the proxy resolves a route-valid text model for the enclosing Responses request.
 - Image responses default to `b64_json`. `response_format: "url"` returns a data URL because Codex returns image bytes rather than a hosted URL.
 - Image options are forwarded rather than emulated. The current Codex `gpt-image-2-codex` backend rejects `input_fidelity`, and it may report a different output size or partial-image count than requested.

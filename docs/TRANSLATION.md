@@ -175,13 +175,15 @@ OpenAI content parts are normalized into Codex content parts as follows:
 - `output_text` -> `output_text`
 - `reasoning_text` -> `reasoning_text`
 - `image_url`, `input_image` -> `input_image`
-- `input_file` -> `input_file`
+- `file`, `input_file` -> `input_file`
 
 `input_file` must include at least one of:
 
 - `file_data`
 - `file_url`
 - `file_id`
+
+Chat-style `file` parts may put those fields under a nested `file` object. Audio input is rejected locally because the current Codex upstream rejects both `input_audio` and audio MIME types supplied as files.
 
 Unsupported content parts return `400` with an `unsupported_content_part` error message.
 
@@ -192,7 +194,7 @@ Chat Completions messages are converted like this:
 - `user` and `assistant` messages without tool calls become Codex `InputItem{Role, Content}`.
 - `assistant` or `user` messages with `tool_calls` first emit the role/content item if content exists, then emit one input item per tool call.
 - Legacy assistant `function_call` becomes `InputItem{Type: "function_call", Name, Arguments}`.
-- `tool` messages become tool output items.
+- `tool` messages become tool output items. Text-only output remains a string; output containing images or files is preserved as structured content.
 
 Tool outputs are typed using the earlier tool-call type seen in the same request:
 
@@ -233,6 +235,7 @@ Tool definitions are normalized into Codex tools like this:
 - `web_search_preview` is rewritten to `web_search`.
 - `web_search` stays `web_search`.
 - Custom tools and unknown tool types are passed through as-is.
+- Tool names longer than 64 characters are shortened deterministically before the upstream request and restored in Chat Completions and Responses output. Colliding shortened names receive numeric suffixes.
 
 Legacy Chat Completions `functions` are converted into modern `tools` only when `tools` is empty.
 

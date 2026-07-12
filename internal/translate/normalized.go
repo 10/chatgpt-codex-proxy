@@ -6,8 +6,9 @@ import "chatgpt-codex-proxy/internal/codex"
 // metadata that the proxy needs while mapping OpenAI payloads.
 type NormalizedRequest struct {
 	codex.Request
-	ModelExplicit bool
-	TupleSchema   map[string]any
+	ModelExplicit   bool
+	TupleSchema     map[string]any
+	ToolNameAliases map[string]string
 }
 
 func (n NormalizedRequest) ToCodexWSCreatePayload() map[string]any {
@@ -46,4 +47,5 @@ type NormalizedCompactRequest struct {
 	ModelExplicit      bool
 	PreviousResponseID string
 	TupleSchema        map[string]any
+	ToolNameAliases    map[string]string
 }

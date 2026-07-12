@@ -572,6 +572,7 @@ func (a *App) rememberContinuation(accountID string, accumulator *translate.Accu
 		Model:           jsonutil.FirstNonEmpty(accumulator.Model, accumulator.Normalized.Model),
 		InputHistory:    continuationInputHistory(accumulator),
 		FunctionCallIDs: functionCallIDs(accumulator),
+		ToolNameAliases: accumulator.Normalized.ToolNameAliases,
 	})
 }
 
