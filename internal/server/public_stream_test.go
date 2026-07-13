@@ -799,7 +799,7 @@ func TestContinuationInputHistoryKeepsShortToolNameForUpstreamReplay(t *testing.
 	}
 }
 
-func TestClassifyUpstreamErrorBansGeneric403ButNotCloudflare403(t *testing.T) {
+func TestClassifyUpstreamErrorCoolsDownGeneric403ButNotCloudflare403(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC()
@@ -839,8 +839,8 @@ func TestClassifyUpstreamErrorBansGeneric403ButNotCloudflare403(t *testing.T) {
 		StatusCode: http.StatusForbidden,
 		Body:       `{"error":"access denied"}`,
 	})
-	if status != http.StatusForbidden || code != "account_banned" {
-		t.Fatalf("generic 403 = (%d, %q), want (403, account_banned)", status, code)
+	if status != http.StatusForbidden || code != "upstream_error" {
+		t.Fatalf("generic 403 = (%d, %q), want (403, upstream_error)", status, code)
 	}
 
 	status, code, _ = app.classifyUpstreamError("acct_cloudflare_403", &codex.UpstreamError{
@@ -853,8 +853,11 @@ func TestClassifyUpstreamErrorBansGeneric403ButNotCloudflare403(t *testing.T) {
 	}
 
 	generic := mustGetAccount(t, accountsSvc, "acct_generic_403")
-	if generic.Status != accounts.StatusBanned {
-		t.Fatalf("generic status = %q, want banned", generic.Status)
+	if generic.Status != accounts.StatusActive {
+		t.Fatalf("generic status = %q, want active", generic.Status)
+	}
+	if generic.CooldownUntil == nil || !generic.CooldownUntil.After(now) {
+		t.Fatalf("generic cooldown = %v, want future cooldown", generic.CooldownUntil)
 	}
 	cloudflare := mustGetAccount(t, accountsSvc, "acct_cloudflare_403")
 	if cloudflare.Status != accounts.StatusActive {

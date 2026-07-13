@@ -606,12 +606,14 @@ Unknown or expired continuation IDs return:
 Upstream failures are classified into OpenAI-style proxy errors:
 
 - upstream `401` or auth-like error code -> `401`, `upstream_unauthorized`
-- upstream `403` that looks like account deactivation -> `403`, `account_banned`
+- upstream `403` -> `403`, `upstream_error`; generic access denials temporarily cool down the account
 - upstream `402` or quota-like error code -> `402`, `quota_exhausted`
 - upstream `429` or rate-limit-like error code -> `429`, `rate_limited`
 - other upstream failures -> clamped upstream status, `upstream_error`
 
 During streaming, classified errors are sent as SSE error payloads instead of raw upstream error objects.
+
+For requests without explicit continuation state, retryable upstream failures (`401`, `402`, `403`, `408`, `429`, and transient `5xx` statuses) fail over to another eligible account before client-visible output begins. Each account is attempted at most once. Non-streaming responses remain retryable until the full upstream response has been buffered; streaming responses stop being retryable after the first public event is ready for delivery.
 
 ## State Recorded From Responses
 

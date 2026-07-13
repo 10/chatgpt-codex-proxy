@@ -1,6 +1,8 @@
 package server
 
 import (
+	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,8 +17,188 @@ import (
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
 	"chatgpt-codex-proxy/internal/middleware"
+	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/translate"
 )
+
+func newFailoverTestApp(t *testing.T) *App {
+	t.Helper()
+	now := time.Now().UTC()
+	accountsSvc := newServerAccounts(t,
+		&accounts.Record{ID: "acct-a", AccountID: "upstream-a", Status: accounts.StatusActive, Token: accounts.OAuthToken{AccessToken: "token-a", ExpiresAt: now.Add(time.Hour)}, CreatedAt: now, UpdatedAt: now},
+		&accounts.Record{ID: "acct-b", AccountID: "upstream-b", Status: accounts.StatusActive, Token: accounts.OAuthToken{AccessToken: "token-b", ExpiresAt: now.Add(time.Hour)}, CreatedAt: now, UpdatedAt: now},
+	)
+	cfg := config.Config{RefreshSkew: time.Minute, DefaultModel: "gpt-5.4", CodexBaseURL: "https://example.invalid"}
+	catalog := models.NewCatalog(models.BootstrapEntries())
+	return &App{
+		cfg:           cfg,
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		accounts:      accountsSvc,
+		accountMgr:    codex.NewAccountManager(cfg, accountsSvc, nil, nil, catalog),
+		continuations: accounts.NewContinuationManager(time.Minute),
+		models:        catalog,
+	}
+}
+
+func TestOpenStreamFailsOverToAnotherAccount(t *testing.T) {
+	t.Parallel()
+
+	var attempts []string
+	app := newFailoverTestApp(t)
+	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		attempts = append(attempts, account.ID)
+		if account.ID == "acct-a" {
+			return nil, &codex.UpstreamError{Op: "codex response", StatusCode: http.StatusTooManyRequests, RetryAfter: 30}
+		}
+		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed"}}}, nil
+	}
+
+	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Stream: true}, ModelExplicit: true}})
+	if err != nil {
+		t.Fatalf("openStream() error = %v", err)
+	}
+	defer stream.Close()
+	if account.ID != "acct-b" {
+		t.Fatalf("account = %q, want acct-b", account.ID)
+	}
+	if len(attempts) != 2 || attempts[0] != "acct-a" || attempts[1] != "acct-b" {
+		t.Fatalf("attempts = %#v, want acct-a then acct-b", attempts)
+	}
+}
+
+func TestOpenStreamFailsOverWhenFirstEventIsRetryableFailure(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		if account.ID == "acct-a" {
+			return &fakeEventStream{events: []*codex.StreamEvent{{
+				Type: "response.failed",
+				Raw: map[string]any{"response": map[string]any{"error": map[string]any{
+					"code": "rate_limited", "message": "try another account",
+				}}},
+			}}}, nil
+		}
+		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.created", Raw: map[string]any{"type": "response.created"}}}}, nil
+	}
+
+	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Stream: true}, ModelExplicit: true}})
+	if err != nil {
+		t.Fatalf("openStream() error = %v", err)
+	}
+	defer stream.Close()
+	if account.ID != "acct-b" {
+		t.Fatalf("account = %q, want acct-b", account.ID)
+	}
+	event, err := stream.NextEvent()
+	if err != nil {
+		t.Fatalf("NextEvent() error = %v", err)
+	}
+	if event.Type != "response.created" {
+		t.Fatalf("event type = %q, want response.created", event.Type)
+	}
+}
+
+func TestResponsesFailsOverWhenNonStreamingResponseFailsAfterFirstEvent(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	var attempts []string
+	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		attempts = append(attempts, account.ID)
+		if account.ID == "acct-a" {
+			return &fakeEventStream{events: []*codex.StreamEvent{
+				{Type: "response.created", Raw: map[string]any{"type": "response.created"}},
+				{Type: "response.failed", Raw: map[string]any{"response": map[string]any{"error": map[string]any{"code": "rate_limited", "message": "try another account"}}}},
+			}}, nil
+		}
+		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_1", "status": "completed"}}}}}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.4","input":"hello","stream":false}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	app.handleResponses(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if response["id"] != "resp_1" || response["status"] != "completed" {
+		t.Fatalf("response = %#v, want completed resp_1", response)
+	}
+	if len(attempts) != 2 || attempts[0] != "acct-a" || attempts[1] != "acct-b" {
+		t.Fatalf("attempts = %#v, want acct-a then acct-b", attempts)
+	}
+}
+
+func TestOpenStreamAttemptsEachAccountOnlyOnce(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	var attempts []string
+	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		attempts = append(attempts, account.ID)
+		return nil, &codex.UpstreamError{Op: "codex response", StatusCode: http.StatusServiceUnavailable}
+	}
+
+	account, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}, ModelExplicit: true}})
+	if err == nil {
+		t.Fatal("openStream() error = nil, want upstream error")
+	}
+	if account.ID != "acct-b" {
+		t.Fatalf("account = %q, want final attempted account acct-b", account.ID)
+	}
+	if len(attempts) != 2 || attempts[0] != "acct-a" || attempts[1] != "acct-b" {
+		t.Fatalf("attempts = %#v, want each account once", attempts)
+	}
+}
+
+func TestOpenStreamDoesNotFailOverNonRetryableRequestError(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	var attempts []string
+	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		attempts = append(attempts, account.ID)
+		return nil, &codex.UpstreamError{Op: "codex response", StatusCode: http.StatusBadRequest}
+	}
+
+	_, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}, ModelExplicit: true}})
+	if err == nil {
+		t.Fatal("openStream() error = nil, want upstream error")
+	}
+	if len(attempts) != 1 || attempts[0] != "acct-a" {
+		t.Fatalf("attempts = %#v, want only acct-a", attempts)
+	}
+}
+
+func TestOpenStreamKeepsExplicitContinuationPinned(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	connects := 0
+	app.wsConnector = func(_ context.Context, _ string, _ http.Header, _ any) (responsesWebSocketStream, error) {
+		connects++
+		return nil, &codex.UpstreamError{Op: "codex websocket", StatusCode: http.StatusServiceUnavailable}
+	}
+
+	account, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{
+		Request:            translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", PreviousResponseID: "resp_1"}, ModelExplicit: true},
+		PreferredAccountID: "acct-a",
+		ExplicitPrevious:   true,
+	})
+	if err == nil {
+		t.Fatal("openStream() error = nil, want upstream error")
+	}
+	if account.ID != "acct-a" || connects != 1 {
+		t.Fatalf("account = %q, connects = %d; want pinned acct-a and one attempt", account.ID, connects)
+	}
+}
 
 func TestObserveQuotaSnapshotUpdatesCachedQuota(t *testing.T) {
 	t.Parallel()

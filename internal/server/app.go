@@ -29,6 +29,7 @@ type App struct {
 	deviceLogins  *admin.DeviceLoginService
 	accountMgr    *codex.AccountManager
 	httpClient    *codex.HTTPClient
+	httpStream    func(context.Context, accounts.Record, codex.Request, string) (eventStream, error)
 	compactCaller func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
 	imageOpener   func(*gin.Context, string, translate.NormalizedRequest) (openedRequest, bool)
 	wsConnector   responsesWebSocketConnector
@@ -160,8 +161,7 @@ func (a *App) classifyUpstreamError(accountID string, err error) (int, string, s
 			return http.StatusUnauthorized, "upstream_unauthorized", "upstream account unauthorized"
 		case http.StatusForbidden:
 			if !looksLikeCloudflareBlock(text) {
-				a.markAccountError(accountID, accounts.StatusBanned, err)
-				return http.StatusForbidden, "account_banned", "upstream account banned or deactivated"
+				a.setAccountCooldown(accountID, fallbackUntil(time.Now().UTC(), accounts.DefaultRateLimitFallback), err)
 			}
 		case http.StatusPaymentRequired:
 			a.setAccountCooldown(accountID, a.quotaCooldownUntil(accountID, time.Now().UTC()), err)

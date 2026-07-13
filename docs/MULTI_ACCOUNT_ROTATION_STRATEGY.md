@@ -422,7 +422,7 @@ When `ObserveQuota` receives a fresh quota snapshot and the snapshot no longer b
 
 This lets the proxy recover early if the upstream quota cache proves the account is healthy again.
 
-## Permanent Failure Handling
+## Failure Handling
 
 Some failures are not temporary.
 
@@ -436,13 +436,14 @@ When the proxy classifies upstream failure as `401`:
 
 If the failure looks like a generic upstream access denial:
 
-- the account is marked `banned`
+- the account remains `active`
+- the account receives a temporary cooldown
 
 If the 403 looks like a Cloudflare-style interstitial or challenge:
 
-- the proxy does not mark the account banned automatically
+- the proxy does not change permanent account status or set an account cooldown automatically
 
-This distinction prevents a transient bot-check page from permanently poisoning the account state.
+Neither form permanently poisons the account state.
 
 ## Manual Admin Overrides
 
@@ -560,8 +561,8 @@ Request flow:
 2. Upstream returns `429`
 3. Proxy sets `acct_b.cooldown_until`
 4. `acct_b` stays `active`
-5. The next request skips `acct_b`
-6. `acct_a` is used
+5. The same request retries on `acct_a` before any client-visible output
+6. Later requests skip `acct_b` until its cooldown clears
 
 ### Example C: Code review budget exhausted
 
@@ -589,9 +590,9 @@ Later the client sends:
 Behavior:
 
 1. The proxy resolves the continuation state
-2. It prefers `acct_b`
+2. It requires `acct_b` so upstream turn state is not replayed on a different account
 3. If `acct_b` is still eligible, it uses `acct_b`
-4. If `acct_b` is now in cooldown or otherwise ineligible, it falls back to the configured strategy
+4. If `acct_b` is now in cooldown or otherwise ineligible, the request fails with `continuation_account_unavailable`
 
 ## Practical Mental Model
 
@@ -601,7 +602,7 @@ If you need a short way to think about the system, use this:
 - `cooldown_until` decides whether the account is temporarily parked
 - `cached_quota` decides whether the account appears exhausted and how `least_used` ranks it
 - `sticky` only remembers the last successful healthy account in memory
-- continuations can prefer a specific account, but only if it is still eligible
+- explicit continuations remain pinned to their original account
 
 ## Summary
 
@@ -613,7 +614,8 @@ The current rotation system is deliberately small and predictable:
 - No local usage counters
 - One transient cooldown mechanism
 - One in-memory sticky preference
-- Continuations prefer their original account when possible
+- Safe in-request failover before client-visible output
+- Explicit continuations require their original account
 
 If you want to understand why a specific request chose a specific account, the right questions are:
 

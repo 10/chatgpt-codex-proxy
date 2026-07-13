@@ -47,6 +47,23 @@ type openedRequest struct {
 	Stream     eventStream
 }
 
+type bufferedEventStream struct {
+	events []*codex.StreamEvent
+	stream eventStream
+}
+
+func (s *bufferedEventStream) NextEvent() (*codex.StreamEvent, error) {
+	if len(s.events) > 0 {
+		event := s.events[0]
+		s.events = s.events[1:]
+		return event, nil
+	}
+	return s.stream.NextEvent()
+}
+
+func (s *bufferedEventStream) Close() error         { return s.stream.Close() }
+func (s *bufferedEventStream) Headers() http.Header { return s.stream.Headers() }
+
 func (a *App) handleChatCompletions(c *gin.Context) {
 	a.handlePublicRequest(
 		c,
@@ -151,7 +168,7 @@ func (a *App) resolveAndOpenRequest(c *gin.Context, endpoint string, normalized 
 
 func (a *App) openStream(c *gin.Context, ctx context.Context, endpoint string, resolution *sessionResolution) (accounts.Record, eventStream, *accounts.QuotaSnapshot, error) {
 	if resolution.Request.PreviousResponseID != "" {
-		account, stream, quota, err := a.openWSStream(c, ctx, endpoint, resolution)
+		account, stream, quota, err := a.openWSStream(c, ctx, endpoint, resolution, nil)
 		if err == nil || !resolution.ImplicitResume {
 			return account, stream, quota, err
 		}
@@ -160,12 +177,95 @@ func (a *App) openStream(c *gin.Context, ctx context.Context, endpoint string, r
 		fallback.PreferredAccountID = ""
 		fallback.TurnState = ""
 		fallback.ImplicitResume = false
-		return a.openHTTPStream(c, ctx, endpoint, &fallback)
+		return a.openStreamWithFailover(c, ctx, endpoint, &fallback, a.openHTTPStream)
 	}
 	if requestUsesHostedWebSearch(resolution.Request) {
-		return a.openWSStream(c, ctx, endpoint, resolution)
+		return a.openStreamWithFailover(c, ctx, endpoint, resolution, a.openWSStream)
 	}
-	return a.openHTTPStream(c, ctx, endpoint, resolution)
+	return a.openStreamWithFailover(c, ctx, endpoint, resolution, a.openHTTPStream)
+}
+
+type streamOpenAttempt func(*gin.Context, context.Context, string, *sessionResolution, map[string]struct{}) (accounts.Record, eventStream, *accounts.QuotaSnapshot, error)
+
+func (a *App) openStreamWithFailover(c *gin.Context, ctx context.Context, endpoint string, resolution *sessionResolution, open streamOpenAttempt) (accounts.Record, eventStream, *accounts.QuotaSnapshot, error) {
+	attempted := make(map[string]struct{})
+	var lastAccount accounts.Record
+	var lastErr error
+	for {
+		account, stream, quota, err := open(c, ctx, endpoint, resolution, attempted)
+		if err == nil {
+			prepared, prepareErr := a.prepareStreamForDelivery(account, stream, resolution.Request.Stream)
+			if prepareErr == nil {
+				return account, prepared, quota, nil
+			}
+			_ = stream.Close()
+			err = prepareErr
+		}
+		if account.ID == "" {
+			if lastErr != nil && strings.Contains(strings.ToLower(err.Error()), "no active accounts") {
+				return lastAccount, nil, nil, lastErr
+			}
+			return account, nil, nil, err
+		}
+		if !shouldFailoverRequest(err) {
+			return account, nil, nil, err
+		}
+
+		attempted[account.ID] = struct{}{}
+		lastAccount = account
+		lastErr = err
+		a.classifyUpstreamError(account.ID, err)
+	}
+}
+
+func (a *App) prepareStreamForDelivery(account accounts.Record, stream eventStream, streaming bool) (eventStream, error) {
+	events := make([]*codex.StreamEvent, 0, 1)
+	for {
+		event, err := stream.NextEvent()
+		if err != nil {
+			if err == io.EOF {
+				return nil, errIncompleteResponse
+			}
+			return nil, err
+		}
+		if event == nil {
+			return nil, errIncompleteResponse
+		}
+		if a.observeQuotaEvent(account, event) {
+			continue
+		}
+		if err := upstreamEventError(event); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+		if streaming || event.Type == "response.completed" {
+			return &bufferedEventStream{events: events, stream: stream}, nil
+		}
+	}
+}
+
+func shouldFailoverRequest(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var upstreamErr *codex.UpstreamError
+	if !errors.As(err, &upstreamErr) {
+		return true
+	}
+	switch upstreamErr.StatusCode {
+	case http.StatusUnauthorized,
+		http.StatusPaymentRequired,
+		http.StatusForbidden,
+		http.StatusRequestTimeout,
+		http.StatusTooManyRequests,
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
 }
 
 func requestUsesHostedWebSearch(request translate.NormalizedRequest) bool {
@@ -177,24 +277,29 @@ func requestUsesHostedWebSearch(request translate.NormalizedRequest) bool {
 	return false
 }
 
-func (a *App) openHTTPStream(c *gin.Context, ctx context.Context, endpoint string, resolution *sessionResolution) (accounts.Record, eventStream, *accounts.QuotaSnapshot, error) {
-	account, err := a.acquireAccountForResolution(ctx, resolution)
+func (a *App) openHTTPStream(c *gin.Context, ctx context.Context, endpoint string, resolution *sessionResolution, attempted map[string]struct{}) (accounts.Record, eventStream, *accounts.QuotaSnapshot, error) {
+	account, err := a.acquireAccountForResolutionExcluding(ctx, resolution, attempted)
 	if err != nil {
-		return accounts.Record{}, nil, nil, err
+		return account, nil, nil, err
 	}
 	request := resolution.Request.Request
 	a.logUpstreamPayload(c, endpoint, "http", account.ID, codex.StreamRequestPayload(request))
-	stream, err := a.httpClient.StreamResponse(ctx, account, request, resolution.TurnState)
+	var stream eventStream
+	if a.httpStream != nil {
+		stream, err = a.httpStream(ctx, account, request, resolution.TurnState)
+	} else {
+		stream, err = a.httpClient.StreamResponse(ctx, account, request, resolution.TurnState)
+	}
 	if err != nil {
 		return account, nil, nil, err
 	}
 	return account, stream, codex.ParseQuotaFromHeaders(stream.Headers()), nil
 }
 
-func (a *App) openWSStream(c *gin.Context, ctx context.Context, endpoint string, resolution *sessionResolution) (accounts.Record, eventStream, *accounts.QuotaSnapshot, error) {
-	account, err := a.acquireAccountForResolution(ctx, resolution)
+func (a *App) openWSStream(c *gin.Context, ctx context.Context, endpoint string, resolution *sessionResolution, attempted map[string]struct{}) (accounts.Record, eventStream, *accounts.QuotaSnapshot, error) {
+	account, err := a.acquireAccountForResolutionExcluding(ctx, resolution, attempted)
 	if err != nil {
-		return accounts.Record{}, nil, nil, err
+		return account, nil, nil, err
 	}
 	headers := codex.BuildHeaders(account.Token.AccessToken, codex.HeaderOptions{
 		AccountID:   account.AccountID,
@@ -670,6 +775,10 @@ func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID
 }
 
 func (a *App) acquireAccountForResolution(ctx context.Context, resolution *sessionResolution) (accounts.Record, error) {
+	return a.acquireAccountForResolutionExcluding(ctx, resolution, nil)
+}
+
+func (a *App) acquireAccountForResolutionExcluding(ctx context.Context, resolution *sessionResolution, attempted map[string]struct{}) (accounts.Record, error) {
 	if resolution == nil {
 		return accounts.Record{}, errContinuationAccountUnavailable
 	}
@@ -687,8 +796,24 @@ func (a *App) acquireAccountForResolution(ctx context.Context, resolution *sessi
 		}
 		return record, nil
 	}
+	acquireReady := func(modelID string) (accounts.Record, error) {
+		record, err := a.accounts.AcquireMatching(resolution.PreferredAccountID, func(record accounts.Record) bool {
+			if _, alreadyAttempted := attempted[record.ID]; alreadyAttempted {
+				return false
+			}
+			return strings.TrimSpace(modelID) == "" || a.modelCatalog().SupportsRecord(record, modelID)
+		})
+		if err != nil {
+			return accounts.Record{}, err
+		}
+		ready, err := a.accountMgr.EnsureReady(ctx, record.ID)
+		if err != nil {
+			return record, err
+		}
+		return ready, nil
+	}
 	if !resolution.Request.ModelExplicit && strings.TrimSpace(resolution.Request.Model) == "" {
-		record, err := a.accountMgr.AcquireReady(ctx, resolution.PreferredAccountID)
+		record, err := acquireReady("")
 		if err != nil {
 			return accounts.Record{}, err
 		}
@@ -705,7 +830,7 @@ func (a *App) acquireAccountForResolution(ctx context.Context, resolution *sessi
 		}
 		return record, nil
 	}
-	return a.accountMgr.AcquireReadyForModel(ctx, resolution.PreferredAccountID, resolution.Request.Model)
+	return acquireReady(resolution.Request.Model)
 }
 
 func (a *App) setRequestAccount(c *gin.Context, account accounts.Record) {
