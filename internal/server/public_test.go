@@ -200,6 +200,43 @@ func TestOpenStreamKeepsExplicitContinuationPinned(t *testing.T) {
 	}
 }
 
+func TestOpenStreamReplaysExplicitHTTPContinuation(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	var upstreamRequest codex.Request
+	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
+		upstreamRequest = request
+		return &fakeEventStream{events: []*codex.StreamEvent{{
+			Type: "response.completed",
+			Raw:  map[string]any{"response": map[string]any{"id": "resp_2", "status": "completed"}},
+		}}}, nil
+	}
+
+	resolution := sessionResolution{
+		Request: translate.NormalizedRequest{Request: codex.Request{
+			Model: "gpt-5.4", PreviousResponseID: "resp_1", Input: []codex.InputItem{userText("second")},
+		}, ModelExplicit: true},
+		Original: translate.NormalizedRequest{Request: codex.Request{
+			Model: "gpt-5.4", Input: []codex.InputItem{userText("first"), assistantText("first answer"), userText("second")},
+		}, ModelExplicit: true},
+		PreferredAccountID: "acct-a",
+		ExplicitPrevious:   true,
+		ReplayAvailable:    true,
+	}
+	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &resolution)
+	if err != nil {
+		t.Fatalf("openStream() error = %v", err)
+	}
+	defer stream.Close()
+	if account.ID != "acct-a" {
+		t.Fatalf("account = %q, want acct-a", account.ID)
+	}
+	if upstreamRequest.PreviousResponseID != "" || len(upstreamRequest.Input) != 3 {
+		t.Fatalf("upstream replay request = %#v", upstreamRequest)
+	}
+}
+
 func TestObserveQuotaSnapshotUpdatesCachedQuota(t *testing.T) {
 	t.Parallel()
 
@@ -742,7 +779,6 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycle(t *testing.T) {
 		"response.function_call_arguments.done",
 		"response.output_item.done",
 		"response.completed",
-		"done",
 	)
 
 	added := events[0].Data
@@ -845,7 +881,6 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycleWithoutDeltas(t *testing
 		"response.function_call_arguments.done",
 		"response.output_item.done",
 		"response.completed",
-		"done",
 	)
 }
 
@@ -913,7 +948,6 @@ func TestStreamResponsesTextOnlyPassthroughRemainsUnchanged(t *testing.T) {
 	assertEventTypes(t, events,
 		"response.output_text.delta",
 		"response.completed",
-		"done",
 	)
 	for _, event := range events {
 		if strings.HasPrefix(event.Event, "response.output_item.") {
@@ -1055,7 +1089,6 @@ func TestStreamResponsesWebSearchPassthroughAndCompletedOutput(t *testing.T) {
 		"response.output_item.done",
 		"response.output_item.done",
 		"response.completed",
-		"done",
 	)
 
 	completed := events[6].Data

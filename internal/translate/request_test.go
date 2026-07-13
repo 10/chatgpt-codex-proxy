@@ -18,6 +18,7 @@ func TestChatCompletionsTranslation(t *testing.T) {
 		ReasoningEffort:    "high",
 		ServiceTier:        "fast",
 		PreviousResponseID: "resp_prev_chat",
+		PromptCacheKey:     "chat-cache-key",
 		Messages: []openai.ChatMessage{
 			{
 				Role:    "system",
@@ -77,6 +78,9 @@ func TestChatCompletionsTranslation(t *testing.T) {
 	if normalized.PreviousResponseID != "resp_prev_chat" {
 		t.Fatalf("previous_response_id = %q, want resp_prev_chat", normalized.PreviousResponseID)
 	}
+	if normalized.PromptCacheKey != "chat-cache-key" {
+		t.Fatalf("prompt_cache_key = %q, want chat-cache-key", normalized.PromptCacheKey)
+	}
 	if len(normalized.Include) != 1 || normalized.Include[0] != "reasoning.encrypted_content" {
 		t.Fatalf("include = %#v, want reasoning.encrypted_content only", normalized.Include)
 	}
@@ -110,6 +114,7 @@ func TestResponsesTranslation(t *testing.T) {
 	request := openai.ResponsesRequest{
 		Model:              "gpt-5.4",
 		PreviousResponseID: "resp_prev",
+		PromptCacheKey:     "client-cache-key",
 		ServiceTier:        "priority",
 		Instructions:       "Be terse",
 		Input: openai.ResponsesInput{
@@ -151,6 +156,9 @@ func TestResponsesTranslation(t *testing.T) {
 	}
 	if normalized.PreviousResponseID != "resp_prev" {
 		t.Fatalf("previous_response_id = %q", normalized.PreviousResponseID)
+	}
+	if normalized.PromptCacheKey != "client-cache-key" {
+		t.Fatalf("prompt_cache_key = %q, want client-cache-key", normalized.PromptCacheKey)
 	}
 	if normalized.Text == nil || normalized.Text.Format.Type != "json_schema" {
 		t.Fatalf("text format = %#v", normalized.Text)

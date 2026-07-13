@@ -95,6 +95,58 @@ func TestResolveSessionCarriesToolNameAliasesAcrossExplicitContinuation(t *testi
 	}
 }
 
+func TestResolveSessionBuildsReplayForExplicitHTTPContinuation(t *testing.T) {
+	t.Parallel()
+
+	app := &App{continuations: accounts.NewContinuationManager(time.Minute)}
+	app.continuations.Put(accounts.ContinuationRecord{
+		ResponseID: "resp_replay",
+		AccountID:  "acct_1",
+		Model:      "gpt-5.4",
+		InputHistory: []accounts.ContinuationInputItem{
+			continuationInputItemFromCodex(userText("first")),
+			continuationInputItemFromCodex(assistantText("first answer")),
+		},
+	})
+
+	resolution, err := app.resolveSession(translate.NormalizedRequest{Request: codex.Request{
+		Model:              "gpt-5.4",
+		PreviousResponseID: "resp_replay",
+		Input:              []codex.InputItem{userText("second")},
+	}})
+	if err != nil {
+		t.Fatalf("resolveSession() error = %v", err)
+	}
+	if resolution.Original.PreviousResponseID != "" {
+		t.Fatalf("replay previous_response_id = %q, want empty", resolution.Original.PreviousResponseID)
+	}
+	if len(resolution.Original.Input) != 3 || resolution.Original.Input[2].Content[0].Text != "second" {
+		t.Fatalf("replay input = %#v", resolution.Original.Input)
+	}
+}
+
+func TestResolveSessionPreservesExplicitPromptCacheKey(t *testing.T) {
+	t.Parallel()
+
+	app := &App{continuations: accounts.NewContinuationManager(time.Minute)}
+	normalized := translate.NormalizedRequest{Request: codex.Request{
+		Model:          "gpt-5.4",
+		PromptCacheKey: "client-cache-key",
+		Input:          []codex.InputItem{userText("hello")},
+	}}
+
+	resolution, err := app.resolveSession(normalized)
+	if err != nil {
+		t.Fatalf("resolveSession() error = %v", err)
+	}
+	if resolution.Request.PromptCacheKey != "client-cache-key" {
+		t.Fatalf("PromptCacheKey = %q, want client-cache-key", resolution.Request.PromptCacheKey)
+	}
+	if resolution.ConversationKey != "client-cache-key" {
+		t.Fatalf("ConversationKey = %q, want client-cache-key", resolution.ConversationKey)
+	}
+}
+
 func TestResolveSessionSkipsImplicitResumeForUnknownToolOutputCallID(t *testing.T) {
 	t.Parallel()
 

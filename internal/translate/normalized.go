@@ -8,6 +8,7 @@ type NormalizedRequest struct {
 	codex.Request
 	ModelExplicit   bool
 	Generate        *bool
+	WebSocketAppend bool
 	TupleSchema     map[string]any
 	ToolNameAliases map[string]string
 }

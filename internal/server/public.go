@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -36,6 +37,7 @@ type sessionResolution struct {
 	ConversationKey    string
 	ExplicitPrevious   bool
 	ImplicitResume     bool
+	ReplayAvailable    bool
 }
 
 var errIncompleteResponse = errors.New("upstream stream ended before response.completed")
@@ -168,6 +170,16 @@ func (a *App) resolveAndOpenRequest(c *gin.Context, endpoint string, normalized 
 
 func (a *App) openStream(c *gin.Context, ctx context.Context, endpoint string, resolution *sessionResolution) (accounts.Record, eventStream, *accounts.QuotaSnapshot, error) {
 	if resolution.Request.PreviousResponseID != "" {
+		if resolution.ExplicitPrevious && resolution.ReplayAvailable {
+			replay := *resolution
+			replay.Request = resolution.Original
+			replay.TurnState = ""
+			replay.ExplicitPrevious = false
+			if requestUsesHostedWebSearch(replay.Request) {
+				return a.openStreamWithFailover(c, ctx, endpoint, &replay, a.openWSStream)
+			}
+			return a.openStreamWithFailover(c, ctx, endpoint, &replay, a.openHTTPStream)
+		}
 		account, stream, quota, err := a.openWSStream(c, ctx, endpoint, resolution, nil)
 		if err == nil || !resolution.ImplicitResume {
 			return account, stream, quota, err
@@ -347,6 +359,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 	accumulator := translate.NewAccumulator(normalized)
 	createdAt := time.Now().UTC().Unix()
 	toolCalls := newChatToolCallStreamer(createdAt)
+	images := newChatImageStreamer()
 	var tupleTextBuffer strings.Builder
 	writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk("", normalized.Model, map[string]any{"role": "assistant"}, "", createdAt)))
 	c.Writer.Flush()
@@ -377,6 +390,16 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 			}
 			c.Writer.Flush()
 			continue
+		}
+		for _, image := range images.imagesForEvent(event) {
+			writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(
+				accumulator.ResponseID,
+				jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model),
+				map[string]any{"role": "assistant", "images": []map[string]any{image}},
+				"",
+				createdAt,
+			)))
+			c.Writer.Flush()
 		}
 		switch event.Type {
 		case "response.reasoning_summary_text.delta":
@@ -435,6 +458,79 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 	c.Writer.Flush()
 }
 
+type chatImageStreamer struct {
+	indexByItemID map[string]int
+	lastHash      map[string][32]byte
+	nextIndex     int
+}
+
+func newChatImageStreamer() *chatImageStreamer {
+	return &chatImageStreamer{
+		indexByItemID: make(map[string]int),
+		lastHash:      make(map[string][32]byte),
+	}
+}
+
+func (s *chatImageStreamer) imagesForEvent(event *codex.StreamEvent) []map[string]any {
+	if event == nil {
+		return nil
+	}
+	switch event.Type {
+	case "response.image_generation_call.partial_image":
+		image := s.image(
+			jsonutil.StringValue(event.Raw["item_id"]),
+			jsonutil.StringValue(event.Raw["output_format"]),
+			jsonutil.StringValue(event.Raw["partial_image_b64"]),
+		)
+		if image != nil {
+			return []map[string]any{image}
+		}
+	case "response.output_item.done":
+		item := jsonutil.FirstMap(jsonutil.MapValue(event.Raw, "item"), jsonutil.MapValue(event.Raw, "output_item"))
+		if jsonutil.StringValue(item["type"]) == "image_generation_call" {
+			image := s.image(jsonutil.StringValue(item["id"]), jsonutil.StringValue(item["output_format"]), jsonutil.StringValue(item["result"]))
+			if image != nil {
+				return []map[string]any{image}
+			}
+		}
+	case "response.completed":
+		response := jsonutil.MapValue(event.Raw, "response")
+		var images []map[string]any
+		for _, item := range jsonutil.SliceOfMaps(response["output"]) {
+			if jsonutil.StringValue(item["type"]) != "image_generation_call" {
+				continue
+			}
+			if image := s.image(jsonutil.StringValue(item["id"]), jsonutil.StringValue(item["output_format"]), jsonutil.StringValue(item["result"])); image != nil {
+				images = append(images, image)
+			}
+		}
+		return images
+	}
+	return nil
+}
+
+func (s *chatImageStreamer) image(itemID, outputFormat, base64Data string) map[string]any {
+	if strings.TrimSpace(base64Data) == "" {
+		return nil
+	}
+	hash := sha256.Sum256([]byte(base64Data))
+	key := strings.TrimSpace(itemID)
+	if key == "" {
+		key = string(hash[:])
+	}
+	if previous, ok := s.lastHash[key]; ok && previous == hash {
+		return nil
+	}
+	s.lastHash[key] = hash
+	index, ok := s.indexByItemID[key]
+	if !ok {
+		index = s.nextIndex
+		s.nextIndex++
+		s.indexByItemID[key] = index
+	}
+	return translate.ChatImage(index, outputFormat, base64Data)
+}
+
 func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalized translate.NormalizedRequest, stream eventStream) {
 	prepareStreamResponse(c)
 
@@ -467,7 +563,6 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 	}
 
 	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
-	writeSSE(c.Writer, "done", []byte("[DONE]"))
 	c.Writer.Flush()
 }
 
@@ -762,16 +857,54 @@ func (a *App) respondOpenAIUpstreamStreamError(c *gin.Context, endpoint, account
 }
 
 func (a *App) respondClassifiedStreamError(c *gin.Context, endpoint, accountID, responseID, eventName string, err error) {
-	_, code, message := a.classifyUpstreamError(accountID, err)
+	status, code, message := a.classifyUpstreamError(accountID, err)
 	a.logUpstreamStreamFailure(c, endpoint, accountID, responseID, err)
+	if endpoint == "responses" {
+		writeResponsesStreamError(c.Writer, status, message)
+		c.Writer.Flush()
+		return
+	}
 	writeSSE(c.Writer, eventName, translate.MustJSON(middleware.OpenAIErrorPayload(message, "api_error", code, "")))
 	c.Writer.Flush()
 }
 
 func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID, eventName string, err error) {
 	a.logUpstreamStreamFailure(c, endpoint, accountID, responseID, err)
+	if endpoint == "responses" {
+		writeResponsesStreamError(c.Writer, http.StatusInternalServerError, err.Error())
+		c.Writer.Flush()
+		return
+	}
 	writeSSE(c.Writer, eventName, translate.MustJSON(middleware.OpenAIErrorPayload(err.Error(), "api_error", "api_error", "")))
 	c.Writer.Flush()
+}
+
+func writeResponsesStreamError(writer io.Writer, status int, message string) {
+	code := "unknown_error"
+	switch status {
+	case http.StatusUnauthorized:
+		code = "invalid_api_key"
+	case http.StatusForbidden:
+		code = "insufficient_quota"
+	case http.StatusTooManyRequests:
+		code = "rate_limit_exceeded"
+	case http.StatusNotFound:
+		code = "model_not_found"
+	case http.StatusRequestTimeout:
+		code = "request_timeout"
+	default:
+		if status >= http.StatusInternalServerError {
+			code = "internal_server_error"
+		} else if status >= http.StatusBadRequest {
+			code = "invalid_request_error"
+		}
+	}
+	writeSSE(writer, "error", translate.MustJSON(map[string]any{
+		"type":            "error",
+		"code":            code,
+		"message":         strings.TrimSpace(message),
+		"sequence_number": 0,
+	}))
 }
 
 func (a *App) acquireAccountForResolution(ctx context.Context, resolution *sessionResolution) (accounts.Record, error) {

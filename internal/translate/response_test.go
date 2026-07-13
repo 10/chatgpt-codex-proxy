@@ -457,3 +457,35 @@ func TestResponsesObjectUsageIncludesDetailFields(t *testing.T) {
 		t.Fatalf("reasoning_tokens = %#v, want 1", outputDetails["reasoning_tokens"])
 	}
 }
+
+func TestChatCompletionObjectIncludesGeneratedImages(t *testing.T) {
+	t.Parallel()
+
+	accumulator := NewAccumulator(NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&codex.StreamEvent{
+		Type: "response.completed",
+		Raw: map[string]any{"response": map[string]any{
+			"id":     "resp_image",
+			"model":  "gpt-5.4",
+			"status": "completed",
+			"output": []any{map[string]any{
+				"id":            "ig_1",
+				"type":          "image_generation_call",
+				"output_format": "jpeg",
+				"result":        "aGVsbG8=",
+			}},
+		}},
+	})
+
+	response := accumulator.ChatCompletionObject()
+	choices, _ := response["choices"].([]map[string]any)
+	message, _ := choices[0]["message"].(map[string]any)
+	images, _ := message["images"].([]map[string]any)
+	if len(images) != 1 {
+		t.Fatalf("images = %#v, want one image", message["images"])
+	}
+	imageURL, _ := images[0]["image_url"].(map[string]any)
+	if imageURL["url"] != "data:image/jpeg;base64,aGVsbG8=" {
+		t.Fatalf("image URL = %#v", imageURL["url"])
+	}
+}

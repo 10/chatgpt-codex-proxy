@@ -168,6 +168,7 @@ The same key protects both public and admin routes.
 
 Routes:
 
+- `POST /v1/completions`
 - `POST /v1/chat/completions`
 - `GET /v1/responses` (WebSocket upgrade)
 - `POST /v1/responses`
@@ -182,7 +183,8 @@ Routes:
 Supported behavior:
 
 - Streaming and non-streaming responses
-- Persistent Responses WebSocket sessions with sequential `response.create` events
+- Persistent Responses WebSocket sessions with sequential `response.create` and `response.append` events
+- Legacy text Completions for a single string prompt
 - Tool calling, including custom tools
 - Legacy Chat Completions `functions` and `function_call`
 - Hosted web search passthrough
@@ -193,6 +195,7 @@ Supported behavior:
 - Explicit OpenAI-style `response.compaction` support on `/v1/responses/compact`
 - Guarded implicit continuation when prior assistant or tool history is replayed
 - Runtime model catalog backed by the upstream Codex model list
+- Codex-client model metadata from `GET /v1/models?client_version=...`
 - Codex-backed image generation and editing with `gpt-image-1.5` and `gpt-image-2`
 - JSON image references and multipart image/mask uploads for edits
 - Images API partial-image streaming
@@ -200,7 +203,7 @@ Supported behavior:
 Important notes:
 
 - `/v1/chat/completions` also accepts a Responses-shaped body when `messages` is omitted.
-- `GET /v1/responses` is a WebSocket endpoint. Each JSON message must be a `response.create` event; the connection can process multiple turns sequentially and does not use SSE `[DONE]` markers.
+- `GET /v1/responses` is a WebSocket endpoint. The first JSON message must be `response.create`; later turns may use `response.create` or `response.append` with array `input`. The connection does not use SSE `[DONE]` markers.
 - The Chat Completions, Responses, and Responses compact JSON endpoints accept identity or zstd request bodies. Other request content encodings are rejected.
 - `/v1/responses/compact` follows the public OpenAI contract and returns `object: "response.compaction"` instead of raw Codex JSON.
 - `/v1/responses/compact` supports explicit `previous_response_id` by expanding locally stored continuation history before calling the private compact backend.
@@ -209,8 +212,8 @@ Important notes:
 - Multipart edits are converted to the native JSON edit shape with data-URL image and mask references.
 - Image fields, including `n`, are forwarded to the native endpoint. Codex may report output metadata such as a different size than requested.
 - If the native endpoint returns `404`, `405`, or `501`, the proxy falls back to the Responses `image_generation` tool adapter. That fallback produces one image and returns a data URL for `response_format: "url"`.
-- Streaming continuations are pinned to the original account; compact requests expand saved history locally and only prefer that account.
-- When the proxy can derive a stable conversation key, it sets `prompt_cache_key` upstream automatically.
+- Public WebSocket continuations stay on the reused upstream connection. JSON HTTP and compact continuations replay saved history locally and prefer the original account.
+- Explicit `prompt_cache_key` values are preserved. When omitted, the proxy derives a stable key when possible.
 - Some OpenAI compatibility fields are accepted and ignored. See [docs/TRANSLATION.md](docs/TRANSLATION.md) for exact behavior.
 
 ## Admin API

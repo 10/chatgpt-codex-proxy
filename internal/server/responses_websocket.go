@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,8 +33,9 @@ type responsesWebSocketStream interface {
 type responsesWebSocketConnector func(context.Context, string, http.Header, any) (responsesWebSocketStream, error)
 
 type responsesWebSocketSession struct {
-	stream  responsesWebSocketStream
-	account accounts.Record
+	stream         responsesWebSocketStream
+	account        accounts.Record
+	lastResponseID string
 }
 
 type responsesStreamState struct {
@@ -90,9 +92,10 @@ func (a *App) handleResponsesWebSocket(c *gin.Context) {
 }
 
 type responsesWebSocketEnvelope struct {
-	Type       string `json:"type"`
-	Background bool   `json:"background"`
-	Generate   *bool  `json:"generate"`
+	Type       string          `json:"type"`
+	Background bool            `json:"background"`
+	Generate   *bool           `json:"generate"`
+	Input      json.RawMessage `json:"input"`
 }
 
 var errResponsesWebSocketBackground = errors.New("background responses are not supported over WebSocket")
@@ -102,7 +105,8 @@ func normalizeResponsesWebSocketMessage(body []byte, catalog *models.Catalog) (t
 	if err := json.Unmarshal(body, &envelope); err != nil {
 		return translate.NormalizedRequest{}, err
 	}
-	if strings.TrimSpace(envelope.Type) != "response.create" {
+	eventType := strings.TrimSpace(envelope.Type)
+	if eventType != "response.create" && eventType != "response.append" {
 		return translate.NormalizedRequest{}, fmt.Errorf("unsupported websocket event type %q", envelope.Type)
 	}
 	if envelope.Background {
@@ -118,10 +122,23 @@ func normalizeResponsesWebSocketMessage(body []byte, catalog *models.Catalog) (t
 	}
 	normalized.Stream = true
 	normalized.Generate = envelope.Generate
+	normalized.WebSocketAppend = eventType == "response.append"
+	if normalized.WebSocketAppend {
+		input := bytes.TrimSpace(envelope.Input)
+		if len(input) == 0 || input[0] != '[' {
+			return translate.NormalizedRequest{}, errors.New("response.append requires array field: input")
+		}
+	}
 	return normalized, nil
 }
 
 func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn, normalized translate.NormalizedRequest, session *responsesWebSocketSession) bool {
+	if normalized.WebSocketAppend && session.lastResponseID == "" {
+		return writeResponsesWebSocketError(conn, http.StatusBadRequest, "invalid_request_error", "response.append received before response.create", "invalid_request_error", "")
+	}
+	if normalized.PreviousResponseID == "" && session.lastResponseID != "" && (normalized.WebSocketAppend || !hasPriorAssistantOrToolHistory(normalized.Input)) {
+		normalized.PreviousResponseID = session.lastResponseID
+	}
 	resolution, err := a.resolveSession(normalized)
 	if err != nil {
 		code := "invalid_request_error"
@@ -206,6 +223,7 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 	}
 
 	a.finalizeSuccessfulStream(account.ID, accumulator, session.stream)
+	session.lastResponseID = accumulator.ResponseID
 	return true
 }
 

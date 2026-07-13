@@ -116,9 +116,12 @@ func TestResponsesWebSocketReusesUpstreamConnectionForContinuation(t *testing.T)
 	assertResponsesWebSocketEventTypes(t, first, "response.created", "response.output_text.delta", "response.completed")
 
 	if err := conn.WriteJSON(map[string]any{
-		"type":                 "response.create",
-		"previous_response_id": "resp_ws_1",
-		"input":                "second prompt",
+		"type": "response.append",
+		"input": []map[string]any{{
+			"type":    "message",
+			"role":    "user",
+			"content": []map[string]any{{"type": "input_text", "text": "second prompt"}},
+		}},
 	}); err != nil {
 		t.Fatalf("second WriteJSON() error = %v", err)
 	}
@@ -236,6 +239,26 @@ func TestNormalizeResponsesWebSocketMessagePreservesGenerateAndIgnoresStream(t *
 	}
 	if got, ok := payload["generate"]; !ok || got != false {
 		t.Fatalf("upstream payload generate = %#v, want false", got)
+	}
+}
+
+func TestNormalizeResponsesWebSocketAppendRequiresArrayInput(t *testing.T) {
+	t.Parallel()
+
+	normalized, err := normalizeResponsesWebSocketMessage([]byte(`{
+		"type":"response.append",
+		"input":[{"type":"message","role":"user","content":"continue"}]
+	}`), models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("normalizeResponsesWebSocketMessage() error = %v", err)
+	}
+	if !normalized.WebSocketAppend {
+		t.Fatal("WebSocketAppend = false, want true")
+	}
+
+	_, err = normalizeResponsesWebSocketMessage([]byte(`{"type":"response.append","input":"continue"}`), models.NewCatalog(models.BootstrapEntries()))
+	if err == nil || !strings.Contains(err.Error(), "array field") {
+		t.Fatalf("string input error = %v, want array field error", err)
 	}
 }
 

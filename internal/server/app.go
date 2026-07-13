@@ -125,6 +125,7 @@ func (a *App) routes() {
 	protected.GET("/health", a.handleHealth)
 	protected.GET("/v1/models", a.handleModels)
 	protected.GET("/v1/models/:model_id", a.handleModelByID)
+	protected.POST("/v1/completions", a.handleCompletions)
 	protected.POST("/v1/chat/completions", a.handleChatCompletions)
 	protected.GET("/v1/responses", a.handleResponsesWebSocket)
 	protected.POST("/v1/responses", a.handleResponses)

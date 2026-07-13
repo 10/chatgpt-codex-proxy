@@ -374,7 +374,7 @@ When possible, the proxy derives a stable `prompt_cache_key` from:
 - normalized instructions
 - the conversation prefix of the normalized input
 
-The conversation prefix stops at the last assistant or tool-call item. This is used for both explicit and implicit continuation flows.
+The conversation prefix stops at the last assistant or tool-call item. Explicit client values are preserved; this derivation is used only when `prompt_cache_key` is omitted.
 
 ## Upstream Transport Translation
 
@@ -382,7 +382,7 @@ Chat Completions and Responses requests consume an upstream stream even when the
 
 ### HTTP path
 
-For requests without continuation state or hosted web search, the proxy sends `codex.StreamRequestPayload(req)` to `POST /codex/responses`.
+For requests without continuation state or hosted web search, the proxy sends `codex.StreamRequestPayload(req)` to `POST /codex/responses`. JSON HTTP requests with explicit continuation state expand the locally saved transcript and use the same path without forwarding `previous_response_id`.
 
 That forced HTTP payload does all of the following:
 
@@ -394,7 +394,7 @@ So even if the public request was non-streaming, the proxy still uses the stream
 
 ### WebSocket path
 
-The proxy uses `WSS /codex/responses` for explicit or implicit continuations, requests containing the hosted `web_search` tool, and turns received through the public Responses WebSocket. It sends:
+The proxy uses `WSS /codex/responses` for implicit continuations, requests containing the hosted `web_search` tool, and turns received through the public Responses WebSocket. It sends:
 
 - `type = "response.create"`
 - `model`
@@ -409,7 +409,7 @@ The proxy uses `WSS /codex/responses` for explicit or implicit continuations, re
 - optional `include`
 - optional `generate` for public WebSocket turns
 
-The WebSocket payload omits `stream`, `store`, and `service_tier`. It preserves `previous_response_id` because Codex continuation happens there. A persistent public WebSocket session can send later `response.create` payloads over the same upstream connection when the account does not change.
+The WebSocket payload omits `stream`, `store`, and `service_tier`. A persistent public WebSocket session can send later `response.create` or `response.append` turns over the same upstream connection when the account does not change. Downstream append turns are normalized to upstream `response.create` payloads with `previous_response_id` and incremental input.
 
 ## Upstream Events the Proxy Consumes
 
@@ -450,6 +450,7 @@ The rebuilt Chat Completions response has:
 - `choices[0].message.content = accumulated text`
 - optional `choices[0].message.reasoning_content`
 - optional `choices[0].message.tool_calls`
+- optional `choices[0].message.images` containing generated image data URLs
 - `choices[0].finish_reason = "tool_calls"` when tool calls exist, else `"stop"`
 - `usage` rewritten into Chat Completions token field names
 
@@ -537,6 +538,7 @@ Then it maps upstream events like this:
 
 - `response.output_text.delta` -> `delta.content`
 - `response.reasoning_summary_text.delta` -> `delta.reasoning_content`
+- image-generation partial or completed output -> `delta.images`
 
 Tool-call streaming has a compatibility shim:
 
@@ -599,10 +601,7 @@ Third, if tuple-schema reconversion is active:
 - one synthetic `response.output_text.delta` SSE is emitted with the patched JSON text
 - the final `response.completed` payload is also patched
 
-At the end of the Responses stream, the proxy emits:
-
-- `event: done`
-- `data: [DONE]`
+The Responses stream ends after `response.completed`; it does not append a Chat Completions-style `[DONE]` sentinel.
 
 The public Responses WebSocket applies the same tool-event normalization, completed-response rebuilding, and tuple reconversion, but writes plain JSON WebSocket messages. It does not append the SSE terminal event or `[DONE]` sentinel.
 
@@ -630,7 +629,7 @@ Upstream failures are classified into OpenAI-style proxy errors:
 - upstream `429` or rate-limit-like error code -> `429`, `rate_limited`
 - other upstream failures -> clamped upstream status, `upstream_error`
 
-During streaming, classified errors are sent as SSE error payloads instead of raw upstream error objects.
+During streaming, classified errors are sent as SSE error payloads instead of raw upstream error objects. Responses streams use top-level `{type, code, message, sequence_number}` error events; Chat and legacy Completions retain the OpenAI error wrapper.
 
 For requests without explicit continuation state, retryable upstream failures (`401`, `402`, `403`, `408`, `429`, and transient `5xx` statuses) fail over to another eligible account before client-visible output begins. Each account is attempted at most once. Non-streaming responses remain retryable until the full upstream response has been buffered; streaming responses stop being retryable after the first public event is ready for delivery.
 

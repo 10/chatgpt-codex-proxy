@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,6 +98,53 @@ func TestContinuationInputHistoryIncludesAssistantReplay(t *testing.T) {
 	}
 	if history[1].Role != "assistant" || history[1].Content[0].Text != "assistant replay" {
 		t.Fatalf("history[1] = %#v", history[1])
+	}
+}
+
+func TestChatImageStreamerMapsAndDeduplicatesImages(t *testing.T) {
+	t.Parallel()
+
+	streamer := newChatImageStreamer()
+	partial := &codex.StreamEvent{Type: "response.image_generation_call.partial_image", Raw: map[string]any{
+		"item_id": "ig_1", "output_format": "png", "partial_image_b64": "aGVsbG8=",
+	}}
+	images := streamer.imagesForEvent(partial)
+	if len(images) != 1 {
+		t.Fatalf("partial images = %#v, want one image", images)
+	}
+	imageURL, _ := images[0]["image_url"].(map[string]any)
+	if imageURL["url"] != "data:image/png;base64,aGVsbG8=" {
+		t.Fatalf("partial image URL = %#v", imageURL["url"])
+	}
+
+	done := &codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
+		"id": "ig_1", "type": "image_generation_call", "output_format": "png", "result": "aGVsbG8=",
+	}}}
+	if duplicate := streamer.imagesForEvent(done); len(duplicate) != 0 {
+		t.Fatalf("duplicate images = %#v, want none", duplicate)
+	}
+
+	done.Raw["item"].(map[string]any)["result"] = "d29ybGQ="
+	images = streamer.imagesForEvent(done)
+	if len(images) != 1 || images[0]["index"] != 0 {
+		t.Fatalf("updated images = %#v, want stable index 0", images)
+	}
+}
+
+func TestResponsesStreamErrorUsesTopLevelResponsesShape(t *testing.T) {
+	t.Parallel()
+
+	var output strings.Builder
+	writeResponsesStreamError(&output, http.StatusTooManyRequests, "slow down")
+	events := parseSSEEvents(t, output.String())
+	if len(events) != 1 || events[0].Event != "error" {
+		t.Fatalf("events = %#v, want one error event", events)
+	}
+	if events[0].Data["type"] != "error" || events[0].Data["code"] != "rate_limit_exceeded" {
+		t.Fatalf("error payload = %#v", events[0].Data)
+	}
+	if _, nested := events[0].Data["error"]; nested {
+		t.Fatalf("error payload = %#v, want top-level fields", events[0].Data)
 	}
 }
 
@@ -668,7 +716,6 @@ func TestStreamResponsesPreservesReasoningItemsAndEvents(t *testing.T) {
 	assertEventTypes(t, events,
 		"response.reasoning_summary_text.delta",
 		"response.completed",
-		"done",
 	)
 	completed := events[1].Data
 	response := nestedMapFromAny(completed["response"])

@@ -2,10 +2,12 @@ package server
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"chatgpt-codex-proxy/internal/middleware"
+	"chatgpt-codex-proxy/internal/models"
 )
 
 const modelCreatedTimestamp int64 = 1700000000
@@ -26,6 +28,10 @@ type modelResponse struct {
 
 func (a *App) handleModels(c *gin.Context) {
 	entries := a.modelCatalog().List()
+	if strings.TrimSpace(c.Query("client_version")) != "" {
+		c.JSON(http.StatusOK, codexClientModelsResponse(entries))
+		return
+	}
 	data := make([]modelResponse, 0, len(entries)+len(codexImageModels))
 	seen := make(map[string]bool, len(entries)+len(codexImageModels))
 	for _, entry := range entries {
@@ -38,6 +44,52 @@ func (a *App) handleModels(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, modelListResponse{Object: "list", Data: data})
+}
+
+func codexClientModelsResponse(entries []models.Entry) map[string]any {
+	data := make([]map[string]any, 0, len(entries)+len(codexImageModels))
+	seen := make(map[string]bool, len(entries))
+	for index, entry := range entries {
+		levels := make([]map[string]any, 0, len(entry.SupportedReasoningEfforts))
+		for _, effort := range entry.SupportedReasoningEfforts {
+			levels = append(levels, map[string]any{
+				"effort":      effort.ReasoningEffort,
+				"description": effort.Description,
+			})
+		}
+		data = append(data, map[string]any{
+			"slug":                       entry.ID,
+			"display_name":               entry.DisplayName,
+			"description":                entry.Description,
+			"prefer_websockets":          true,
+			"support_verbosity":          true,
+			"default_verbosity":          "low",
+			"input_modalities":           []string{"text", "image"},
+			"context_window":             272000,
+			"max_context_window":         1000000,
+			"default_reasoning_level":    entry.DefaultReasoningEffort,
+			"supported_reasoning_levels": levels,
+			"visibility":                 "list",
+			"supported_in_api":           true,
+			"priority":                   index + 1,
+		})
+		seen[entry.ID] = true
+	}
+	for _, id := range codexImageModels {
+		if seen[id] {
+			continue
+		}
+		data = append(data, map[string]any{
+			"slug":              id,
+			"display_name":      id,
+			"description":       id,
+			"prefer_websockets": false,
+			"visibility":        "hide",
+			"supported_in_api":  true,
+			"priority":          len(data) + 1,
+		})
+	}
+	return map[string]any{"models": data}
 }
 
 func (a *App) handleModelByID(c *gin.Context) {

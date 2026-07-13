@@ -30,7 +30,7 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 		if !ok {
 			return sessionResolution{}, errInvalidPreviousResponseID
 		}
-		if strings.TrimSpace(resolution.Request.Model) == "" {
+		if !resolution.Request.ModelExplicit || strings.TrimSpace(resolution.Request.Model) == "" {
 			resolution.Request.Model = record.Model
 			resolution.Original.Model = record.Model
 		}
@@ -47,6 +47,11 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 		resolution.TurnState = strings.TrimSpace(record.TurnState)
 		resolution.Request.ToolNameAliases = translate.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
 		resolution.Original.ToolNameAliases = translate.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
+		if history := continuationInputItemsToCodex(record.InputHistory); len(history) > 0 {
+			resolution.Original.Input = append(history, normalized.Input...)
+			resolution.Original.PreviousResponseID = ""
+			resolution.ReplayAvailable = true
+		}
 		resolution.ExplicitPrevious = true
 		return resolution, nil
 	}
@@ -55,7 +60,9 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 		return resolution, nil
 	}
 
-	if key := conversationkey.Derive(normalized.Request); key != "" {
+	if key := strings.TrimSpace(normalized.PromptCacheKey); key != "" {
+		resolution.ConversationKey = key
+	} else if key := conversationkey.Derive(normalized.Request); key != "" {
 		resolution.ConversationKey = key
 		resolution.Request.PromptCacheKey = key
 		resolution.Original.PromptCacheKey = key

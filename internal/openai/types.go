@@ -14,6 +14,7 @@ type ChatCompletionsRequest struct {
 	ReasoningEffort    string                     `json:"reasoning_effort,omitempty"`
 	ServiceTier        string                     `json:"service_tier,omitempty"`
 	PreviousResponseID string                     `json:"previous_response_id,omitempty"`
+	PromptCacheKey     string                     `json:"prompt_cache_key,omitempty"`
 	Tools              []ToolDefinition           `json:"tools,omitempty"`
 	ToolChoice         json.RawMessage            `json:"tool_choice,omitempty"`
 	ResponseFormat     *ResponseFormat            `json:"response_format,omitempty"`
@@ -235,6 +236,7 @@ type ResponsesRequest struct {
 	Tools              []ToolDefinition `json:"tools,omitempty"`
 	ToolChoice         json.RawMessage  `json:"tool_choice,omitempty"`
 	PreviousResponseID string           `json:"previous_response_id,omitempty"`
+	PromptCacheKey     string           `json:"prompt_cache_key,omitempty"`
 	ServiceTier        string           `json:"service_tier,omitempty"`
 	Text               *ResponsesText   `json:"text,omitempty"`
 	Reasoning          *Reasoning       `json:"reasoning,omitempty"`

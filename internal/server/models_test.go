@@ -70,6 +70,35 @@ func TestHandleModelsIncludesCodexImageModels(t *testing.T) {
 	}
 }
 
+func TestHandleModelsReturnsCodexClientMetadata(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models?client_version=0.98.0", nil)
+
+	app := &App{cfg: config.Config{DefaultModel: "gpt-5.4"}}
+	app.handleModels(ctx)
+
+	var body struct {
+		Models []map[string]any `json:"models"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(body.Models) == 0 {
+		t.Fatal("models = empty")
+	}
+	model := body.Models[0]
+	if model["slug"] == "" || model["context_window"] == nil || model["supported_reasoning_levels"] == nil {
+		t.Fatalf("Codex client model metadata = %#v", model)
+	}
+	if _, hasOpenAIList := model["object"]; hasOpenAIList {
+		t.Fatalf("Codex client model metadata unexpectedly uses OpenAI list shape: %#v", model)
+	}
+}
+
 func TestHandleModelByID(t *testing.T) {
 	t.Parallel()
 

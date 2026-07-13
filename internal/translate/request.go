@@ -55,6 +55,7 @@ func ChatCompletions(req openai.ChatCompletionsRequest, catalog ...*models.Catal
 		serviceTier,
 		req.PreviousResponseID,
 	)
+	out.PromptCacheKey = strings.TrimSpace(req.PromptCacheKey)
 	out.ToolNameAliases = toolNames.aliases()
 	if req.ResponseFormat != nil {
 		text, tupleSchema, err := normalizeChatResponseFormat(req.ResponseFormat)
@@ -142,6 +143,7 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 	out.Instructions = payload.Instructions
 	out.Input = payload.Input
 	out.Text = payload.Text
+	out.PromptCacheKey = strings.TrimSpace(req.PromptCacheKey)
 	out.TupleSchema = payload.TupleSchema
 	out.ToolNameAliases = toolNames.aliases()
 	return out, nil

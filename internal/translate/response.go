@@ -353,6 +353,9 @@ func (a *Accumulator) ChatCompletionObject() map[string]any {
 	if toolCalls := a.chatCompletionToolCalls(); len(toolCalls) > 0 {
 		message["tool_calls"] = toolCalls
 	}
+	if images := a.ChatImages(); len(images) > 0 {
+		message["images"] = images
+	}
 	return map[string]any{
 		"id":      jsonutil.FirstNonEmpty(a.ResponseID, "chatcmpl_proxy"),
 		"object":  "chat.completion",
@@ -360,6 +363,52 @@ func (a *Accumulator) ChatCompletionObject() map[string]any {
 		"model":   jsonutil.FirstNonEmpty(a.Model, a.Normalized.Model),
 		"choices": []map[string]any{{"index": 0, "message": message, "finish_reason": finishReason(a)}},
 		"usage":   a.ChatUsageObject(),
+	}
+}
+
+func (a *Accumulator) CompletionObject() map[string]any {
+	return map[string]any{
+		"id":      jsonutil.FirstNonEmpty(a.ResponseID, "cmpl_proxy"),
+		"object":  "text_completion",
+		"created": a.createdAt(),
+		"model":   jsonutil.FirstNonEmpty(a.Model, a.Normalized.Model),
+		"choices": []map[string]any{{"index": 0, "text": a.Text(), "finish_reason": finishReason(a)}},
+		"usage":   a.ChatUsageObject(),
+	}
+}
+
+func (a *Accumulator) ChatImages() []map[string]any {
+	images := make([]map[string]any, 0)
+	for _, item := range a.sortedOutputItems() {
+		if jsonutil.StringValue(item["type"]) != "image_generation_call" {
+			continue
+		}
+		if image := ChatImage(len(images), jsonutil.StringValue(item["output_format"]), jsonutil.StringValue(item["result"])); image != nil {
+			images = append(images, image)
+		}
+	}
+	return images
+}
+
+func ChatImage(index int, outputFormat, base64Data string) map[string]any {
+	if strings.TrimSpace(base64Data) == "" {
+		return nil
+	}
+	mimeType := "image/png"
+	switch strings.ToLower(strings.TrimSpace(outputFormat)) {
+	case "jpeg", "jpg":
+		mimeType = "image/jpeg"
+	case "webp":
+		mimeType = "image/webp"
+	case "gif":
+		mimeType = "image/gif"
+	}
+	return map[string]any{
+		"index": index,
+		"type":  "image_url",
+		"image_url": map[string]any{
+			"url": "data:" + mimeType + ";base64," + base64Data,
+		},
 	}
 }
 
