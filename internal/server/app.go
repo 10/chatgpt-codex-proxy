@@ -22,20 +22,21 @@ import (
 )
 
 type App struct {
-	cfg           config.Config
-	logger        *slog.Logger
-	engine        *gin.Engine
-	accounts      *accounts.Service
-	deviceLogins  *admin.DeviceLoginService
-	accountMgr    *codex.AccountManager
-	httpClient    *codex.HTTPClient
-	httpStream    func(context.Context, accounts.Record, codex.Request, string) (eventStream, error)
-	compactCaller func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
-	imageOpener   func(*gin.Context, string, translate.NormalizedRequest) (openedRequest, bool)
-	wsConnector   responsesWebSocketConnector
-	continuations *accounts.ContinuationManager
-	models        *models.Catalog
-	cancel        context.CancelFunc
+	cfg             config.Config
+	logger          *slog.Logger
+	engine          *gin.Engine
+	accounts        *accounts.Service
+	deviceLogins    *admin.DeviceLoginService
+	accountMgr      *codex.AccountManager
+	httpClient      *codex.HTTPClient
+	httpStream      func(context.Context, accounts.Record, codex.Request, string) (eventStream, error)
+	compactCaller   func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
+	imageOpener     func(*gin.Context, string, translate.NormalizedRequest) (openedRequest, bool)
+	directImageOpen func(context.Context, accounts.Record, string, []byte, bool) (*codex.RawImageResponse, error)
+	wsConnector     responsesWebSocketConnector
+	continuations   *accounts.ContinuationManager
+	models          *models.Catalog
+	cancel          context.CancelFunc
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {

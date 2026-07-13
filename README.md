@@ -205,10 +205,10 @@ Important notes:
 - `/v1/responses/compact` follows the public OpenAI contract and returns `object: "response.compaction"` instead of raw Codex JSON.
 - `/v1/responses/compact` supports explicit `previous_response_id` by expanding locally stored continuation history before calling the private compact backend.
 - Compact requests currently support the same text, image, file, reasoning, tool-call, tool-output, and compaction input items used elsewhere in the proxy. Audio input is rejected locally because the current Codex upstream does not accept `input_audio` or audio MIME types as files.
-- Image requests default to `gpt-image-2`. The image model is sent to Codex's `image_generation` tool while the proxy resolves a route-valid text model for the enclosing Responses request.
-- Image responses default to `b64_json`. `response_format: "url"` returns a data URL because Codex returns image bytes rather than a hosted URL.
-- Image options are forwarded rather than emulated. The current Codex `gpt-image-2-codex` backend rejects `input_fidelity`, and it may report a different output size or partial-image count than requested.
-- The Codex image tool currently produces one image per request; `n` does not fan out into multiple upstream requests.
+- Image requests default to `gpt-image-2` and use Codex's native `/codex/images/generations` and `/codex/images/edits` endpoints. Native JSON and SSE responses are passed through without local reconstruction.
+- Multipart edits are converted to the native JSON edit shape with data-URL image and mask references.
+- Image fields, including `n`, are forwarded to the native endpoint. Codex may report output metadata such as a different size than requested.
+- If the native endpoint returns `404`, `405`, or `501`, the proxy falls back to the Responses `image_generation` tool adapter. That fallback produces one image and returns a data URL for `response_format: "url"`.
 - Streaming continuations are pinned to the original account; compact requests expand saved history locally and only prefer that account.
 - When the proxy can derive a stable conversation key, it sets `prompt_cache_key` upstream automatically.
 - Some OpenAI compatibility fields are accepted and ignored. See [docs/TRANSLATION.md](docs/TRANSLATION.md) for exact behavior.

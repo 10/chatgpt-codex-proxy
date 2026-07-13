@@ -1,8 +1,10 @@
 package server
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/openai"
@@ -25,6 +28,7 @@ const defaultImageModel = "gpt-image-2"
 type imageGenerationRequest struct {
 	Model             string `json:"model"`
 	Prompt            string `json:"prompt"`
+	N                 *int   `json:"n,omitempty"`
 	Size              string `json:"size,omitempty"`
 	Quality           string `json:"quality,omitempty"`
 	Background        string `json:"background,omitempty"`
@@ -65,8 +69,13 @@ type imagesResponse struct {
 }
 
 func (a *App) handleImageGenerations(c *gin.Context) {
+	body, err := readRequestBody(c.Request)
+	if err != nil {
+		a.respondOpenAIInvalidRequest(c, err)
+		return
+	}
 	var req imageGenerationRequest
-	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
 		a.respondOpenAIInvalidRequest(c, err)
 		return
 	}
@@ -77,13 +86,22 @@ func (a *App) handleImageGenerations(c *gin.Context) {
 	if !a.validateImageModel(c, req.Model) {
 		return
 	}
+	req.Model = resolvedImageModel(req.Model)
+	directPayload, err := prepareDirectImagePayload(body, req.Model, req.Stream)
+	if err != nil {
+		a.respondOpenAIInvalidRequest(c, err)
+		return
+	}
+	if a.handleDirectImageResponse(c, "images_generations", "/codex/images/generations", directPayload, req.Stream) {
+		return
+	}
 
 	normalized := normalizedImageRequest(req)
 	a.handleImageResponse(c, "images_generations", "image_generation", req.ResponseFormat, normalized)
 }
 
 func (a *App) handleImageEdits(c *gin.Context) {
-	req, cleanup, err := decodeImageEditRequest(c.Request)
+	req, directPayload, cleanup, err := decodeImageEditRequest(c.Request)
 	if cleanup != nil {
 		defer cleanup()
 	}
@@ -102,6 +120,15 @@ func (a *App) handleImageEdits(c *gin.Context) {
 		a.writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", "images are required", "invalid_request_error")
 		return
 	}
+	req.Model = resolvedImageModel(req.Model)
+	directPayload, err = prepareDirectImagePayload(directPayload, req.Model, req.Stream)
+	if err != nil {
+		a.respondOpenAIInvalidRequest(c, err)
+		return
+	}
+	if a.handleDirectImageResponse(c, "images_edits", "/codex/images/edits", directPayload, req.Stream) {
+		return
+	}
 
 	normalized := normalizedImageEditRequest(req)
 	a.handleImageResponse(c, "images_edits", "image_edit", req.ResponseFormat, normalized)
@@ -116,16 +143,20 @@ func (a *App) validateImageModel(c *gin.Context, model string) bool {
 	return false
 }
 
-func decodeImageEditRequest(req *http.Request) (imageEditRequest, func(), error) {
+func decodeImageEditRequest(req *http.Request) (imageEditRequest, []byte, func(), error) {
 	mediaType, _, _ := mime.ParseMediaType(req.Header.Get("Content-Type"))
 	if !strings.HasPrefix(strings.ToLower(mediaType), "multipart/") {
+		body, err := readRequestBody(req)
+		if err != nil {
+			return imageEditRequest{}, nil, nil, err
+		}
 		var decoded imageEditRequest
-		err := json.NewDecoder(req.Body).Decode(&decoded)
-		return decoded, nil, err
+		err = json.Unmarshal(body, &decoded)
+		return decoded, body, nil, err
 	}
 
 	if err := req.ParseMultipartForm(32 << 20); err != nil {
-		return imageEditRequest{}, nil, err
+		return imageEditRequest{}, nil, nil, err
 	}
 	cleanup := func() {
 		if req.MultipartForm != nil {
@@ -136,6 +167,7 @@ func decodeImageEditRequest(req *http.Request) (imageEditRequest, func(), error)
 	decoded := imageEditRequest{imageGenerationRequest: imageGenerationRequest{
 		Model:             multipartValue(form, "model"),
 		Prompt:            multipartValue(form, "prompt"),
+		N:                 multipartInt(form, "n"),
 		Size:              multipartValue(form, "size"),
 		Quality:           multipartValue(form, "quality"),
 		Background:        multipartValue(form, "background"),
@@ -155,7 +187,7 @@ func decodeImageEditRequest(req *http.Request) (imageEditRequest, func(), error)
 		dataURL, err := multipartImageDataURL(file)
 		if err != nil {
 			cleanup()
-			return imageEditRequest{}, nil, err
+			return imageEditRequest{}, nil, nil, err
 		}
 		decoded.Images = append(decoded.Images, imageReference{ImageURL: dataURL})
 	}
@@ -163,11 +195,142 @@ func decodeImageEditRequest(req *http.Request) (imageEditRequest, func(), error)
 		dataURL, err := multipartImageDataURL(masks[0])
 		if err != nil {
 			cleanup()
-			return imageEditRequest{}, nil, err
+			return imageEditRequest{}, nil, nil, err
 		}
 		decoded.Mask = &imageReference{ImageURL: dataURL}
 	}
-	return decoded, cleanup, nil
+	body, err := json.Marshal(decoded)
+	if err != nil {
+		cleanup()
+		return imageEditRequest{}, nil, nil, err
+	}
+	return decoded, body, cleanup, nil
+}
+
+func resolvedImageModel(model string) string {
+	if model = strings.TrimSpace(model); model != "" {
+		return model
+	}
+	return defaultImageModel
+}
+
+func prepareDirectImagePayload(body []byte, model string, stream bool) ([]byte, error) {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	payload["model"] = mustRawJSON(model)
+	if stream {
+		payload["stream"] = json.RawMessage("true")
+	} else {
+		delete(payload, "stream")
+	}
+	return json.Marshal(payload)
+}
+
+func (a *App) handleDirectImageResponse(c *gin.Context, endpoint, path string, payload []byte, stream bool) bool {
+	account, response, err := a.openDirectImageWithFailover(c.Request.Context(), c, endpoint, path, payload, stream)
+	if err != nil {
+		if directImageEndpointUnavailable(err) {
+			return false
+		}
+		a.setRequestAccount(c, account)
+		a.handleOpenStreamError(c, endpoint, account.ID, account.ID, err)
+		return true
+	}
+	defer response.Close()
+
+	a.setRequestAccount(c, account)
+	a.observeQuotaSnapshot(account.ID, codex.ParseQuotaFromHeaders(response.Headers))
+	contentType := strings.TrimSpace(response.Headers.Get("Content-Type"))
+	if stream {
+		prepareStreamResponse(c)
+		if contentType != "" {
+			c.Header("Content-Type", contentType)
+		}
+		buffer := make([]byte, 32*1024)
+		for {
+			n, readErr := response.Body.Read(buffer)
+			if n > 0 {
+				_, _ = c.Writer.Write(buffer[:n])
+				c.Writer.Flush()
+			}
+			if readErr != nil {
+				if readErr != io.EOF {
+					a.respondStreamError(c, endpoint, account.ID, "", "error", readErr)
+					return true
+				}
+				break
+			}
+		}
+	} else {
+		body, readErr := io.ReadAll(response.Body)
+		if readErr != nil {
+			a.handleOpenStreamError(c, endpoint, account.ID, account.ID, readErr)
+			return true
+		}
+		if contentType == "" {
+			contentType = "application/json"
+		}
+		c.Data(http.StatusOK, contentType, body)
+	}
+	a.accounts.NoteSuccess(account.ID)
+	return true
+}
+
+func (a *App) openDirectImageWithFailover(ctx context.Context, c *gin.Context, endpoint, path string, payload []byte, stream bool) (accounts.Record, *codex.RawImageResponse, error) {
+	attempted := make(map[string]struct{})
+	var lastAccount accounts.Record
+	var lastErr error
+	for {
+		account, err := a.accounts.AcquireMatching("", func(record accounts.Record) bool {
+			_, alreadyAttempted := attempted[record.ID]
+			return !alreadyAttempted
+		})
+		if err != nil {
+			if lastErr != nil && strings.Contains(strings.ToLower(err.Error()), "no active accounts") {
+				return lastAccount, nil, lastErr
+			}
+			return account, nil, err
+		}
+		selected := account
+		account, err = a.accountMgr.EnsureReady(ctx, selected.ID)
+		if err != nil {
+			account = selected
+		}
+		if err == nil {
+			a.logUpstreamPayload(c, endpoint, "http", account.ID, json.RawMessage(payload))
+			open := a.directImageOpen
+			if open == nil {
+				open = a.httpClient.OpenImage
+			}
+			var response *codex.RawImageResponse
+			response, err = open(ctx, account, path, payload, stream)
+			if err == nil {
+				return account, response, nil
+			}
+		}
+		if directImageEndpointUnavailable(err) || !shouldFailoverRequest(err) {
+			return account, nil, err
+		}
+		attempted[account.ID] = struct{}{}
+		lastAccount = account
+		lastErr = err
+		a.classifyUpstreamError(account.ID, err)
+	}
+}
+
+func directImageEndpointUnavailable(err error) bool {
+	var upstreamErr *codex.UpstreamError
+	if !errors.As(err, &upstreamErr) {
+		return false
+	}
+	switch upstreamErr.StatusCode {
+	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+		return true
+	default:
+		return false
+	}
 }
 
 func multipartValue(form *multipart.Form, key string) string {

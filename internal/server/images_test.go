@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -20,6 +21,151 @@ import (
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/translate"
 )
+
+func TestImagesGenerationsUsesDirectCodexEndpoint(t *testing.T) {
+	t.Parallel()
+
+	app := newImagesTestApp(t, func(translate.NormalizedRequest) eventStream {
+		t.Fatal("tool fallback should not be used")
+		return nil
+	})
+	var gotPath string
+	var gotPayload []byte
+	var gotStream bool
+	app.directImageOpen = func(_ context.Context, _ accounts.Record, path string, payload []byte, stream bool) (*codex.RawImageResponse, error) {
+		gotPath = path
+		gotPayload = append([]byte(nil), payload...)
+		gotStream = stream
+		return &codex.RawImageResponse{
+			Body:    io.NopCloser(strings.NewReader(`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`)),
+			Headers: http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(`{
+		"model":"gpt-image-2",
+		"prompt":"A blue circle",
+		"n":2,
+		"response_format":"url"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer test-key")
+	app.Handler().ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if gotPath != "/codex/images/generations" || gotStream {
+		t.Fatalf("direct call = path %q stream %v", gotPath, gotStream)
+	}
+	var upstream map[string]any
+	if err := json.Unmarshal(gotPayload, &upstream); err != nil {
+		t.Fatalf("decode direct payload: %v", err)
+	}
+	if upstream["model"] != "gpt-image-2" || upstream["n"] != float64(2) || upstream["response_format"] != "url" {
+		t.Fatalf("direct payload = %#v", upstream)
+	}
+	if recorder.Body.String() != `{"created":123,"data":[{"url":"https://example.com/image.png"}]}` {
+		t.Fatalf("response body = %s", recorder.Body.String())
+	}
+}
+
+func TestImagesGenerationsStreamsDirectCodexResponse(t *testing.T) {
+	t.Parallel()
+
+	app := newImagesTestApp(t, nil)
+	const upstream = "event: image_generation.partial_image\ndata: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"partial\"}\n\n" +
+		"event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"final\"}\n\n"
+	var gotPayload []byte
+	app.directImageOpen = func(_ context.Context, _ accounts.Record, path string, payload []byte, stream bool) (*codex.RawImageResponse, error) {
+		if path != "/codex/images/generations" || !stream {
+			t.Fatalf("direct call = path %q stream %v", path, stream)
+		}
+		gotPayload = append([]byte(nil), payload...)
+		return &codex.RawImageResponse{
+			Body:    io.NopCloser(strings.NewReader(upstream)),
+			Headers: http.Header{"Content-Type": []string{"text/event-stream"}},
+		}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(`{"prompt":"A blue circle","stream":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-API-Key", "test-key")
+	app.Handler().ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK || recorder.Body.String() != upstream {
+		t.Fatalf("status = %d body = %q", recorder.Code, recorder.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(gotPayload, &payload); err != nil {
+		t.Fatalf("decode direct payload: %v", err)
+	}
+	if payload["model"] != defaultImageModel || payload["stream"] != true {
+		t.Fatalf("direct payload = %#v", payload)
+	}
+}
+
+func TestImagesEditsConvertsMultipartForDirectCodexEndpoint(t *testing.T) {
+	t.Parallel()
+
+	app := newImagesTestApp(t, nil)
+	var gotPayload []byte
+	app.directImageOpen = func(_ context.Context, _ accounts.Record, path string, payload []byte, stream bool) (*codex.RawImageResponse, error) {
+		if path != "/codex/images/edits" || stream {
+			t.Fatalf("direct call = path %q stream %v", path, stream)
+		}
+		gotPayload = append([]byte(nil), payload...)
+		return &codex.RawImageResponse{
+			Body:    io.NopCloser(strings.NewReader(`{"created":123,"data":[{"b64_json":"edited"}]}`)),
+			Headers: http.Header{"Content-Type": []string{"application/json"}},
+		}, nil
+	}
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	_ = writer.WriteField("model", "gpt-image-2")
+	_ = writer.WriteField("prompt", "Turn it green")
+	_ = writer.WriteField("n", "2")
+	imagePart, err := writer.CreateFormFile("image", "input.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = imagePart.Write([]byte("input-png"))
+	maskPart, err := writer.CreateFormFile("mask", "mask.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = maskPart.Write([]byte("mask-png"))
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer test-key")
+	app.Handler().ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		N      int              `json:"n"`
+		Images []imageReference `json:"images"`
+		Mask   *imageReference  `json:"mask"`
+	}
+	if err := json.Unmarshal(gotPayload, &payload); err != nil {
+		t.Fatalf("decode direct payload: %v", err)
+	}
+	if payload.N != 2 || len(payload.Images) != 1 || !strings.HasPrefix(payload.Images[0].ImageURL, "data:") {
+		t.Fatalf("direct edit payload = %#v", payload)
+	}
+	if payload.Mask == nil || !strings.HasPrefix(payload.Mask.ImageURL, "data:") {
+		t.Fatalf("direct edit mask = %#v", payload.Mask)
+	}
+}
 
 func TestImagesGenerationsReturnsOpenAIImageResponse(t *testing.T) {
 	t.Parallel()
@@ -443,6 +589,9 @@ func newImagesTestApp(t *testing.T, opener func(translate.NormalizedRequest) eve
 		httpClient:    httpClient,
 		continuations: accounts.NewContinuationManager(time.Minute),
 		models:        catalog,
+	}
+	app.directImageOpen = func(context.Context, accounts.Record, string, []byte, bool) (*codex.RawImageResponse, error) {
+		return nil, &codex.UpstreamError{StatusCode: http.StatusNotFound, Body: "direct images unavailable"}
 	}
 	if opener != nil {
 		record := mustGetAccount(t, accountsSvc, "acct_images")

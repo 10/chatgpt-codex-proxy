@@ -23,6 +23,8 @@ The Codex backend endpoints in active use are:
 
 - `POST /codex/responses`
 - `POST /codex/responses/compact`
+- `POST /codex/images/generations`
+- `POST /codex/images/edits`
 - `WSS /codex/responses`
 - `GET /codex/usage`
 - `GET /codex/models`
@@ -42,6 +44,17 @@ Codex backend:
 Auth backend:
 
 - `https://auth.openai.com`
+
+## Native Images
+
+The proxy sends `gpt-image-1.5` and `gpt-image-2` requests directly to:
+
+- `POST /codex/images/generations`
+- `POST /codex/images/edits`
+
+Generation requests remain JSON. JSON edits are forwarded with their OpenAI-compatible `images` and optional `mask` references. Multipart edits are converted to the same JSON shape with uploaded files encoded as data URLs.
+
+Non-streaming JSON and streaming SSE responses are passed through unchanged. A `404`, `405`, or `501` response falls back to the Responses `image_generation` tool adapter; other errors are returned to the client.
 
 ## Authentication
 

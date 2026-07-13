@@ -19,7 +19,7 @@ It is based on the current implementation, not an external specification. The co
 
 ## Overview
 
-The proxy keeps one shared streaming translation stack for Chat Completions and Responses, a dedicated compact path for `/v1/responses/compact`, and an Images API adapter over the Codex `image_generation` tool.
+The proxy keeps one shared streaming translation stack for Chat Completions and Responses, a dedicated compact path for `/v1/responses/compact`, and a direct-first Images API adapter with a Responses tool fallback.
 
 The high-level streaming pipeline is:
 
@@ -40,10 +40,10 @@ The compact pipeline is:
 The image pipeline is:
 
 1. Accept JSON on `/v1/images/generations`, or JSON/multipart input on `/v1/images/edits`.
-2. Build a forced `image_generation` tool call with `action: "generate"` or `action: "edit"`.
-3. Put edit source images in the user message and an optional mask in `input_image_mask`.
-4. Send the enclosing request through the normal Codex account and transport stack.
-5. Translate the returned `image_generation_call` into an Images API JSON response or Images API SSE events.
+2. Default the image model to `gpt-image-2`; convert multipart edit uploads to data-URL JSON references.
+3. Send the request to `/codex/images/generations` or `/codex/images/edits` and pass the native JSON or SSE response through unchanged.
+4. If the native endpoint returns `404`, `405`, or `501`, build the previous forced `image_generation` tool request and send it through the Responses transport.
+5. On fallback only, translate the returned `image_generation_call` into Images API JSON or SSE events.
 
 ## Canonical Internal Request
 
@@ -118,10 +118,11 @@ Unlike `/v1/responses`, this endpoint does not use the SSE streaming path. It se
 
 ### `/v1/images/generations` and `/v1/images/edits`
 
-Both endpoints use Codex image generation inside an enclosing Responses request. The public image model defaults to `gpt-image-2`; `gpt-image-1.5` is also accepted. The image model is assigned to the tool, while normal account resolution selects a route-valid text model for the enclosing request.
+Both endpoints use the native Codex Images API first. The public image model defaults to `gpt-image-2`; `gpt-image-1.5` is also accepted. JSON fields are preserved, while multipart edit uploads are converted into JSON `images` and `mask` references containing data URLs.
 
-The adapter forwards these tool options when supplied:
+The direct adapter forwards image fields including:
 
+- `n`
 - `size`
 - `quality`
 - `background`
@@ -133,13 +134,13 @@ The adapter forwards these tool options when supplied:
 
 JSON edits accept `images` entries containing `image_url` or `file_id`, plus an optional `mask`. Multipart edits accept one or more `image` or `image[]` files and an optional `mask` file; uploads are encoded as data URLs before being sent upstream.
 
-Non-streaming responses contain `created`, `data`, upstream image metadata when present, and image-generation usage when Codex reports it. The default data field is `b64_json`. `response_format: "url"` wraps the returned bytes in a data URL rather than creating a hosted URL.
+Native non-streaming responses and their metadata are returned unchanged. Native streaming responses are forwarded frame-for-frame and are flushed as they arrive.
 
-With `stream: true`, generation emits `image_generation.partial_image` and `image_generation.completed`; edits use the equivalent `image_edit.*` event names. The stream does not append a `[DONE]` sentinel.
+If a native endpoint responds with `404`, `405`, or `501`, the request falls back to an enclosing Responses request using a forced `image_generation` tool. Other upstream errors are returned directly and do not trigger fallback.
 
-Codex currently returns one image for each image tool call. The adapter does not fan out `n` into multiple upstream requests.
+On fallback, the adapter forwards the same tool options except `n`; the image tool produces one image. `response_format: "url"` becomes a data URL because the tool returns image bytes instead of a hosted URL.
 
-Image options are passed through, not simulated locally. In live testing, the current `gpt-image-2-codex` backend rejected `input_fidelity` and did not always honor the requested size or partial-image count; the proxy returns the upstream error or actual output metadata/events.
+Image options are passed through, not simulated locally. Live direct-endpoint testing confirmed native image usage metadata and also returned an output size different from the requested size, so clients should use the returned metadata.
 
 ## Model Resolution
 
@@ -377,7 +378,7 @@ The conversation prefix stops at the last assistant or tool-call item. This is u
 
 ## Upstream Transport Translation
 
-Chat Completions, Responses, and Images requests consume an upstream stream even when the public request is non-streaming. Responses compact is the exception: it uses a dedicated JSON request and response.
+Chat Completions and Responses requests consume an upstream stream even when the public request is non-streaming. Native Images requests use the matching JSON or SSE mode. Responses compact uses a dedicated JSON request and response.
 
 ### HTTP path
 
