@@ -104,6 +104,12 @@ If both `messages` and Responses-style fields are present, `messages` wins.
 
 `POST /v1/responses` binds directly to `openai.ResponsesRequest` and normalizes with `translate.Responses(...)`.
 
+`GET /v1/responses` upgrades to a persistent WebSocket connection. The client sends one JSON `response.create` event per turn. WebSocket streaming is implicit, so a supplied `stream` field is ignored. `background: true` is rejected, while an optional `generate` boolean is forwarded only on the upstream WebSocket payload.
+
+The connection processes turns sequentially. It reuses the same upstream WebSocket while the selected account remains the same; if account selection changes, it closes that upstream connection and opens another one. Each turn ends with `response.completed` or an `error` JSON message. There is no SSE `done` event or `[DONE]` sentinel.
+
+Malformed JSON, unsupported event types, and other request-level protocol errors are returned as `type: "error"` messages without intentionally closing the client connection. An unknown `previous_response_id` uses the WebSocket-specific code `previous_response_not_found`.
+
 ### `/v1/responses/compact`
 
 `POST /v1/responses/compact` binds directly to `openai.ResponsesCompactRequest` and normalizes with `translate.Compact(...)`.
@@ -297,12 +303,14 @@ Responses ignored fields:
 - `max_output_tokens`
 - `parallel_tool_calls`
 - `store`
-- `background`
+- `background` on `POST /v1/responses`; the WebSocket endpoint rejects `background: true`
 - `user`
 - `metadata`
 - `stream_options`
 
-`service_tier` is transmitted upstream for Chat Completions and Responses requests. The compatibility alias `fast` is normalized to Codex's `priority` wire value.
+`service_tier` is retained on the canonical request and sent on the HTTP Codex path. OpenAI's `auto` value is normalized to Codex's `default` wire value, and the compatibility alias `fast` is normalized to `priority`. The current WebSocket payload builder does not include `service_tier`.
+
+The Chat Completions, Responses, and Responses compact JSON handlers decode `Content-Encoding: zstd` request bodies. Identity or an omitted encoding is accepted; other request content encodings are rejected locally.
 
 ## Continuation Translation
 
@@ -369,11 +377,11 @@ The conversation prefix stops at the last assistant or tool-call item. This is u
 
 ## Upstream Transport Translation
 
-The proxy always consumes an upstream stream, even for non-streaming public requests.
+Chat Completions, Responses, and Images requests consume an upstream stream even when the public request is non-streaming. Responses compact is the exception: it uses a dedicated JSON request and response.
 
 ### HTTP path
 
-For ordinary requests, the proxy sends `codex.StreamRequestPayload(req)` to `POST /codex/responses`.
+For requests without continuation state or hosted web search, the proxy sends `codex.StreamRequestPayload(req)` to `POST /codex/responses`.
 
 That forced HTTP payload does all of the following:
 
@@ -385,7 +393,7 @@ So even if the public request was non-streaming, the proxy still uses the stream
 
 ### WebSocket path
 
-For continuation requests, the proxy opens `WSS /codex/responses` and sends:
+The proxy uses `WSS /codex/responses` for explicit or implicit continuations, requests containing the hosted `web_search` tool, and turns received through the public Responses WebSocket. It sends:
 
 - `type = "response.create"`
 - `model`
@@ -398,8 +406,9 @@ For continuation requests, the proxy opens `WSS /codex/responses` and sends:
 - optional `previous_response_id`
 - optional `prompt_cache_key`
 - optional `include`
+- optional `generate` for public WebSocket turns
 
-The WebSocket path preserves `previous_response_id` because Codex continuation happens there.
+The WebSocket payload omits `stream`, `store`, and `service_tier`. It preserves `previous_response_id` because Codex continuation happens there. A persistent public WebSocket session can send later `response.create` payloads over the same upstream connection when the account does not change.
 
 ## Upstream Events the Proxy Consumes
 
@@ -433,6 +442,7 @@ The rebuilt Chat Completions response has:
 
 - `id`
 - `object = "chat.completion"`
+- `created`, copied from upstream `created_at` when available or synthesized locally
 - `model`
 - `choices[0].index = 0`
 - `choices[0].message.role = "assistant"`
@@ -458,6 +468,8 @@ The rebuilt Responses response has:
 - `output`
 - `output_text`
 - `usage`
+
+The proxy starts from the native final upstream `response` object, preserving other top-level and usage fields it does not explicitly rebuild. It then overwrites or fills the compatibility fields listed above.
 
 `output` is reconstructed from both:
 
@@ -517,6 +529,8 @@ The proxy emits Chat Completions SSE, not raw Codex SSE.
 It always starts by sending an initial assistant-role chunk:
 
 - `delta = {"role":"assistant"}`
+
+Every chunk includes one stable `created` timestamp for the stream.
 
 Then it maps upstream events like this:
 
@@ -589,6 +603,8 @@ At the end of the Responses stream, the proxy emits:
 - `event: done`
 - `data: [DONE]`
 
+The public Responses WebSocket applies the same tool-event normalization, completed-response rebuilding, and tuple reconversion, but writes plain JSON WebSocket messages. It does not append the SSE terminal event or `[DONE]` sentinel.
+
 ## Error Translation
 
 Request-shape and normalization failures are returned as OpenAI-style JSON errors.
@@ -598,10 +614,12 @@ Model lookup failures return:
 - HTTP `404`
 - code `model_not_found`
 
-Unknown or expired continuation IDs return:
+Unknown or expired continuation IDs on the JSON HTTP endpoints return:
 
 - HTTP `400`
 - code `invalid_previous_response_id`
+
+On the public Responses WebSocket, the equivalent error message has status `400` and code `previous_response_not_found`.
 
 Upstream failures are classified into OpenAI-style proxy errors:
 
@@ -638,7 +656,7 @@ The proxy is not a thin field rename layer. It does all of the following:
 - collapses instructions and content into the shapes Codex accepts
 - rewrites schemas for Codex compatibility and converts tuple outputs back afterward
 - converts public replay-style follow-up turns into true Codex continuations when safe
-- uses HTTP SSE for ordinary requests and WebSocket for continuations
+- uses HTTP SSE for ordinary requests and WebSocket for continuations, hosted web search, and the public Responses WebSocket
 - reconstructs OpenAI Chat Completions and Responses outputs from the Codex stream
 - hides internal quota events and translates upstream failures into OpenAI-style errors
 

@@ -4,11 +4,11 @@ This document explains exactly how account rotation works in `chatgpt-codex-prox
 
 It is written to match the current implementation in:
 
-- [internal/accounts/service.go](/Users/Anson/Desktop/chatgpt-codex-proxy/internal/accounts/service.go)
-- [internal/codex/account_manager.go](/Users/Anson/Desktop/chatgpt-codex-proxy/internal/codex/account_manager.go)
-- [internal/server/app.go](/Users/Anson/Desktop/chatgpt-codex-proxy/internal/server/app.go)
-- [internal/server/public.go](/Users/Anson/Desktop/chatgpt-codex-proxy/internal/server/public.go)
-- [internal/server/admin.go](/Users/Anson/Desktop/chatgpt-codex-proxy/internal/server/admin.go)
+- [internal/accounts/service.go](../internal/accounts/service.go)
+- [internal/codex/account_manager.go](../internal/codex/account_manager.go)
+- [internal/server/app.go](../internal/server/app.go)
+- [internal/server/public.go](../internal/server/public.go)
+- [internal/server/admin.go](../internal/server/admin.go)
 
 If the code changes, this file should be updated to stay authoritative.
 
@@ -90,9 +90,9 @@ If `cooldown_until` is in the past, the proxy clears it automatically during nor
 
 Cached quota blocks normal routing only in these cases:
 
-- Primary `allowed == false`
-- Primary `limit_reached == true` with a reset still in the future
-- Secondary `limit_reached == true` with a reset still in the future
+- Primary `allowed == false`, unless its reset is already past
+- Primary `limit_reached == true` with no reset timestamp or a reset still in the future
+- Secondary `limit_reached == true` with no reset timestamp or a reset still in the future
 
 `code_review_rate_limit` does not block normal routing.
 
@@ -134,12 +134,12 @@ Routing is a two-step process:
 1. Build the eligible account list
 2. Apply the configured strategy to that eligible list
 
-One important exception exists for continuations or other request flows that pass a preferred account ID:
+The account service also accepts a preferred account ID:
 
 - If a `preferredID` is provided and that account is still eligible, it is used immediately.
 - If a `preferredID` is provided but the account is no longer eligible, the proxy falls back to the configured global strategy.
 
-This is how `previous_response_id` continuations stay pinned to the original account when possible.
+The streaming Responses paths add stricter continuation handling above this generic service behavior, as described below.
 
 ## `round_robin`
 
@@ -339,21 +339,20 @@ If `acct_a` later hits cooldown:
 
 ## Continuations and Preferred Account Routing
 
-Some requests, especially `Responses API` continuations via `previous_response_id`, should stay on the account that created the original response.
+The proxy keeps short-lived continuation state in memory, including the account that created each response.
 
-The proxy keeps short-lived continuation state in memory.
+For explicit `previous_response_id` requests on `POST /v1/responses`, `POST /v1/chat/completions`, and the public Responses WebSocket:
 
-When a continuation arrives:
+- the original account is required; the global rotation strategy is not used as a fallback
+- the account must still have a usable token and support the resolved model
+- the continuation is not failed over to another account if the upstream WebSocket request fails
+- failure to prepare the original account returns `continuation_account_unavailable`
 
-- it resolves the original account
-- passes that account ID into acquisition as `preferredID`
+These continuation paths call the account readiness check directly. They do not re-run the normal rotation eligibility filter, so a stored cooldown alone does not move the continuation to another account.
 
-Routing behavior then becomes:
+Implicit replay detection initially pins the matching continuation in the same way. If that implicit WebSocket resume fails, however, the proxy can retry the original full request through normal account selection.
 
-1. If the preferred account is still eligible, use it immediately
-2. If it is no longer eligible, use the configured global strategy instead
-
-This gives the proxy the best chance of preserving upstream continuity while still recovering gracefully from exhausted or failed accounts.
+`POST /v1/responses/compact` is different: saved history is expanded locally, and the original account is only preferred. If it cannot be selected, compact acquisition may use another eligible account that supports the model.
 
 ## Readiness Checks After Selection
 
@@ -384,7 +383,7 @@ When the proxy classifies a failure as `429`:
 
 1. Use `Retry-After` if present
 2. Otherwise use cached primary quota reset if available
-3. Otherwise use the configured rate-limit fallback duration
+3. Otherwise use the built-in 60-second rate-limit fallback
 
 ### How 402 cooldown is chosen
 
@@ -392,7 +391,7 @@ When the proxy classifies a failure as quota exhaustion:
 
 1. Use cached primary reset if available
 2. Otherwise use cached secondary reset if available
-3. Otherwise use the configured quota fallback duration
+3. Otherwise use the built-in 5-minute quota fallback
 
 ### What cooldown does not do
 
@@ -424,7 +423,7 @@ This lets the proxy recover early if the upstream quota cache proves the account
 
 ## Failure Handling
 
-Some failures are not temporary.
+Failure classification can change permanent account status or apply a temporary cooldown.
 
 ### 401 Unauthorized
 
@@ -591,8 +590,9 @@ Behavior:
 
 1. The proxy resolves the continuation state
 2. It requires `acct_b` so upstream turn state is not replayed on a different account
-3. If `acct_b` is still eligible, it uses `acct_b`
-4. If `acct_b` is now in cooldown or otherwise ineligible, the request fails with `continuation_account_unavailable`
+3. It verifies that `acct_b` is ready and supports the continuation model
+4. A cooldown alone does not reroute the continuation
+5. If `acct_b` cannot be prepared, the request fails with `continuation_account_unavailable`
 
 ## Practical Mental Model
 

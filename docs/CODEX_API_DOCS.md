@@ -101,7 +101,7 @@ Accept: text/event-stream
 
 ### Notes
 
-- `OpenAI-Beta: responses_websockets=2026-02-06` is sent for response creation requests, compact requests, and websocket continuations.
+- `OpenAI-Beta: responses_websockets=2026-02-06` is sent for HTTP response creation, compact requests, and every upstream WebSocket connection.
 - `x-codex-turn-state` is reused on continuation requests.
 - The proxy preserves a specific header ordering when talking to upstream.
 
@@ -160,7 +160,7 @@ Implementation notes:
 - The HTTP path always forces `stream = true`.
 - The HTTP path always forces `store = false`.
 - The HTTP path clears `previous_response_id` before sending.
-- The websocket continuation path does not use this exact object; it wraps the request in a `response.create` envelope.
+- The websocket path does not use this exact object; it wraps selected request fields in a `response.create` envelope.
 
 ## Compact Request Object
 
@@ -1022,9 +1022,9 @@ The websocket handshake uses the same auth and identity headers as the HTTP path
 - `x-codex-turn-state`
 - `OpenAI-Beta`
 
-### Initial message
+### Initial and subsequent messages
 
-The proxy sends one JSON message immediately after connecting:
+The proxy sends one JSON message immediately after connecting. Persistent public Responses WebSocket sessions may send later messages on the same upstream connection after the preceding response completes:
 
 ```json
 {
@@ -1047,22 +1047,35 @@ The proxy sends one JSON message immediately after connecting:
   "prompt_cache_key": "01234567-89ab-cdef-0123-456789abcdef",
   "include": [
     "reasoning.encrypted_content"
-  ]
+  ],
+  "generate": false
 }
 ```
 
 Observed fields:
 
 - `type: "response.create"`
-- all request fields from the HTTP `Request` object except `stream` and `store`
+- `model`
+- `input`
+- `instructions`
+- optional `tools`
+- optional `tool_choice`
+- optional `text`
+- optional `reasoning`
+- optional `previous_response_id`
+- optional `prompt_cache_key`
+- optional `include`
+- optional `generate`
+
+The current WebSocket payload omits the HTTP request fields `stream`, `store`, and `service_tier`.
 
 ### Websocket response messages
 
-The proxy expects each websocket message to be a single JSON object with a `type` field.
+The proxy expects each websocket message to be a single JSON object with a `type` field. It reads through `response.completed` before sending another `response.create` on a reused connection.
 
 It parses the same event types documented for the HTTP SSE path.
 
-There is no practical `curl` command for this route because the continuation path is a WebSocket endpoint rather than a normal HTTP request.
+There is no practical `curl` command for this route because it is a WebSocket endpoint rather than a normal HTTP request.
 
 ## GET /codex/usage
 
@@ -1517,7 +1530,7 @@ These claims are read from tokens by the proxy:
 - Any field not mentioned here may still exist upstream; it is simply not used by this proxy today.
 - The proxy only documents shapes it either sends or parses.
 - The proxy does not maintain a full schema for every upstream event subtype; some event objects are treated as partially typed JSON.
-- The websocket path is currently used for continuation requests because it preserves `previous_response_id`.
+- The websocket path is used for continuation requests, hosted web search requests, and the proxy's public Responses WebSocket transport.
 
 ## Quick Reference
 

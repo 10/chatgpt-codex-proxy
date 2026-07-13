@@ -200,6 +200,8 @@ Supported behavior:
 Important notes:
 
 - `/v1/chat/completions` also accepts a Responses-shaped body when `messages` is omitted.
+- `GET /v1/responses` is a WebSocket endpoint. Each JSON message must be a `response.create` event; the connection can process multiple turns sequentially and does not use SSE `[DONE]` markers.
+- The Chat Completions, Responses, and Responses compact JSON endpoints accept identity or zstd request bodies. Other request content encodings are rejected.
 - `/v1/responses/compact` follows the public OpenAI contract and returns `object: "response.compaction"` instead of raw Codex JSON.
 - `/v1/responses/compact` supports explicit `previous_response_id` by expanding locally stored continuation history before calling the private compact backend.
 - Compact requests currently support the same text, image, file, reasoning, tool-call, tool-output, and compaction input items used elsewhere in the proxy. Audio input is rejected locally because the current Codex upstream does not accept `input_audio` or audio MIME types as files.
@@ -207,7 +209,7 @@ Important notes:
 - Image responses default to `b64_json`. `response_format: "url"` returns a data URL because Codex returns image bytes rather than a hosted URL.
 - Image options are forwarded rather than emulated. The current Codex `gpt-image-2-codex` backend rejects `input_fidelity`, and it may report a different output size or partial-image count than requested.
 - The Codex image tool currently produces one image per request; `n` does not fan out into multiple upstream requests.
-- Continuations are pinned to the original account when possible.
+- Streaming continuations are pinned to the original account; compact requests expand saved history locally and only prefer that account.
 - When the proxy can derive a stable conversation key, it sets `prompt_cache_key` upstream automatically.
 - Some OpenAI compatibility fields are accepted and ignored. See [docs/TRANSLATION.md](docs/TRANSLATION.md) for exact behavior.
 
