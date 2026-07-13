@@ -41,7 +41,7 @@ type App struct {
 
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	accountsStore := store.NewJSONAccountsStore(cfg.DataDir)
-	accountsSvc, err := accounts.NewService(accountsStore, accounts.RotationStrategy(cfg.RotationStrategy))
+	accountsSvc, err := accounts.NewService(accountsStore, accounts.RotationLeastUsed)
 	if err != nil {
 		return nil, err
 	}
@@ -103,14 +103,13 @@ func (a *App) modelCatalog() *models.Catalog {
 }
 
 func (a *App) housekeeping(ctx context.Context) {
-	sweepTicker := time.NewTicker(30 * time.Second)
-	defer sweepTicker.Stop()
+	sweeps := time.Tick(30 * time.Second)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-sweepTicker.C:
+		case <-sweeps:
 			a.continuations.Sweep()
 			a.deviceLogins.DeleteExpired(time.Now().UTC())
 		}
@@ -240,18 +239,12 @@ func clampUpstreamStatus(status int) int {
 
 func looksLikeCloudflareBlock(text string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(text))
-	if normalized == "" {
-		return false
-	}
 	return strings.Contains(normalized, "cf_chl") ||
 		strings.Contains(normalized, "<!doctype") ||
 		strings.Contains(normalized, "<html")
 }
 
 func fallbackUntil(now time.Time, duration time.Duration) *time.Time {
-	if duration <= 0 {
-		return nil
-	}
 	until := now.Add(duration).UTC()
 	return &until
 }

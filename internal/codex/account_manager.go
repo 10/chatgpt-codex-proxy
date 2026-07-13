@@ -19,8 +19,7 @@ type AccountManager struct {
 	http     *HTTPClient
 	models   ModelSupport
 
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	locks sync.Map
 }
 
 type ModelSupport interface {
@@ -36,7 +35,6 @@ func NewAccountManager(cfg config.Config, accountsSvc *accounts.Service, oauth *
 		oauth:    oauth,
 		http:     httpClient,
 		models:   modelSupport,
-		locks:    make(map[string]*sync.Mutex),
 	}
 }
 
@@ -196,12 +194,6 @@ func validateReadyRecord(record accounts.Record) error {
 }
 
 func (m *AccountManager) lockFor(id string) *sync.Mutex {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	lock, ok := m.locks[id]
-	if !ok {
-		lock = &sync.Mutex{}
-		m.locks[id] = lock
-	}
-	return lock
+	lock, _ := m.locks.LoadOrStore(id, &sync.Mutex{})
+	return lock.(*sync.Mutex)
 }

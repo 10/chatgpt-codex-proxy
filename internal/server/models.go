@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -13,11 +14,6 @@ import (
 const modelCreatedTimestamp int64 = 1700000000
 
 var codexImageModels = []string{"gpt-image-1.5", "gpt-image-2"}
-
-type modelListResponse struct {
-	Object string          `json:"object"`
-	Data   []modelResponse `json:"data"`
-}
 
 type modelResponse struct {
 	ID      string `json:"id"`
@@ -43,7 +39,7 @@ func (a *App) handleModels(c *gin.Context) {
 			data = append(data, modelObject(model))
 		}
 	}
-	c.JSON(http.StatusOK, modelListResponse{Object: "list", Data: data})
+	c.JSON(http.StatusOK, gin.H{"object": "list", "data": data})
 }
 
 func codexClientModelsResponse(entries []models.Entry) map[string]any {
@@ -107,12 +103,7 @@ func (a *App) handleModelByID(c *gin.Context) {
 }
 
 func isCodexImageModel(model string) bool {
-	for _, candidate := range codexImageModels {
-		if model == candidate {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(codexImageModels, model)
 }
 
 func modelObject(model string) modelResponse {

@@ -106,18 +106,12 @@ func resolveLocalRefs(node map[string]any, defs map[string]map[string]any, resol
 
 func forEachSchemaChild(node map[string]any, visit func(map[string]any)) {
 	updateSchemaChildren(node, func(child map[string]any) map[string]any {
-		if visit != nil {
-			visit(child)
-		}
+		visit(child)
 		return child
 	})
 }
 
 func updateSchemaChildren(node map[string]any, update func(map[string]any) map[string]any) {
-	if node == nil || update == nil {
-		return
-	}
-
 	for _, key := range schemaMapChildKeys {
 		children, ok := node[key].(map[string]any)
 		if !ok {

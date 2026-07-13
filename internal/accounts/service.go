@@ -1,8 +1,9 @@
 package accounts
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,13 +41,9 @@ func NewService(accountsStore Store, defaultStrategy RotationStrategy) (*Service
 	}
 
 	svc := &Service{
-		store:   accountsStore,
-		records: make(map[string]*Record),
-	}
-	if state.RotationStrategy != "" {
-		svc.rotationStrategy = state.RotationStrategy
-	} else {
-		svc.rotationStrategy = defaultStrategy
+		store:            accountsStore,
+		records:          make(map[string]*Record),
+		rotationStrategy: cmp.Or(state.RotationStrategy, defaultStrategy),
 	}
 
 	now := time.Now().UTC()
@@ -79,11 +76,8 @@ func (s *Service) List() ([]Record, error) {
 	for _, record := range s.records {
 		items = append(items, cloneRecord(record))
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
-			return items[i].ID < items[j].ID
-		}
-		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	slices.SortFunc(items, func(a, b Record) int {
+		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), cmp.Compare(a.ID, b.ID))
 	})
 	return items, nil
 }
@@ -361,8 +355,12 @@ func (s *Service) AcquireMatching(preferredID string, allow func(Record) bool) (
 		record := selectRoundRobin(candidates, &s.roundRobinIndex)
 		return cloneRecord(record), nil
 	case RotationSticky:
-		if sticky := s.selectStickyLocked(candidates, now); sticky != nil {
-			return cloneRecord(sticky), nil
+		if s.stickyAccountID != "" {
+			for _, candidate := range candidates {
+				if candidate.ID == s.stickyAccountID {
+					return cloneRecord(candidate), nil
+				}
+			}
 		}
 	}
 	record := selectLeastUsed(candidates, &s.roundRobinIndex)
@@ -395,10 +393,6 @@ func (s *Service) persistLocked() error {
 }
 
 func (s *Service) normalizeLoadedRecord(record *Record, now time.Time) bool {
-	if record == nil {
-		return false
-	}
-
 	changed := false
 	metadata := metadataFromToken(record.Token)
 	if record.Status == "" {

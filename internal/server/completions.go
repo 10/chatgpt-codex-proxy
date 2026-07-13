@@ -32,9 +32,7 @@ func (a *App) handleCompletions(c *gin.Context) {
 			return normalizeCompletionsBody(body, a.modelCatalog())
 		},
 		a.streamCompletion,
-		func(accumulator *translate.Accumulator) map[string]any {
-			return accumulator.CompletionObject()
-		},
+		(*translate.Accumulator).CompletionObject,
 		func(map[string]any, map[string]any) error { return nil },
 	)
 }
@@ -81,11 +79,7 @@ func (a *App) streamCompletion(c *gin.Context, account accounts.Record, normaliz
 			if err == io.EOF {
 				err = errIncompleteResponse
 			}
-			if upstreamErr {
-				a.respondClassifiedStreamError(c, "completions", account.ID, accumulator.ResponseID, "", err)
-			} else {
-				a.respondStreamError(c, "completions", account.ID, accumulator.ResponseID, "", err)
-			}
+			a.respondStreamError(c, "completions", account.ID, accumulator.ResponseID, "", err, upstreamErr)
 			return
 		}
 		if event.Type == "response.output_text.delta" {

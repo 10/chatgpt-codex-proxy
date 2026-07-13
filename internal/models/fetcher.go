@@ -3,7 +3,8 @@ package models
 import (
 	"context"
 	"log/slog"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -39,22 +40,17 @@ func NewFetcher(cfg config.Config, logger *slog.Logger, accountsSvc *accounts.Se
 }
 
 func (f *Fetcher) Run(ctx context.Context) {
-	timer := time.NewTimer(initialFetchDelay)
-	defer timer.Stop()
-
 	select {
 	case <-ctx.Done():
 		return
-	case <-timer.C:
+	case <-time.After(initialFetchDelay):
 	}
 
-	fetched := false
-	for !fetched {
+	for {
 		if ctx.Err() != nil {
 			return
 		}
-		fetched = f.refreshOnce(ctx)
-		if fetched {
+		if f.refreshOnce(ctx) {
 			break
 		}
 		select {
@@ -64,13 +60,12 @@ func (f *Fetcher) Run(ctx context.Context) {
 		}
 	}
 
-	ticker := time.NewTicker(refreshInterval)
-	defer ticker.Stop()
+	ticks := time.Tick(refreshInterval)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
 			f.refreshOnce(ctx)
 		}
 	}
@@ -86,12 +81,10 @@ func (f *Fetcher) refreshOnce(ctx context.Context) bool {
 		return false
 	}
 
-	keys := make([]string, 0, len(routes))
-	for key := range routes {
+	keys := slices.Sorted(maps.Keys(routes))
+	for _, key := range keys {
 		f.catalog.RegisterRoute(key)
-		keys = append(keys, key)
 	}
-	sort.Strings(keys)
 
 	anySuccess := false
 	fetchedAt := time.Now().UTC()

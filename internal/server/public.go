@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,9 +75,7 @@ func (a *App) handleChatCompletions(c *gin.Context) {
 			return normalizeChatCompletionsBody(body, a.modelCatalog())
 		},
 		a.streamChatCompletion,
-		func(accumulator *translate.Accumulator) map[string]any {
-			return accumulator.ChatCompletionObject()
-		},
+		(*translate.Accumulator).ChatCompletionObject,
 		translate.PatchChatCompletionObjectForTuple,
 	)
 }
@@ -89,9 +88,7 @@ func (a *App) handleResponses(c *gin.Context) {
 			return normalizeResponsesBody(body, a.modelCatalog())
 		},
 		a.streamResponses,
-		func(accumulator *translate.Accumulator) map[string]any {
-			return accumulator.ResponsesObject()
-		},
+		(*translate.Accumulator).ResponsesObject,
 		translate.PatchResponsesObjectForTuple,
 	)
 }
@@ -281,12 +278,9 @@ func shouldFailoverRequest(err error) bool {
 }
 
 func requestUsesHostedWebSearch(request translate.NormalizedRequest) bool {
-	for _, tool := range request.Tools {
-		if strings.TrimSpace(tool.Type) == "web_search" {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(request.Tools, func(tool openai.ToolDefinition) bool {
+		return strings.TrimSpace(tool.Type) == "web_search"
+	})
 }
 
 func (a *App) openHTTPStream(c *gin.Context, ctx context.Context, endpoint string, resolution *sessionResolution, attempted map[string]struct{}) (accounts.Record, eventStream, *accounts.QuotaSnapshot, error) {
@@ -358,7 +352,12 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 
 	accumulator := translate.NewAccumulator(normalized)
 	createdAt := time.Now().UTC().Unix()
-	toolCalls := newChatToolCallStreamer(createdAt)
+	toolCalls := &chatToolCallStreamer{
+		indexByCallID: make(map[string]int),
+		initialized:   make(map[string]bool),
+		argumentsSent: make(map[string]int),
+		createdAt:     createdAt,
+	}
 	images := newChatImageStreamer()
 	var tupleTextBuffer strings.Builder
 	writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk("", normalized.Model, map[string]any{"role": "assistant"}, "", createdAt)))
@@ -369,16 +368,12 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 		if err != nil {
 			if err == io.EOF {
 				if !accumulator.IsCompleted() {
-					a.respondStreamError(c, "chat_completions", account.ID, accumulator.ResponseID, "", errIncompleteResponse)
+					a.respondStreamError(c, "chat_completions", account.ID, accumulator.ResponseID, "", errIncompleteResponse, false)
 					return
 				}
 				break
 			}
-			if upstreamErr {
-				a.respondClassifiedStreamError(c, "chat_completions", account.ID, accumulator.ResponseID, "", err)
-			} else {
-				a.respondStreamError(c, "chat_completions", account.ID, accumulator.ResponseID, "", err)
-			}
+			a.respondStreamError(c, "chat_completions", account.ID, accumulator.ResponseID, "", err, upstreamErr)
 			return
 		}
 		if state := accumulator.ToolCallStateForEvent(event); state != nil && (state.ToolType == "custom" || strings.HasPrefix(event.Type, "response.custom_tool_call_input.")) {
@@ -535,25 +530,21 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 	prepareStreamResponse(c)
 
 	accumulator := translate.NewAccumulator(normalized)
-	state := responsesStreamState{}
+	var tupleTextBuffer strings.Builder
 	for {
 		event, upstreamErr, err := a.nextStreamEvent(account, accumulator, stream)
 		if err != nil {
 			if err == io.EOF {
 				if !accumulator.IsCompleted() {
-					a.respondStreamError(c, "responses", account.ID, accumulator.ResponseID, "error", errIncompleteResponse)
+					a.respondStreamError(c, "responses", account.ID, accumulator.ResponseID, "error", errIncompleteResponse, false)
 					return
 				}
 				break
 			}
-			if upstreamErr {
-				a.respondClassifiedStreamError(c, "responses", account.ID, accumulator.ResponseID, "error", err)
-			} else {
-				a.respondStreamError(c, "responses", account.ID, accumulator.ResponseID, "error", err)
-			}
+			a.respondStreamError(c, "responses", account.ID, accumulator.ResponseID, "error", err, upstreamErr)
 			return
 		}
-		for _, outgoing := range a.responsesStreamEvents(c, accumulator, normalized, &state, event) {
+		for _, outgoing := range a.responsesStreamEvents(c, accumulator, normalized, &tupleTextBuffer, event) {
 			writeSSE(c.Writer, outgoing.Type, translate.ResponseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload))
 		}
 		c.Writer.Flush()
@@ -594,15 +585,6 @@ type chatToolCallStreamer struct {
 	argumentsSent map[string]int
 	nextIndex     int
 	createdAt     int64
-}
-
-func newChatToolCallStreamer(createdAt int64) *chatToolCallStreamer {
-	return &chatToolCallStreamer{
-		indexByCallID: make(map[string]int),
-		initialized:   make(map[string]bool),
-		argumentsSent: make(map[string]int),
-		createdAt:     createdAt,
-	}
 }
 
 func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *translate.Accumulator, normalized translate.NormalizedRequest, event *codex.StreamEvent) bool {
@@ -856,8 +838,11 @@ func (a *App) respondOpenAIUpstreamStreamError(c *gin.Context, endpoint, account
 	a.writeOpenAIError(c, status, code, message, "api_error")
 }
 
-func (a *App) respondClassifiedStreamError(c *gin.Context, endpoint, accountID, responseID, eventName string, err error) {
-	status, code, message := a.classifyUpstreamError(accountID, err)
+func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID, eventName string, err error, classify bool) {
+	status, code, message := http.StatusInternalServerError, "api_error", err.Error()
+	if classify {
+		status, code, message = a.classifyUpstreamError(accountID, err)
+	}
 	a.logUpstreamStreamFailure(c, endpoint, accountID, responseID, err)
 	if endpoint == "responses" {
 		writeResponsesStreamError(c.Writer, status, message)
@@ -865,17 +850,6 @@ func (a *App) respondClassifiedStreamError(c *gin.Context, endpoint, accountID, 
 		return
 	}
 	writeSSE(c.Writer, eventName, translate.MustJSON(middleware.OpenAIErrorPayload(message, "api_error", code, "")))
-	c.Writer.Flush()
-}
-
-func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID, eventName string, err error) {
-	a.logUpstreamStreamFailure(c, endpoint, accountID, responseID, err)
-	if endpoint == "responses" {
-		writeResponsesStreamError(c.Writer, http.StatusInternalServerError, err.Error())
-		c.Writer.Flush()
-		return
-	}
-	writeSSE(c.Writer, eventName, translate.MustJSON(middleware.OpenAIErrorPayload(err.Error(), "api_error", "api_error", "")))
 	c.Writer.Flush()
 }
 

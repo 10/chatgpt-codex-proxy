@@ -82,19 +82,7 @@ func continuationInputItemsToCodex(items []accounts.ContinuationInputItem) []cod
 }
 
 func continuationInputItemFromCodex(item codex.InputItem) accounts.ContinuationInputItem {
-	out := accounts.ContinuationInputItem{
-		Role:             item.Role,
-		Type:             item.Type,
-		Phase:            item.Phase,
-		CallID:           item.CallID,
-		Name:             item.Name,
-		Input:            item.Input,
-		Arguments:        item.Arguments,
-		OutputText:       item.OutputText,
-		ID:               item.ID,
-		Status:           item.Status,
-		EncryptedContent: item.EncryptedContent,
-	}
+	out := accounts.ContinuationInputItem(item)
 	out.Summary = slices.Clone(item.Summary)
 	out.Content = slices.Clone(item.Content)
 	out.OutputContent = slices.Clone(item.OutputContent)
@@ -102,19 +90,7 @@ func continuationInputItemFromCodex(item codex.InputItem) accounts.ContinuationI
 }
 
 func continuationInputItemToCodex(item accounts.ContinuationInputItem) codex.InputItem {
-	out := codex.InputItem{
-		Role:             item.Role,
-		Type:             item.Type,
-		Phase:            item.Phase,
-		CallID:           item.CallID,
-		Name:             item.Name,
-		Input:            item.Input,
-		Arguments:        item.Arguments,
-		OutputText:       item.OutputText,
-		ID:               item.ID,
-		Status:           item.Status,
-		EncryptedContent: item.EncryptedContent,
-	}
+	out := codex.InputItem(item)
 	out.Summary = slices.Clone(item.Summary)
 	out.Content = slices.Clone(item.Content)
 	out.OutputContent = slices.Clone(item.OutputContent)

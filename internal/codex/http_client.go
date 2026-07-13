@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/textproto"
 	"net/url"
 	"strings"
 	"sync"
@@ -187,7 +186,7 @@ func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record,
 
 	return &StreamReader{
 		reader:  bufio.NewReader(streamResp),
-		closer:  streamResp,
+		Closer:  streamResp,
 		headers: CanonicalHeader(streamResp.Headers),
 	}, nil
 }
@@ -208,17 +207,13 @@ func (c *HTTPClient) sessionFor(accountID string) *httpcloak.Client {
 }
 
 type StreamReader struct {
-	reader  *bufio.Reader
-	closer  io.Closer
+	reader *bufio.Reader
+	io.Closer
 	headers http.Header
 }
 
 func (r *StreamReader) Headers() http.Header {
 	return r.headers.Clone()
-}
-
-func (r *StreamReader) Close() error {
-	return r.closer.Close()
 }
 
 func (r *StreamReader) NextEvent() (*StreamEvent, error) {
@@ -275,7 +270,7 @@ func parseStreamEvent(eventName, data string) (*StreamEvent, error) {
 func CanonicalHeader(headers map[string][]string) http.Header {
 	out := make(http.Header, len(headers))
 	for key, values := range headers {
-		canonical := textproto.CanonicalMIMEHeaderKey(key)
+		canonical := http.CanonicalHeaderKey(key)
 		out[canonical] = append([]string(nil), values...)
 	}
 	return out

@@ -5,17 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"chatgpt-codex-proxy/internal/accounts"
 )
 
 type JSONAccountsStore struct {
 	path string
-	mu   sync.Mutex
 }
-
-var _ accounts.Store = (*JSONAccountsStore)(nil)
 
 func NewJSONAccountsStore(dataDir string) *JSONAccountsStore {
 	return &JSONAccountsStore{
@@ -24,9 +20,6 @@ func NewJSONAccountsStore(dataDir string) *JSONAccountsStore {
 }
 
 func (s *JSONAccountsStore) Load() (accounts.State, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -43,9 +36,6 @@ func (s *JSONAccountsStore) Load() (accounts.State, error) {
 }
 
 func (s *JSONAccountsStore) Save(state accounts.State) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return fmt.Errorf("create store dir: %w", err)
 	}

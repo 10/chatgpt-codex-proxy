@@ -99,25 +99,10 @@ func (m *ContinuationManager) ListByConversation(key string) []ContinuationRecor
 		return nil
 	}
 
-	now := time.Now()
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	records := make([]ContinuationRecord, 0)
-	for responseID, record := range m.records {
-		if now.After(record.ExpiresAt) {
-			delete(m.records, responseID)
-			continue
-		}
-		if strings.TrimSpace(record.ConversationKey) != key {
-			continue
-		}
-		records = append(records, record)
-	}
-	slices.SortFunc(records, func(a, b ContinuationRecord) int {
-		return cmp.Or(b.CreatedAt.Compare(a.CreatedAt), strings.Compare(a.ResponseID, b.ResponseID))
+	records := m.ListAll()
+	return slices.DeleteFunc(records, func(record ContinuationRecord) bool {
+		return strings.TrimSpace(record.ConversationKey) != key
 	})
-	return records
 }
 
 func (m *ContinuationManager) ListAll() []ContinuationRecord {

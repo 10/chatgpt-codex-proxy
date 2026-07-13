@@ -163,7 +163,7 @@ func (s *OAuthService) DeviceAuthURL() string {
 func (s *OAuthService) RequestDeviceCode(ctx context.Context) (DeviceCodeResponse, error) {
 	endpoint := strings.TrimRight(s.cfg.AuthIssuer, "/") + deviceUserCodePath
 	body := map[string]string{"client_id": s.cfg.OAuthClientID}
-	result, _, err := doJSONAllowPending[DeviceCodeResponse](ctx, s.client, http.MethodPost, endpoint, body, s.defaultHeaders(), nil)
+	result, _, err := doDeviceAuthJSON[DeviceCodeResponse](ctx, s.client, endpoint, body, s.defaultHeaders(), false)
 	return result, err
 }
 
@@ -173,10 +173,7 @@ func (s *OAuthService) PollDeviceCode(ctx context.Context, deviceAuthID, userCod
 		"device_auth_id": deviceAuthID,
 		"user_code":      userCode,
 	}
-	result, pending, err := doJSONAllowPending[DevicePollResponse](ctx, s.client, http.MethodPost, endpoint, body, s.defaultHeaders(), map[int]struct{}{
-		http.StatusForbidden: {},
-		http.StatusNotFound:  {},
-	})
+	result, pending, err := doDeviceAuthJSON[DevicePollResponse](ctx, s.client, endpoint, body, s.defaultHeaders(), true)
 	if err != nil {
 		return nil, err
 	}
@@ -260,13 +257,13 @@ func (s *OAuthService) defaultHeaders() http.Header {
 	return headers
 }
 
-func doJSONAllowPending[T any](ctx context.Context, client *http.Client, method, endpoint string, body any, headers http.Header, pendingStatuses map[int]struct{}) (T, bool, error) {
+func doDeviceAuthJSON[T any](ctx context.Context, client *http.Client, endpoint string, body any, headers http.Header, allowPending bool) (T, bool, error) {
 	var zero T
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return zero, false, err
 	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return zero, false, err
 	}
@@ -276,7 +273,7 @@ func doJSONAllowPending[T any](ctx context.Context, client *http.Client, method,
 		return zero, false, err
 	}
 	defer resp.Body.Close()
-	if _, ok := pendingStatuses[resp.StatusCode]; ok {
+	if allowPending && (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound) {
 		if err := drainLimitedBody(resp.Body); err != nil {
 			return zero, false, fmt.Errorf("drain pending oauth response: %w", err)
 		}

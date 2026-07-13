@@ -113,7 +113,7 @@ func normalizeToolChoice(raw json.RawMessage, toolNames *toolNameMapper) json.Ra
 }
 
 func normalizeLegacyFunctionChoice(choice *openai.LegacyFunctionCallChoice, toolNames *toolNameMapper) json.RawMessage {
-	if choice == nil || choice.IsZero() {
+	if choice == nil || (choice.Mode == "" && choice.Name == "") {
 		return nil
 	}
 	switch strings.TrimSpace(choice.Mode) {

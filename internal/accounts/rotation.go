@@ -7,18 +7,6 @@ import (
 	"time"
 )
 
-func (s *Service) selectStickyLocked(candidates []*Record, now time.Time) *Record {
-	if s.stickyAccountID == "" {
-		return nil
-	}
-	for _, candidate := range candidates {
-		if candidate.ID == s.stickyAccountID && isEligible(candidate, now) {
-			return candidate
-		}
-	}
-	return nil
-}
-
 func selectRoundRobin(candidates []*Record, index *int) *Record {
 	slices.SortFunc(candidates, func(a, b *Record) int { return strings.Compare(a.ID, b.ID) })
 	selected := candidates[*index%len(candidates)]

@@ -17,7 +17,6 @@ type Config struct {
 	ProxyAPIKey      string
 	DebugLogPayloads bool
 	DefaultModel     string
-	RotationStrategy string
 	CodexBaseURL     string
 	AuthIssuer       string
 	OAuthClientID    string
@@ -44,9 +43,13 @@ func Load() (Config, error) {
 		dataDir = filepath.Join(cwd, dataDir)
 	}
 
-	listenAddr, err := loadListenAddr()
-	if err != nil {
-		return Config{}, err
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8080"
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber <= 0 || portNumber > 65535 {
+		return Config{}, fmt.Errorf("PORT must be a valid TCP port")
 	}
 	debugLogPayloads := false
 	if raw := strings.TrimSpace(os.Getenv("DEBUG_LOG_PAYLOADS")); raw != "" {
@@ -58,12 +61,11 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		ListenAddr:       listenAddr,
+		ListenAddr:       ":" + strconv.Itoa(portNumber),
 		DataDir:          dataDir,
 		ProxyAPIKey:      strings.TrimSpace(os.Getenv("PROXY_API_KEY")),
 		DebugLogPayloads: debugLogPayloads,
 		DefaultModel:     "gpt-5.6-sol",
-		RotationStrategy: "least_used",
 		CodexBaseURL:     "https://chatgpt.com/backend-api",
 		AuthIssuer:       "https://auth.openai.com",
 		OAuthClientID:    "app_EMoamEEZ73f0CkXaXp7hrann",
@@ -82,16 +84,4 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
-}
-
-func loadListenAddr() (string, error) {
-	raw := strings.TrimSpace(os.Getenv("PORT"))
-	if raw == "" {
-		return ":8080", nil
-	}
-	port, err := strconv.Atoi(raw)
-	if err != nil || port <= 0 || port > 65535 {
-		return "", fmt.Errorf("PORT must be a valid TCP port")
-	}
-	return ":" + strconv.Itoa(port), nil
 }

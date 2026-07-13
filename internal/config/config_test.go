@@ -47,7 +47,6 @@ func TestLoadBuildsListenAddrAndDataDir(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			cwd := t.TempDir()
 			t.Chdir(cwd)
@@ -96,7 +95,6 @@ func TestLoadParsesDebugLogPayloads(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("PROXY_API_KEY", "test-key")
 			t.Setenv("DEBUG_LOG_PAYLOADS", tc.value)

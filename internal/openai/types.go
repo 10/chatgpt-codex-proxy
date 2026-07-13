@@ -69,10 +69,6 @@ func (l *LegacyFunctionCallChoice) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (l *LegacyFunctionCallChoice) IsZero() bool {
-	return l == nil || (l.Mode == "" && l.Name == "")
-}
-
 type MessageContent []ContentPart
 
 func (m *MessageContent) UnmarshalJSON(data []byte) error {
@@ -171,11 +167,7 @@ func (t *ToolDefinition) UnmarshalJSON(data []byte) error {
 	delete(raw, "search_context_size")
 	delete(raw, "user_location")
 
-	extra := make(map[string]json.RawMessage, len(raw))
-	for key, value := range raw {
-		extra[key] = append(json.RawMessage(nil), value...)
-	}
-	decoded.ExtraFields = extra
+	decoded.ExtraFields = raw
 	*t = ToolDefinition(decoded)
 	return nil
 }
@@ -371,12 +363,7 @@ func parseResponsesOutputContent(raw json.RawMessage) (MessageContent, bool) {
 }
 
 func isResponseOutputContentPart(part ContentPart) bool {
-	switch part.Type {
-	case "input_text", "output_text", "input_image", "input_file":
-		return true
-	default:
-		return false
-	}
+	return part.Type == "input_text" || part.Type == "output_text" || part.Type == "input_image" || part.Type == "input_file"
 }
 
 type ReasoningPart = conversation.ReasoningPart

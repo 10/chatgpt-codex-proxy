@@ -35,16 +35,6 @@ func FirstMap(values ...map[string]any) map[string]any {
 	return nil
 }
 
-// FirstMapValue returns the first map value found at any of keys.
-func FirstMapValue(raw map[string]any, keys ...string) map[string]any {
-	for _, key := range keys {
-		if value := MapValue(raw, key); value != nil {
-			return value
-		}
-	}
-	return nil
-}
-
 // CloneMap recursively clones decoded JSON map trees.
 func CloneMap(src map[string]any) map[string]any {
 	if src == nil {

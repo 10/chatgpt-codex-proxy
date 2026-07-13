@@ -2,6 +2,7 @@ package translate
 
 import (
 	"encoding/json"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -90,11 +91,7 @@ func (m *toolNameMapper) aliases() map[string]string {
 	if m == nil || len(m.shortToOriginal) == 0 {
 		return nil
 	}
-	aliases := make(map[string]string, len(m.shortToOriginal))
-	for shortened, original := range m.shortToOriginal {
-		aliases[shortened] = original
-	}
-	return aliases
+	return maps.Clone(m.shortToOriginal)
 }
 
 func toolNamesForChat(req openai.ChatCompletionsRequest, tools []openai.ToolDefinition) []string {
@@ -192,12 +189,7 @@ func MergeToolNameAliases(current, previous map[string]string) map[string]string
 	if len(previous) == 0 {
 		return current
 	}
-	merged := make(map[string]string, len(current)+len(previous))
-	for shortened, original := range previous {
-		merged[shortened] = original
-	}
-	for shortened, original := range current {
-		merged[shortened] = original
-	}
+	merged := maps.Clone(previous)
+	maps.Copy(merged, current)
 	return merged
 }

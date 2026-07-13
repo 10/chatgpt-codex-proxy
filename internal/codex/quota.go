@@ -68,7 +68,7 @@ func ParseQuotaFromEvent(event *StreamEvent, planType string) *accounts.QuotaSna
 
 	primary := parseEventRateWindow(jsonutil.MapValue(rateLimits, "primary"))
 	secondary := parseEventRateWindow(jsonutil.MapValue(rateLimits, "secondary"))
-	codeReview := parseEventRateWindow(jsonutil.FirstMapValue(rateLimits, "code_review", "code_review_rate_limit"))
+	codeReview := parseEventRateWindow(jsonutil.FirstMap(jsonutil.MapValue(rateLimits, "code_review"), jsonutil.MapValue(rateLimits, "code_review_rate_limit")))
 	if primary == nil && secondary == nil && codeReview == nil {
 		return nil
 	}
@@ -149,11 +149,11 @@ func parseEventRateWindow(raw map[string]any) *accounts.RateLimitWindow {
 func parseCredits(headers http.Header, prefix string) *accounts.CreditsSnapshot {
 	hasAny := false
 	credits := &accounts.CreditsSnapshot{}
-	if value, ok := parseBoolHeader(headers.Get(prefix + "-credits-has-credits")); ok {
+	if value, err := strconv.ParseBool(headers.Get(prefix + "-credits-has-credits")); err == nil {
 		credits.HasCredits = value
 		hasAny = true
 	}
-	if value, ok := parseBoolHeader(headers.Get(prefix + "-credits-unlimited")); ok {
+	if value, err := strconv.ParseBool(headers.Get(prefix + "-credits-unlimited")); err == nil {
 		credits.Unlimited = value
 		hasAny = true
 	}
@@ -198,17 +198,6 @@ func parseCreditsFromUsage(value *UsageResponseCredits) *accounts.CreditsSnapsho
 		return nil
 	}
 	return credits
-}
-
-func parseBoolHeader(raw string) (bool, bool) {
-	if raw == "" {
-		return false, false
-	}
-	value, err := strconv.ParseBool(raw)
-	if err != nil {
-		return false, false
-	}
-	return value, true
 }
 
 func usageWindowRateLimit(window *UsageWindow, allowed, limitReached bool) accounts.RateLimitWindow {

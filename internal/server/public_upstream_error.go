@@ -51,20 +51,12 @@ func extractUpstreamEventDetails(event *codex.StreamEvent) *codex.UpstreamError 
 		jsonutil.StringValue(event.Raw["code"]),
 		jsonutil.StringValue(event.Raw["type"]),
 	)
-	statusCode, ok := 0, false
-	if nested != nil {
-		statusCode, ok = serverIntValue(nested["status_code"])
-	}
-	if !ok {
-		if nested != nil {
-			statusCode, ok = serverIntValue(nested["status"])
+	statusCode := 0
+	for _, value := range []any{nested["status_code"], nested["status"], event.Raw["status_code"], event.Raw["status"]} {
+		if parsed, ok := serverIntValue(value); ok {
+			statusCode = parsed
+			break
 		}
-	}
-	if !ok {
-		statusCode, ok = serverIntValue(event.Raw["status_code"])
-	}
-	if !ok {
-		statusCode, _ = serverIntValue(event.Raw["status"])
 	}
 	if statusCode == 0 {
 		statusCode = upstreamStatusCodeFromCode(code)

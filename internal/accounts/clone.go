@@ -2,7 +2,6 @@ package accounts
 
 import (
 	"maps"
-	"time"
 )
 
 func cloneRecord(record *Record) Record {
@@ -11,7 +10,10 @@ func cloneRecord(record *Record) Record {
 	if cloned.Cookies == nil {
 		cloned.Cookies = map[string]string{}
 	}
-	cloned.CooldownUntil = cloneTime(record.CooldownUntil)
+	if record.CooldownUntil != nil {
+		ts := record.CooldownUntil.UTC()
+		cloned.CooldownUntil = &ts
+	}
 	if record.CachedQuota != nil {
 		quota := cloneQuotaSnapshot(record.CachedQuota)
 		cloned.CachedQuota = &quota
@@ -58,12 +60,4 @@ func cloneRateLimitWindow(window *RateLimitWindow) RateLimitWindow {
 		cloned.LimitWindowSeconds = &value
 	}
 	return cloned
-}
-
-func cloneTime(value *time.Time) *time.Time {
-	if value == nil {
-		return nil
-	}
-	ts := value.UTC()
-	return &ts
 }

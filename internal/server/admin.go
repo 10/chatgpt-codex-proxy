@@ -10,10 +10,6 @@ import (
 	"chatgpt-codex-proxy/internal/accounts"
 )
 
-type adminAccountsResponse struct {
-	Accounts []adminAccountResponse `json:"accounts"`
-}
-
 type adminAccountResponse struct {
 	ID            string                  `json:"id"`
 	UpstreamID    string                  `json:"upstream_account_id"`
@@ -46,14 +42,6 @@ type adminAccountUsageResponse struct {
 	OauthExpires   time.Time               `json:"oauth_expires"`
 }
 
-type adminAccountRefreshResponse struct {
-	Account accounts.Record `json:"account"`
-}
-
-type rotationResponse struct {
-	Strategy accounts.RotationStrategy `json:"strategy"`
-}
-
 func (a *App) handleAdminAccounts(c *gin.Context) {
 	records, err := a.accounts.List()
 	if err != nil {
@@ -84,7 +72,7 @@ func (a *App) handleAdminAccounts(c *gin.Context) {
 			UpdatedAt:     record.UpdatedAt,
 		})
 	}
-	c.JSON(http.StatusOK, adminAccountsResponse{Accounts: items})
+	c.JSON(http.StatusOK, gin.H{"accounts": items})
 }
 
 func (a *App) handleAdminDeviceLoginStart(c *gin.Context) {
@@ -189,11 +177,11 @@ func (a *App) handleAdminAccountRefresh(c *gin.Context) {
 		a.writeAdminError(c, http.StatusBadGateway, "refresh_failed", err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, adminAccountRefreshResponse{Account: record})
+	c.JSON(http.StatusOK, gin.H{"account": record})
 }
 
 func (a *App) handleAdminRotationGet(c *gin.Context) {
-	c.JSON(http.StatusOK, rotationResponse{Strategy: a.accounts.RotationStrategy()})
+	c.JSON(http.StatusOK, gin.H{"strategy": a.accounts.RotationStrategy()})
 }
 
 func (a *App) handleAdminRotationPut(c *gin.Context) {
@@ -215,5 +203,5 @@ func (a *App) handleAdminRotationPut(c *gin.Context) {
 		a.writeAdminError(c, http.StatusInternalServerError, "rotation_update_failed", err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, rotationResponse{Strategy: strategy})
+	c.JSON(http.StatusOK, gin.H{"strategy": strategy})
 }

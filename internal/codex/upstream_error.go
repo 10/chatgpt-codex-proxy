@@ -1,7 +1,6 @@
 package codex
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -54,16 +53,9 @@ func NewUpstreamError(op string, statusCode int, body string, headers http.Heade
 		StatusCode: statusCode,
 		Body:       strings.TrimSpace(body),
 	}
-	err.Code, err.RetryAfter = parseUpstreamErrorMetadata(err.Body, headers)
+	err.Code, err.RetryAfter = parseUpstreamErrorBody(err.Body)
+	err.RetryAfter = max(err.RetryAfter, parseRetryAfterHeaders(headers))
 	return err
-}
-
-func parseUpstreamErrorMetadata(body string, headers http.Header) (string, int) {
-	code, retryAfter := parseUpstreamErrorBody(body)
-	if headerRetry := parseRetryAfterHeaders(headers); headerRetry > retryAfter {
-		retryAfter = headerRetry
-	}
-	return code, retryAfter
 }
 
 func parseUpstreamErrorBody(body string) (string, int) {
@@ -97,19 +89,17 @@ func parseUpstreamErrorBody(body string) (string, int) {
 		}
 	}
 
-	if retryAfter, ok := parseRetryAfterValue(nested.ResetsInSeconds); ok {
-		return strings.TrimSpace(nested.Code), retryAfter
+	code := strings.TrimSpace(nested.Code)
+	if retryAfter, ok := parsePositiveInt64(nested.ResetsInSeconds); ok {
+		return code, int(retryAfter)
 	}
-	if retryAfter, ok := parseRetryAfterValue(nested.RetryAfter); ok {
-		return strings.TrimSpace(nested.Code), retryAfter
+	if retryAfter, ok := parsePositiveInt64(nested.RetryAfter); ok {
+		return code, int(retryAfter)
 	}
-	if resetAt, ok := parseUnixTimestamp(nested.ResetsAt); ok {
-		retryAfter := int(time.Until(resetAt).Seconds())
-		if retryAfter > 0 {
-			return strings.TrimSpace(nested.Code), retryAfter
-		}
+	if resetAt, ok := parsePositiveInt64(nested.ResetsAt); ok {
+		return code, max(int(time.Until(time.Unix(resetAt, 0)).Seconds()), 0)
 	}
-	return strings.TrimSpace(nested.Code), 0
+	return code, 0
 }
 
 func parseRetryAfterHeaders(headers http.Header) int {
@@ -144,50 +134,11 @@ type upstreamErrorFields struct {
 	ResetsAt        json.RawMessage `json:"resets_at"`
 }
 
-func parseRetryAfterValue(raw json.RawMessage) (int, bool) {
-	if parsed, ok := parsePositiveInt64(raw); ok && parsed > 0 {
-		return int(parsed), true
-	}
-	return 0, false
-}
-
-func parseUnixTimestamp(raw json.RawMessage) (time.Time, bool) {
-	if parsed, ok := parsePositiveInt64(raw); ok && parsed > 0 {
-		return time.Unix(parsed, 0).UTC(), true
-	}
-	return time.Time{}, false
-}
-
 func parsePositiveInt64(raw json.RawMessage) (int64, bool) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+	var parsed flexibleInt64
+	if err := parsed.UnmarshalJSON(raw); err != nil {
 		return 0, false
 	}
-
-	var number json.Number
-	if err := json.Unmarshal(trimmed, &number); err == nil {
-		if value, err := number.Int64(); err == nil && value > 0 {
-			return value, true
-		}
-		if value, err := number.Float64(); err == nil && value > 0 {
-			return int64(value), true
-		}
-		return 0, false
-	}
-
-	var text string
-	if err := json.Unmarshal(trimmed, &text); err == nil {
-		text = strings.TrimSpace(text)
-		if text == "" {
-			return 0, false
-		}
-		if value, err := strconv.ParseInt(text, 10, 64); err == nil && value > 0 {
-			return value, true
-		}
-		if value, err := strconv.ParseFloat(text, 64); err == nil && value > 0 {
-			return int64(value), true
-		}
-	}
-
-	return 0, false
+	value, ok := parsed.Int64()
+	return value, ok && value > 0
 }

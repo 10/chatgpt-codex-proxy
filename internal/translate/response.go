@@ -1,10 +1,11 @@
 package translate
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"maps"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -223,19 +224,15 @@ func (a *Accumulator) ResponsesStreamEventsForEvent(event *codex.StreamEvent) ([
 
 	switch event.Type {
 	case "response.function_call_arguments.delta", "response.custom_tool_call_input.delta":
-		state := a.toolCallStateForEvent(event)
+		state := a.ToolCallStateForEvent(event)
 		if state == nil {
 			return nil, false
 		}
 		events := a.ensureResponseOutputItemAdded(state)
 		delta := jsonutil.StringValue(event.Raw["delta"])
 		if delta != "" {
-			eventType := "response.function_call_arguments.delta"
-			if event.Type == "response.custom_tool_call_input.delta" {
-				eventType = "response.custom_tool_call_input.delta"
-			}
 			events = append(events, ResponseStreamEvent{
-				Type: eventType,
+				Type: event.Type,
 				Payload: map[string]any{
 					"item_id":      state.ItemID,
 					"output_index": state.OutputIndex,
@@ -244,24 +241,18 @@ func (a *Accumulator) ResponsesStreamEventsForEvent(event *codex.StreamEvent) ([
 			})
 		}
 		return events, true
-	case "response.function_call_arguments.done", "response.custom_tool_call_input.done":
-		state := a.toolCallStateForEvent(event)
+	case "response.function_call_arguments.done", "response.custom_tool_call_input.done", "response.output_item.done":
+		state := a.ToolCallStateForEvent(event)
 		if state == nil {
 			return nil, false
 		}
 		return a.ensureResponseToolCallCompleted(state), true
 	case "response.output_item.added":
-		state := a.toolCallStateForEvent(event)
+		state := a.ToolCallStateForEvent(event)
 		if state == nil {
 			return nil, false
 		}
 		return a.ensureResponseOutputItemAdded(state), true
-	case "response.output_item.done":
-		state := a.toolCallStateForEvent(event)
-		if state == nil {
-			return nil, false
-		}
-		return a.ensureResponseToolCallCompleted(state), true
 	default:
 		return nil, false
 	}
@@ -437,9 +428,7 @@ func (a *Accumulator) ResponsesObject() map[string]any {
 				if merged == nil {
 					merged = map[string]any{}
 				}
-				for detailKey, detailValue := range details {
-					merged[detailKey] = detailValue
-				}
+				maps.Copy(merged, details)
 				usage[key] = merged
 				continue
 			}
@@ -492,11 +481,8 @@ func (a *Accumulator) responsesOutput(text string) []map[string]any {
 		})
 	}
 
-	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].OutputIndex == entries[j].OutputIndex {
-			return entries[i].Order < entries[j].Order
-		}
-		return entries[i].OutputIndex < entries[j].OutputIndex
+	slices.SortStableFunc(entries, func(a, b outputEntry) int {
+		return cmp.Or(cmp.Compare(a.OutputIndex, b.OutputIndex), cmp.Compare(a.Order, b.Order))
 	})
 
 	output := make([]map[string]any, 0, len(entries)+1)
@@ -592,8 +578,8 @@ func (a *Accumulator) sortedOutputItems() []map[string]any {
 	}
 
 	states := append([]*outputItemState(nil), a.OutputItems...)
-	sort.SliceStable(states, func(i, j int) bool {
-		return states[i].OutputIndex < states[j].OutputIndex
+	slices.SortStableFunc(states, func(a, b *outputItemState) int {
+		return cmp.Compare(a.OutputIndex, b.OutputIndex)
 	})
 
 	items := make([]map[string]any, 0, len(states))

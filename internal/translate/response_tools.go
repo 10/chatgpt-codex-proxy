@@ -92,10 +92,6 @@ func (a *Accumulator) ensureToolCallState(itemID, callID string, explicitIndex i
 	return state
 }
 
-func (a *Accumulator) ToolCallStateForEvent(event *codex.StreamEvent) *ToolCallState {
-	return a.toolCallStateForEvent(event)
-}
-
 func (a *Accumulator) registerToolCallAliases(call *ToolCallState, ids ...string) {
 	for _, id := range ids {
 		if strings.TrimSpace(id) == "" {
@@ -105,7 +101,7 @@ func (a *Accumulator) registerToolCallAliases(call *ToolCallState, ids ...string
 	}
 }
 
-func (a *Accumulator) toolCallStateForEvent(event *codex.StreamEvent) *ToolCallState {
+func (a *Accumulator) ToolCallStateForEvent(event *codex.StreamEvent) *ToolCallState {
 	if event == nil {
 		return nil
 	}

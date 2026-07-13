@@ -38,10 +38,6 @@ type responsesWebSocketSession struct {
 	lastResponseID string
 }
 
-type responsesStreamState struct {
-	tupleTextBuffer strings.Builder
-}
-
 func (a *App) connectResponsesWebSocket(ctx context.Context, endpoint string, headers http.Header, body any) (responsesWebSocketStream, error) {
 	if a.wsConnector != nil {
 		return a.wsConnector(ctx, endpoint, headers, body)
@@ -195,7 +191,7 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 	}
 
 	accumulator := translate.NewAccumulator(resolution.Request)
-	state := responsesStreamState{}
+	var tupleTextBuffer strings.Builder
 	for {
 		event, upstreamErr, err := a.nextStreamEvent(account, accumulator, session.stream)
 		if err != nil {
@@ -207,11 +203,12 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 				session.stream = nil
 				session.account = accounts.Record{}
 			}
-			status, code, message := a.responsesWebSocketStreamError(c, account.ID, accumulator.ResponseID, err)
+			status, code, message := a.classifyUpstreamError(account.ID, err)
+			a.logUpstreamStreamFailure(c, "responses_websocket", account.ID, accumulator.ResponseID, err)
 			return writeResponsesWebSocketError(conn, status, code, message, "api_error", "")
 		}
 
-		for _, outgoing := range a.responsesStreamEvents(c, accumulator, resolution.Request, &state, event) {
+		for _, outgoing := range a.responsesStreamEvents(c, accumulator, resolution.Request, &tupleTextBuffer, event) {
 			payload := translate.ResponseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload)
 			if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 				return false
@@ -227,16 +224,16 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 	return true
 }
 
-func (a *App) responsesStreamEvents(c *gin.Context, accumulator *translate.Accumulator, normalized translate.NormalizedRequest, state *responsesStreamState, event *codex.StreamEvent) []translate.ResponseStreamEvent {
+func (a *App) responsesStreamEvents(c *gin.Context, accumulator *translate.Accumulator, normalized translate.NormalizedRequest, tupleTextBuffer *strings.Builder, event *codex.StreamEvent) []translate.ResponseStreamEvent {
 	if normalized.TupleSchema != nil {
 		switch event.Type {
 		case "response.output_text.delta":
-			state.tupleTextBuffer.WriteString(jsonutil.StringValue(event.Raw["delta"]))
+			tupleTextBuffer.WriteString(jsonutil.StringValue(event.Raw["delta"]))
 			return nil
 		case "response.output_text.done":
 			if text := jsonutil.StringValue(event.Raw["text"]); text != "" {
-				state.tupleTextBuffer.Reset()
-				state.tupleTextBuffer.WriteString(text)
+				tupleTextBuffer.Reset()
+				tupleTextBuffer.WriteString(text)
 			}
 			return nil
 		}
@@ -248,8 +245,8 @@ func (a *App) responsesStreamEvents(c *gin.Context, accumulator *translate.Accum
 
 	events := make([]translate.ResponseStreamEvent, 0, 3)
 	if event.Type == "response.completed" {
-		if normalized.TupleSchema != nil && strings.TrimSpace(state.tupleTextBuffer.String()) != "" {
-			reconverted := state.tupleTextBuffer.String()
+		if normalized.TupleSchema != nil && strings.TrimSpace(tupleTextBuffer.String()) != "" {
+			reconverted := tupleTextBuffer.String()
 			if patched, err := translate.ReconvertJSONText(reconverted, normalized.TupleSchema); err != nil {
 				a.logTupleReconversionWarning(c, "responses", accumulator.ResponseID, err)
 			} else {
@@ -296,12 +293,6 @@ func (a *App) responsesWebSocketOpenError(c *gin.Context, accountID string, err 
 	}
 	status, code, message := a.classifyUpstreamError(accountID, err)
 	a.logUpstreamRequestFailure(c, "responses_websocket", accountID, status, code, err)
-	return status, code, message
-}
-
-func (a *App) responsesWebSocketStreamError(c *gin.Context, accountID, responseID string, err error) (int, string, string) {
-	status, code, message := a.classifyUpstreamError(accountID, err)
-	a.logUpstreamStreamFailure(c, "responses_websocket", accountID, responseID, err)
 	return status, code, message
 }
 

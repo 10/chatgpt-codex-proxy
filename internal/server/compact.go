@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -96,10 +97,7 @@ func (a *App) resolveCompactRequest(normalized translate.NormalizedCompactReques
 
 	history := continuationInputItemsToCodex(record.InputHistory)
 	if len(history) > 0 {
-		combined := make([]codex.InputItem, 0, len(history)+len(normalized.Input))
-		combined = append(combined, history...)
-		combined = append(combined, normalized.Input...)
-		normalized.Input = combined
+		normalized.Input = slices.Concat(history, normalized.Input)
 	}
 
 	return normalized, strings.TrimSpace(record.AccountID), nil
@@ -135,11 +133,7 @@ func compactResponseObject(upstream codex.CompactResponse) map[string]any {
 		"object":     jsonutil.FirstNonEmpty(strings.TrimSpace(upstream.Object), "response.compaction"),
 		"created_at": createdAt,
 	}
-	output := make([]map[string]any, 0, len(upstream.Output))
-	for _, item := range upstream.Output {
-		output = append(output, jsonutil.CloneMap(item))
-	}
-	response["output"] = output
+	response["output"] = jsonutil.CloneValue(upstream.Output)
 	if len(upstream.Usage) > 0 {
 		response["usage"] = upstream.Usage
 	}

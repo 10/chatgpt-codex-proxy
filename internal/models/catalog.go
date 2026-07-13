@@ -181,9 +181,7 @@ func (c *Catalog) visibleContainsLocked(modelID string) bool {
 func (c *Catalog) rebuildVisibleLocked() {
 	visibleIDs := make(map[string]struct{})
 	for _, set := range c.support {
-		for id := range set {
-			visibleIDs[id] = struct{}{}
-		}
+		maps.Copy(visibleIDs, set)
 	}
 
 	if c.hasUnrefreshedRoutesLocked() {

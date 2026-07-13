@@ -76,29 +76,21 @@ func (s *DeviceLoginService) poll(login *pendingLogin) {
 	ctx, cancel := context.WithDeadline(context.Background(), login.ExpiresAt)
 	defer cancel()
 
-	ticker := time.NewTicker(login.Interval)
-	defer ticker.Stop()
+	ticks := time.Tick(login.Interval)
 
 	for {
 		select {
 		case <-ctx.Done():
-			s.update(login.LoginID, func(target *pendingLogin) {
-				if target.Status == accounts.DeviceLoginPending {
-					target.Status = accounts.DeviceLoginExpired
-					target.Error = "device login expired"
-				}
-			})
+			s.setStatus(login.LoginID, accounts.DeviceLoginPending, accounts.DeviceLoginExpired, "device login expired")
 			return
-		case <-ticker.C:
+		case <-ticks:
 			result, err := s.oauth.PollDeviceCode(ctx, login.DeviceAuthID, login.UserCode)
 			if err != nil {
-				if isAuthorizationPending(err) {
+				text := strings.ToLower(err.Error())
+				if strings.Contains(text, "authorization_pending") || strings.Contains(text, "not found") {
 					continue
 				}
-				s.update(login.LoginID, func(target *pendingLogin) {
-					target.Status = accounts.DeviceLoginError
-					target.Error = err.Error()
-				})
+				s.setStatus(login.LoginID, "", accounts.DeviceLoginError, err.Error())
 				return
 			}
 
@@ -108,53 +100,34 @@ func (s *DeviceLoginService) poll(login *pendingLogin) {
 
 			token, accountID, err := s.oauth.ExchangeAuthorizationCode(ctx, result.AuthorizationCode, result.CodeVerifier)
 			if err != nil {
-				s.update(login.LoginID, func(target *pendingLogin) {
-					target.Status = accounts.DeviceLoginError
-					target.Error = err.Error()
-				})
+				s.setStatus(login.LoginID, "", accounts.DeviceLoginError, err.Error())
 				return
 			}
 			if strings.TrimSpace(accountID) == "" {
-				s.update(login.LoginID, func(target *pendingLogin) {
-					target.Status = accounts.DeviceLoginError
-					target.Error = "oauth exchange did not return account_id"
-				})
+				s.setStatus(login.LoginID, "", accounts.DeviceLoginError, "oauth exchange did not return account_id")
 				return
 			}
 
 			if _, err := s.accounts.UpsertFromToken(accountID, token); err != nil {
-				s.update(login.LoginID, func(target *pendingLogin) {
-					target.Status = accounts.DeviceLoginError
-					target.Error = err.Error()
-				})
+				s.setStatus(login.LoginID, "", accounts.DeviceLoginError, err.Error())
 				return
 			}
 
-			s.update(login.LoginID, func(target *pendingLogin) {
-				target.Status = accounts.DeviceLoginReady
-				target.Error = ""
-			})
+			s.setStatus(login.LoginID, "", accounts.DeviceLoginReady, "")
 			return
 		}
 	}
 }
 
-func (s *DeviceLoginService) update(loginID string, fn func(*pendingLogin)) {
+func (s *DeviceLoginService) setStatus(loginID string, expected, status accounts.DeviceLoginStatus, message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	login, ok := s.logins[loginID]
-	if !ok {
+	if !ok || (expected != "" && login.Status != expected) {
 		return
 	}
-	fn(login)
-}
-
-func isAuthorizationPending(err error) bool {
-	if err == nil {
-		return false
-	}
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "authorization_pending") || strings.Contains(text, "not found")
+	login.Status = status
+	login.Error = message
 }
 
 func (s *DeviceLoginService) DeleteExpired(now time.Time) {

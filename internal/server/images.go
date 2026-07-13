@@ -257,7 +257,7 @@ func (a *App) handleDirectImageResponse(c *gin.Context, endpoint, path string, p
 			}
 			if readErr != nil {
 				if readErr != io.EOF {
-					a.respondStreamError(c, endpoint, account.ID, "", "error", readErr)
+					a.respondStreamError(c, endpoint, account.ID, "", "error", readErr, false)
 					return true
 				}
 				break
@@ -417,10 +417,6 @@ func normalizedImageEditRequest(req imageEditRequest) translate.NormalizedReques
 }
 
 func newImageTool(model, action string) openai.ToolDefinition {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		model = defaultImageModel
-	}
 	return openai.ToolDefinition{
 		Type: "image_generation",
 		ExtraFields: map[string]json.RawMessage{
@@ -515,15 +511,21 @@ func (a *App) collectImageResponse(c *gin.Context, endpoint, responseFormat stri
 		a.writeOpenAIError(c, http.StatusBadGateway, "image_generation_failed", "upstream did not return image output", "api_error")
 		return
 	}
-	metadata := imageMetadataFromAccumulator(accumulator)
+	var metadata map[string]any
+	for _, item := range jsonutil.SliceOfMaps(accumulator.ResponsesObject()["output"]) {
+		if jsonutil.StringValue(item["type"]) == "image_generation_call" {
+			metadata = item
+			break
+		}
+	}
 	a.accounts.NoteSuccess(opened.Account.ID)
 	c.JSON(http.StatusOK, imagesResponse{
-		Background:   metadata.Background,
+		Background:   strings.TrimSpace(jsonutil.StringValue(metadata["background"])),
 		Created:      imageCreatedAt(accumulator),
 		Data:         results,
-		OutputFormat: metadata.OutputFormat,
-		Quality:      metadata.Quality,
-		Size:         metadata.Size,
+		OutputFormat: strings.TrimSpace(jsonutil.StringValue(metadata["output_format"])),
+		Quality:      strings.TrimSpace(jsonutil.StringValue(metadata["quality"])),
+		Size:         strings.TrimSpace(jsonutil.StringValue(metadata["size"])),
 		Usage:        imageUsage(accumulator),
 	})
 }
@@ -543,11 +545,7 @@ func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, respon
 			if err == io.EOF {
 				err = errIncompleteResponse
 			}
-			if upstreamErr {
-				a.respondClassifiedStreamError(c, endpoint, opened.Account.ID, accumulator.ResponseID, "error", err)
-			} else {
-				a.respondStreamError(c, endpoint, opened.Account.ID, accumulator.ResponseID, "error", err)
-			}
+			a.respondStreamError(c, endpoint, opened.Account.ID, accumulator.ResponseID, "error", err, upstreamErr)
 			return
 		}
 
@@ -564,7 +562,7 @@ func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, respon
 
 		results := imageResultsFromAccumulator(accumulator, responseFormat)
 		if len(results) == 0 {
-			a.respondStreamError(c, endpoint, opened.Account.ID, accumulator.ResponseID, "error", io.ErrUnexpectedEOF)
+			a.respondStreamError(c, endpoint, opened.Account.ID, accumulator.ResponseID, "error", io.ErrUnexpectedEOF, false)
 			return
 		}
 		for _, result := range results {
@@ -593,9 +591,6 @@ func (a *App) openImageRequest(c *gin.Context, endpoint string, normalized trans
 }
 
 func imageResultsFromAccumulator(accumulator *translate.Accumulator, responseFormat string) []imageResult {
-	if accumulator == nil {
-		return nil
-	}
 	response := accumulator.ResponsesObject()
 	output := jsonutil.SliceOfMaps(response["output"])
 	results := make([]imageResult, 0, len(output))
@@ -620,34 +615,7 @@ func imageResultsFromAccumulator(accumulator *translate.Accumulator, responseFor
 	return results
 }
 
-type imageMetadata struct {
-	Background   string
-	OutputFormat string
-	Quality      string
-	Size         string
-}
-
-func imageMetadataFromAccumulator(accumulator *translate.Accumulator) imageMetadata {
-	if accumulator == nil {
-		return imageMetadata{}
-	}
-	for _, item := range jsonutil.SliceOfMaps(accumulator.ResponsesObject()["output"]) {
-		if jsonutil.StringValue(item["type"]) == "image_generation_call" {
-			return imageMetadata{
-				Background:   strings.TrimSpace(jsonutil.StringValue(item["background"])),
-				OutputFormat: strings.TrimSpace(jsonutil.StringValue(item["output_format"])),
-				Quality:      strings.TrimSpace(jsonutil.StringValue(item["quality"])),
-				Size:         strings.TrimSpace(jsonutil.StringValue(item["size"])),
-			}
-		}
-	}
-	return imageMetadata{}
-}
-
 func imagePartialEventPayload(event *codex.StreamEvent, streamPrefix, responseFormat string) map[string]any {
-	if event == nil {
-		return nil
-	}
 	result := strings.TrimSpace(jsonutil.StringValue(event.Raw["partial_image_b64"]))
 	if result == "" {
 		return nil
@@ -679,19 +647,14 @@ func imageMIMEType(outputFormat string) string {
 }
 
 func imageCreatedAt(accumulator *translate.Accumulator) int64 {
-	if accumulator != nil {
-		response := jsonutil.MapValue(accumulator.RawFinal, "response")
-		if created, ok := serverIntValue(response["created_at"]); ok && created > 0 {
-			return int64(created)
-		}
+	response := jsonutil.MapValue(accumulator.RawFinal, "response")
+	if created, ok := serverIntValue(response["created_at"]); ok && created > 0 {
+		return int64(created)
 	}
 	return time.Now().UTC().Unix()
 }
 
 func imageUsage(accumulator *translate.Accumulator) map[string]any {
-	if accumulator == nil {
-		return nil
-	}
 	response := jsonutil.MapValue(accumulator.RawFinal, "response")
 	toolUsage := jsonutil.MapValue(response, "tool_usage")
 	if usage := jsonutil.MapValue(toolUsage, "image_gen"); len(usage) > 0 {

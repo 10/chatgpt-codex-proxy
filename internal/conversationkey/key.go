@@ -2,7 +2,6 @@ package conversationkey
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
@@ -21,8 +20,7 @@ func Derive(req codex.Request) string {
 
 	seed := model + "\x00" + instructions + "\x00" + transcript
 	sum := sha256.Sum256([]byte(seed))
-	hash := hex.EncodeToString(sum[:])
-	return hash[:8] + "-" + hash[8:12] + "-" + hash[12:16] + "-" + hash[16:20] + "-" + hash[20:32]
+	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
 
 func extractSeed(req codex.Request) (string, string) {

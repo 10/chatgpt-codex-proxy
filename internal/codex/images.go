@@ -17,19 +17,20 @@ type RawImageResponse struct {
 }
 
 func (r *RawImageResponse) Close() error {
-	if r == nil || r.Body == nil {
-		return nil
-	}
 	return r.Body.Close()
 }
 
 func (c *HTTPClient) OpenImage(ctx context.Context, record accounts.Record, path string, payload []byte, stream bool) (*RawImageResponse, error) {
+	accept := "application/json"
+	if stream {
+		accept = "text/event-stream"
+	}
 	headers := BuildHeaders(record.Token.AccessToken, HeaderOptions{
 		AccountID:   record.AccountID,
 		Cookies:     record.Cookies,
 		ContentType: "application/json",
 		RequestID:   NewRequestID(),
-		Accept:      imageResponseAccept(stream),
+		Accept:      accept,
 	})
 
 	resp, err := c.sessionFor(record.ID).DoStream(ctx, &httpcloak.Request{
@@ -49,11 +50,4 @@ func (c *HTTPClient) OpenImage(ctx context.Context, record accounts.Record, path
 	}
 
 	return &RawImageResponse{Body: resp, Headers: responseHeaders}, nil
-}
-
-func imageResponseAccept(stream bool) string {
-	if stream {
-		return "text/event-stream"
-	}
-	return "application/json"
 }
