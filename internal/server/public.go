@@ -85,7 +85,7 @@ func (a *App) handlePublicRequest(
 	buildResponse func(*translate.Accumulator) map[string]any,
 	patchTuple func(map[string]any, map[string]any) error,
 ) {
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := readRequestBody(c.Request)
 	if err != nil {
 		a.respondOpenAIInvalidRequest(c, err)
 		return

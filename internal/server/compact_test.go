@@ -111,6 +111,30 @@ func TestHandleResponsesCompactWrapsBareOutput(t *testing.T) {
 	}
 }
 
+func TestHandleResponsesCompactDecodesZstdRequestBody(t *testing.T) {
+	t.Parallel()
+
+	var received codex.CompactRequest
+	app := newCompactTestApp(t, func(ctx context.Context, record accounts.Record, req codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error) {
+		received = req
+		return codex.CompactResponse{}, nil, nil
+	})
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", zstdRequestBody(t, `{"input":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "zstd")
+	req.Header.Set("X-API-Key", "test-key")
+	app.Handler().ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
+	}
+	if len(received.Input) != 1 || received.Input[0].Content[0].Text != "hello" {
+		t.Fatalf("received.Input = %#v, want decoded hello input", received.Input)
+	}
+}
+
 func TestHandleResponsesCompactPreservesUsageAndExpandsPreviousResponse(t *testing.T) {
 	t.Parallel()
 

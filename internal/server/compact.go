@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -20,7 +19,7 @@ import (
 )
 
 func (a *App) handleResponsesCompact(c *gin.Context) {
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := readRequestBody(c.Request)
 	if err != nil {
 		a.respondOpenAIInvalidRequest(c, err)
 		return
