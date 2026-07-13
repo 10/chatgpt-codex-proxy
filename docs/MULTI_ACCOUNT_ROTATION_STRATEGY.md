@@ -363,8 +363,9 @@ After the service chooses an account, `AccountManager.AcquireReady` runs readine
 1. Acquire an eligible account from the rotation service
 2. Check the current token state
 3. If the token is close to expiry, refresh it
-4. If refresh succeeds, update the stored auth state
-5. If refresh fails, mark the account `expired`
+4. If refresh succeeds, update the stored auth state while preserving the existing refresh token when the provider does not return a replacement
+5. If refresh fails with OAuth `invalid_grant`, mark the account `expired`
+6. For other refresh failures, keep the account active and apply the built-in 60-second cooldown
 
 This means the routing service decides eligibility based on current record state, and the account manager performs last-mile readiness before the upstream request is sent.
 
@@ -376,6 +377,7 @@ It is used for temporary upstream failures such as:
 
 - `429 Too Many Requests`
 - `402 Payment Required` or quota exhaustion
+- transient OAuth refresh failures
 
 ### How 429 cooldown is chosen
 

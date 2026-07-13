@@ -138,7 +138,15 @@ func (m *AccountManager) GetUsage(ctx context.Context, id string, cached bool) (
 }
 
 func (m *AccountManager) markRefreshFailure(id string, cause error) {
-	if err := m.accounts.MarkError(id, accounts.StatusExpired, cause.Error()); err != nil {
+	var oauthErr *oauthTokenError
+	var err error
+	if errors.As(cause, &oauthErr) && oauthErr.terminalCredentialFailure() {
+		err = m.accounts.MarkError(id, accounts.StatusExpired, cause.Error())
+	} else {
+		until := time.Now().UTC().Add(accounts.DefaultRateLimitFallback)
+		err = m.accounts.SetCooldown(id, &until, cause.Error())
+	}
+	if err != nil {
 		slog.Default().Error("persist account refresh failure status failed",
 			"account_id", id,
 			"refresh_error", cause.Error(),

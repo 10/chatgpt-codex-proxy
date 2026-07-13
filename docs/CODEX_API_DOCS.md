@@ -1474,6 +1474,8 @@ Observed shape:
 Notes:
 
 - `expires_in` may be numeric or string-like
+- a successful refresh response may omit `refresh_token`; the proxy preserves the existing refresh token in that case
+- an OAuth `invalid_grant` response expires the account; other refresh failures keep it active behind a 60-second cooldown
 - The proxy extracts `chatgpt_account_id` from either:
   - `id_token`
   - `access_token`

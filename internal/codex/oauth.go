@@ -37,6 +37,24 @@ type oauthTokenResponse struct {
 	ExpiresIn    flexibleInt64 `json:"expires_in"`
 }
 
+type oauthTokenError struct {
+	Code        string
+	Description string
+	Body        string
+}
+
+func (e *oauthTokenError) Error() string {
+	message := strings.TrimSpace(e.Description)
+	if message == "" {
+		message = strings.TrimSpace(e.Body)
+	}
+	return fmt.Sprintf("oauth token exchange failed: %s", message)
+}
+
+func (e *oauthTokenError) terminalCredentialFailure() bool {
+	return e != nil && strings.EqualFold(strings.TrimSpace(e.Code), "invalid_grant")
+}
+
 type oauthClaims struct {
 	ChatGPTAccountID string          `json:"chatgpt_account_id"`
 	OpenAIAuth       oauthAuthClaims `json:"https://api.openai.com/auth"`
@@ -200,7 +218,11 @@ func (s *OAuthService) Refresh(ctx context.Context, existing accounts.OAuthToken
 	if nextAccountID == "" {
 		nextAccountID = accountID
 	}
-	return buildOAuthToken(resp), nextAccountID, nil
+	nextToken := buildOAuthToken(resp)
+	if strings.TrimSpace(nextToken.RefreshToken) == "" {
+		nextToken.RefreshToken = existing.RefreshToken
+	}
+	return nextToken, nextAccountID, nil
 }
 
 func buildOAuthToken(raw oauthTokenResponse) accounts.OAuthToken {
@@ -285,7 +307,16 @@ func doForm(ctx context.Context, client *http.Client, endpoint string, values ur
 	defer resp.Body.Close()
 	bodyText := readLimitedErrorBody(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return oauthTokenResponse{}, fmt.Errorf("oauth token exchange failed: %s", strings.TrimSpace(bodyText))
+		var payload struct {
+			Error            string `json:"error"`
+			ErrorDescription string `json:"error_description"`
+		}
+		_ = json.Unmarshal([]byte(bodyText), &payload)
+		return oauthTokenResponse{}, &oauthTokenError{
+			Code:        strings.TrimSpace(payload.Error),
+			Description: strings.TrimSpace(payload.ErrorDescription),
+			Body:        strings.TrimSpace(bodyText),
+		}
 	}
 	var decoded oauthTokenResponse
 	if err := json.Unmarshal([]byte(bodyText), &decoded); err != nil {

@@ -1,11 +1,17 @@
 package codex
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"chatgpt-codex-proxy/internal/accounts"
+	"chatgpt-codex-proxy/internal/config"
 )
 
 func TestDeviceCodeResponseUnmarshalJSONAcceptsStringAndNumber(t *testing.T) {
@@ -60,6 +66,31 @@ func TestBuildOAuthTokenUsesTypedExpiresIn(t *testing.T) {
 	delta := token.ExpiresAt.Sub(before)
 	if delta < 7190*time.Second || delta > 7210*time.Second {
 		t.Fatalf("expires_at delta = %s, want about 2h", delta)
+	}
+}
+
+func TestRefreshPreservesExistingRefreshTokenWhenResponseOmitsOne(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"next-access","expires_in":3600}`))
+	}))
+	defer server.Close()
+
+	service := NewOAuthService(config.Config{AuthIssuer: server.URL})
+	existing := accounts.OAuthToken{
+		AccessToken:  "old-access",
+		RefreshToken: "existing-refresh",
+		ExpiresAt:    time.Now().UTC().Add(-time.Minute),
+	}
+
+	refreshed, _, err := service.Refresh(context.Background(), existing, "acct_123")
+	if err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if refreshed.RefreshToken != existing.RefreshToken {
+		t.Fatalf("refresh token = %q, want existing token %q", refreshed.RefreshToken, existing.RefreshToken)
 	}
 }
 

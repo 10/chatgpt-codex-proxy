@@ -232,7 +232,7 @@ What it does:
 - Lists locally known accounts, status, eligibility, cooldown state, and cached quota
 - Starts and polls device login
 - Removes accounts or updates `label` / `status`
-- Refreshes OAuth tokens
+- Refreshes OAuth tokens without discarding an existing refresh token when the provider does not rotate it
 - Fetches runtime or cached quota data
 - Shows or changes the global rotation strategy
 
@@ -250,6 +250,8 @@ Account status values:
 - `banned`
 
 General routing is blocked by permanent status, active cooldown, missing token, or exhausted primary / secondary quota. `code_review_rate_limit` is kept for observability and does not affect normal routing.
+
+OAuth refresh failures only expire an account when the provider returns `invalid_grant`. Transient refresh failures keep the account active and apply the built-in 60-second cooldown.
 
 ## Deployment and Persistence
 
