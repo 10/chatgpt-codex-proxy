@@ -7,6 +7,7 @@ import "chatgpt-codex-proxy/internal/codex"
 type NormalizedRequest struct {
 	codex.Request
 	ModelExplicit   bool
+	Generate        *bool
 	TupleSchema     map[string]any
 	ToolNameAliases map[string]string
 }
@@ -38,6 +39,9 @@ func (n NormalizedRequest) ToCodexWSCreatePayload() map[string]any {
 	}
 	if len(n.Include) > 0 {
 		payload["include"] = append([]string(nil), n.Include...)
+	}
+	if n.Generate != nil {
+		payload["generate"] = *n.Generate
 	}
 	return payload
 }

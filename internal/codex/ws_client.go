@@ -45,6 +45,10 @@ func (s *WSStream) Headers() http.Header {
 	return s.headers.Clone()
 }
 
+func (s *WSStream) SendJSON(body any) error {
+	return s.conn.WriteJSON(body)
+}
+
 func (s *WSStream) NextEvent() (*StreamEvent, error) {
 	_, message, err := s.conn.ReadMessage()
 	if err != nil {

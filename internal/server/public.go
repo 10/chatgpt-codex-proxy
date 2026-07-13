@@ -206,7 +206,7 @@ func (a *App) openWSStream(c *gin.Context, ctx context.Context, endpoint string,
 	body := resolution.Request.ToCodexWSCreatePayload()
 	a.logUpstreamPayload(c, endpoint, "websocket", account.ID, body)
 	wsEndpoint := websocketEndpoint(a.cfg.CodexBaseURL)
-	stream, err := codex.ConnectWS(ctx, wsEndpoint, headers, body)
+	stream, err := a.connectResponsesWebSocket(ctx, wsEndpoint, headers, body)
 	if err != nil {
 		return account, nil, nil, err
 	}
@@ -334,7 +334,7 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 	prepareStreamResponse(c)
 
 	accumulator := translate.NewAccumulator(normalized)
-	var tupleTextBuffer strings.Builder
+	state := responsesStreamState{}
 	for {
 		event, upstreamErr, err := a.nextStreamEvent(account, accumulator, stream)
 		if err != nil {
@@ -352,48 +352,9 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 			}
 			return
 		}
-		if normalized.TupleSchema != nil {
-			switch event.Type {
-			case "response.output_text.delta":
-				tupleTextBuffer.WriteString(jsonutil.StringValue(event.Raw["delta"]))
-				continue
-			case "response.output_text.done":
-				if text := jsonutil.StringValue(event.Raw["text"]); text != "" {
-					tupleTextBuffer.Reset()
-					tupleTextBuffer.WriteString(text)
-				}
-				continue
-			case "response.completed":
-				if strings.TrimSpace(tupleTextBuffer.String()) != "" {
-					reconverted := tupleTextBuffer.String()
-					if patched, err := translate.ReconvertJSONText(reconverted, normalized.TupleSchema); err != nil {
-						a.logTupleReconversionWarning(c, "responses", accumulator.ResponseID, err)
-					} else {
-						reconverted = patched
-					}
-					writeSSE(c.Writer, "response.output_text.delta", translate.ResponseEventJSON("response.output_text.delta", accumulator.ResponseID, map[string]any{
-						"delta": reconverted,
-					}))
-					c.Writer.Flush()
-				}
-			}
+		for _, outgoing := range a.responsesStreamEvents(c, accumulator, normalized, &state, event) {
+			writeSSE(c.Writer, outgoing.Type, translate.ResponseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload))
 		}
-		if toolEvents, handled := accumulator.ResponsesStreamEventsForEvent(event); handled {
-			writeResponseStreamEvents(c.Writer, accumulator.ResponseID, toolEvents)
-			c.Writer.Flush()
-			continue
-		}
-		if event.Type == "response.completed" {
-			writeResponseStreamEvents(c.Writer, accumulator.ResponseID, accumulator.PendingResponseToolCallCompletionEvents())
-			c.Writer.Flush()
-		}
-		payload := responseStreamPayload(event, accumulator)
-		if normalized.TupleSchema != nil && event.Type == "response.completed" {
-			if err := translate.PatchResponseCompletedPayloadForTuple(payload, normalized.TupleSchema); err != nil {
-				a.logTupleReconversionWarning(c, "responses", accumulator.ResponseID, err)
-			}
-		}
-		writeSSE(c.Writer, event.Type, translate.ResponseEventJSON(event.Type, accumulator.ResponseID, payload))
 		c.Writer.Flush()
 		if event.Type == "response.completed" {
 			break
@@ -425,12 +386,6 @@ func (a *App) nextStreamEvent(account accounts.Record, accumulator *translate.Ac
 func (a *App) finalizeSuccessfulStream(accountID string, accumulator *translate.Accumulator, stream eventStream) {
 	a.accounts.NoteSuccess(accountID)
 	a.rememberContinuation(accountID, accumulator, stream.Headers().Get("x-codex-turn-state"))
-}
-
-func writeResponseStreamEvents(w io.Writer, responseID string, events []translate.ResponseStreamEvent) {
-	for _, event := range events {
-		writeSSE(w, event.Type, translate.ResponseEventJSON(event.Type, responseID, event.Payload))
-	}
 }
 
 type chatToolCallStreamer struct {

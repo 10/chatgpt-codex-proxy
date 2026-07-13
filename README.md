@@ -169,6 +169,7 @@ The same key protects both public and admin routes.
 Routes:
 
 - `POST /v1/chat/completions`
+- `GET /v1/responses` (WebSocket upgrade)
 - `POST /v1/responses`
 - `POST /v1/responses/compact`
 - `POST /v1/images/generations`
@@ -181,6 +182,7 @@ Routes:
 Supported behavior:
 
 - Streaming and non-streaming responses
+- Persistent Responses WebSocket sessions with sequential `response.create` events
 - Tool calling, including custom tools
 - Legacy Chat Completions `functions` and `function_call`
 - Hosted web search passthrough
