@@ -56,7 +56,7 @@ func ChatCompletions(req openai.ChatCompletionsRequest, catalog ...*models.Catal
 		req.PreviousResponseID,
 	)
 	out.PromptCacheKey = strings.TrimSpace(req.PromptCacheKey)
-	out.ToolNameAliases = toolNames.aliases()
+	out.ToolNameAliases = toolNames.Aliases()
 	if req.ResponseFormat != nil {
 		text, tupleSchema, err := normalizeChatResponseFormat(req.ResponseFormat)
 		if err != nil {
@@ -145,7 +145,7 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 	out.Text = payload.Text
 	out.PromptCacheKey = strings.TrimSpace(req.PromptCacheKey)
 	out.TupleSchema = payload.TupleSchema
-	out.ToolNameAliases = toolNames.aliases()
+	out.ToolNameAliases = toolNames.Aliases()
 	return out, nil
 }
 
@@ -172,7 +172,7 @@ func Compact(req openai.ResponsesCompactRequest, catalog ...*models.Catalog) (No
 			Reasoning:    reasoning,
 		},
 		TupleSchema:     payload.TupleSchema,
-		ToolNameAliases: toolNames.aliases(),
+		ToolNameAliases: toolNames.Aliases(),
 	}
 	return out, nil
 }
@@ -262,7 +262,7 @@ func normalizeChatMessage(out *NormalizedRequest, instructions *[]string, toolCa
 		if message.FunctionCall != nil {
 			out.Input = append(out.Input, codex.InputItem{
 				Type:      "function_call",
-				Name:      toolNames.shorten(message.FunctionCall.Name),
+				Name:      toolNames.Shorten(message.FunctionCall.Name),
 				Arguments: message.FunctionCall.Arguments,
 			})
 			return nil
@@ -305,7 +305,7 @@ func chatToolCallInputItem(call openai.ToolCall, callType string, toolNames *too
 		return codex.InputItem{
 			Type:      "function_call",
 			CallID:    call.ID,
-			Name:      toolNames.shorten(call.Function.Name),
+			Name:      toolNames.Shorten(call.Function.Name),
 			Arguments: call.Function.Arguments,
 		}
 	}
@@ -325,7 +325,7 @@ func chatToolCallInputItem(call openai.ToolCall, callType string, toolNames *too
 	return codex.InputItem{
 		Type:   "custom_tool_call",
 		CallID: call.ID,
-		Name:   toolNames.shorten(name),
+		Name:   toolNames.Shorten(name),
 		Input:  input,
 	}
 }
@@ -346,14 +346,14 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, to
 		*out = append(*out, codex.InputItem{
 			Type:      "function_call",
 			CallID:    item.CallID,
-			Name:      toolNames.shorten(item.Name),
+			Name:      toolNames.Shorten(item.Name),
 			Arguments: item.Arguments,
 		})
 	case "custom_tool_call":
 		*out = append(*out, codex.InputItem{
 			Type:   "custom_tool_call",
 			CallID: item.CallID,
-			Name:   toolNames.shorten(item.Name),
+			Name:   toolNames.Shorten(item.Name),
 			Input:  item.Input,
 		})
 	case "function_call_output", "custom_tool_call_output":

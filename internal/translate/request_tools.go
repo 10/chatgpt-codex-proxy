@@ -50,7 +50,7 @@ func normalizeTools(tools []openai.ToolDefinition, toolNames *toolNameMapper) []
 			}
 			result = append(result, codex.Tool{
 				Type:        "function",
-				Name:        toolNames.shorten(function.Name),
+				Name:        toolNames.Shorten(function.Name),
 				Description: function.Description,
 				Parameters:  NormalizeSchema(function.Parameters),
 				Strict:      function.Strict,
@@ -63,7 +63,7 @@ func normalizeTools(tools []openai.ToolDefinition, toolNames *toolNameMapper) []
 			})
 		default:
 			if strings.TrimSpace(tool.Name) != "" {
-				tool.Name = toolNames.shorten(tool.Name)
+				tool.Name = toolNames.Shorten(tool.Name)
 			}
 			result = append(result, tool)
 		}
@@ -99,12 +99,12 @@ func normalizeToolChoice(raw json.RawMessage, toolNames *toolNameMapper) json.Ra
 			name = strings.TrimSpace(choice.Function.Name)
 		}
 		if name != "" {
-			name = toolNames.shorten(name)
+			name = toolNames.Shorten(name)
 			return json.RawMessage(`{"type":"function","name":` + strconv.Quote(name) + `}`)
 		}
 	case "custom":
 		if name := strings.TrimSpace(choice.Name); name != "" {
-			return json.RawMessage(`{"type":"custom","name":` + strconv.Quote(toolNames.shorten(name)) + `}`)
+			return json.RawMessage(`{"type":"custom","name":` + strconv.Quote(toolNames.Shorten(name)) + `}`)
 		}
 	case "web_search", "web_search_preview":
 		return json.RawMessage(`{"type":"web_search"}`)
@@ -121,7 +121,7 @@ func normalizeLegacyFunctionChoice(choice *openai.LegacyFunctionCallChoice, tool
 		return json.RawMessage(strconv.Quote(choice.Mode))
 	}
 	if name := strings.TrimSpace(choice.Name); name != "" {
-		name = toolNames.shorten(name)
+		name = toolNames.Shorten(name)
 		return json.RawMessage(`{"type":"function","name":` + strconv.Quote(name) + `}`)
 	}
 	return nil

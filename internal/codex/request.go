@@ -5,14 +5,13 @@ import (
 	"strings"
 
 	"chatgpt-codex-proxy/internal/conversation"
-	"chatgpt-codex-proxy/internal/openai"
+	"chatgpt-codex-proxy/internal/generation"
 )
 
-type Reasoning = openai.Reasoning
-type TextFormat = openai.ResponsesTextFormat
+type Reasoning = generation.Reasoning
+type TextFormat = generation.TextFormat
 
-// Tool shares the OpenAI tool definition schema.
-type Tool = openai.ToolDefinition
+type Tool = generation.Tool
 
 type Request struct {
 	Model              string          `json:"model"`
@@ -28,6 +27,7 @@ type Request struct {
 	PreviousResponseID string          `json:"previous_response_id,omitempty"`
 	PromptCacheKey     string          `json:"prompt_cache_key,omitempty"`
 	Include            []string        `json:"include,omitempty"`
+	ParallelToolCalls  *bool           `json:"parallel_tool_calls,omitempty"`
 }
 
 type CompactRequest struct {
@@ -51,20 +51,20 @@ type TextConfig struct {
 }
 
 type InputItem struct {
-	Role             string                 `json:"role,omitempty"`
-	Type             string                 `json:"type,omitempty"`
-	Phase            string                 `json:"phase,omitempty"`
-	Content          []ContentPart          `json:"content,omitempty"`
-	CallID           string                 `json:"call_id,omitempty"`
-	Name             string                 `json:"name,omitempty"`
-	Input            string                 `json:"input,omitempty"`
-	Arguments        string                 `json:"arguments,omitempty"`
-	OutputText       string                 `json:"-"`
-	OutputContent    []ContentPart          `json:"-"`
-	ID               string                 `json:"id,omitempty"`
-	Status           string                 `json:"status,omitempty"`
-	Summary          []openai.ReasoningPart `json:"summary,omitempty"`
-	EncryptedContent string                 `json:"encrypted_content,omitempty"`
+	Role             string                     `json:"role,omitempty"`
+	Type             string                     `json:"type,omitempty"`
+	Phase            string                     `json:"phase,omitempty"`
+	Content          []ContentPart              `json:"content,omitempty"`
+	CallID           string                     `json:"call_id,omitempty"`
+	Name             string                     `json:"name,omitempty"`
+	Input            string                     `json:"input,omitempty"`
+	Arguments        string                     `json:"arguments,omitempty"`
+	OutputText       string                     `json:"-"`
+	OutputContent    []ContentPart              `json:"-"`
+	ID               string                     `json:"id,omitempty"`
+	Status           string                     `json:"status,omitempty"`
+	Summary          []generation.ReasoningPart `json:"summary,omitempty"`
+	EncryptedContent string                     `json:"encrypted_content,omitempty"`
 }
 
 func (i InputItem) MarshalJSON() ([]byte, error) {
@@ -99,7 +99,7 @@ func (i InputItem) MarshalJSON() ([]byte, error) {
 		payload["status"] = i.Status
 	}
 	if i.Type == "reasoning" {
-		payload["summary"] = append(make([]openai.ReasoningPart, 0, len(i.Summary)), i.Summary...)
+		payload["summary"] = append(make([]generation.ReasoningPart, 0, len(i.Summary)), i.Summary...)
 	} else if len(i.Summary) > 0 {
 		payload["summary"] = i.Summary
 	}

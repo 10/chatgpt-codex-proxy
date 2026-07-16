@@ -3,96 +3,15 @@ package translate
 import (
 	"encoding/json"
 	"maps"
-	"strconv"
 	"strings"
 
+	"chatgpt-codex-proxy/internal/generation"
 	"chatgpt-codex-proxy/internal/openai"
 )
 
-const maxToolNameLength = 64
+type toolNameMapper = generation.ToolNames
 
-type toolNameMapper struct {
-	originalToShort map[string]string
-	shortToOriginal map[string]string
-	used            map[string]struct{}
-}
-
-func newToolNameMapper(names []string) *toolNameMapper {
-	mapper := &toolNameMapper{
-		originalToShort: make(map[string]string),
-		shortToOriginal: make(map[string]string),
-		used:            make(map[string]struct{}),
-	}
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" || len(name) > maxToolNameLength {
-			continue
-		}
-		mapper.originalToShort[name] = name
-		mapper.used[name] = struct{}{}
-	}
-	for _, name := range names {
-		mapper.shorten(name)
-	}
-	return mapper
-}
-
-func (m *toolNameMapper) shorten(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" || m == nil {
-		return name
-	}
-	if shortened, ok := m.originalToShort[name]; ok {
-		return shortened
-	}
-
-	candidate := toolNameCandidate(name)
-	if _, exists := m.used[candidate]; exists {
-		base := candidate
-		for suffixNumber := 1; ; suffixNumber++ {
-			suffix := "_" + strconv.Itoa(suffixNumber)
-			prefixLength := maxToolNameLength - len(suffix)
-			candidate = base
-			if len(candidate) > prefixLength {
-				candidate = candidate[:prefixLength]
-			}
-			candidate += suffix
-			if _, exists := m.used[candidate]; !exists {
-				break
-			}
-		}
-	}
-
-	m.originalToShort[name] = candidate
-	m.used[candidate] = struct{}{}
-	if candidate != name {
-		m.shortToOriginal[candidate] = name
-	}
-	return candidate
-}
-
-func toolNameCandidate(name string) string {
-	if len(name) <= maxToolNameLength {
-		return name
-	}
-	if strings.HasPrefix(name, "mcp__") {
-		if index := strings.LastIndex(name, "__"); index > 0 {
-			candidate := "mcp__" + name[index+2:]
-			if len(candidate) > maxToolNameLength {
-				candidate = candidate[:maxToolNameLength]
-			}
-			return candidate
-		}
-	}
-	return name[:maxToolNameLength]
-}
-
-func (m *toolNameMapper) aliases() map[string]string {
-	if m == nil || len(m.shortToOriginal) == 0 {
-		return nil
-	}
-	return maps.Clone(m.shortToOriginal)
-}
+func newToolNameMapper(names []string) *toolNameMapper { return generation.NewToolNames(names) }
 
 func toolNamesForChat(req openai.ChatCompletionsRequest, tools []openai.ToolDefinition) []string {
 	names := toolDefinitionNames(tools)

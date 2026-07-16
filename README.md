@@ -1,8 +1,8 @@
 # chatgpt-codex-proxy
 
-`chatgpt-codex-proxy` is a small Go service that lets standard OpenAI clients talk to ChatGPT Codex accounts.
+`chatgpt-codex-proxy` is a small Go service that lets standard OpenAI and Anthropic clients talk to ChatGPT Codex accounts.
 
-It exposes an OpenAI-compatible API, translates requests into the private `chatgpt.com/backend-api/codex/*` format, and manages one or more locally authenticated Codex accounts.
+It exposes OpenAI-compatible and Anthropic Messages APIs, translates requests into the private `chatgpt.com/backend-api/codex/*` format, and manages one or more locally authenticated Codex accounts.
 
 The upstream Codex surface is private and undocumented. It may change at any time. This project is best suited for local or small-scale deployments.
 
@@ -112,6 +112,22 @@ curl -sS "${PROXY_URL}/v1/responses" \
   }'
 ```
 
+Anthropic Messages:
+
+```bash
+curl -sS "${PROXY_URL}/v1/messages" \
+  -H "X-API-Key: ${PROXY_API_KEY}" \
+  -H "Anthropic-Version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5.6-sol",
+    "max_tokens": 1024,
+    "messages": [
+      { "role": "user", "content": "Summarize this project in three bullet points." }
+    ]
+  }'
+```
+
 Responses compact:
 
 ```bash
@@ -148,10 +164,20 @@ curl -sS "${PROXY_URL}/v1/images/generations" \
   }'
 ```
 
-### 5. Point an OpenAI client at it
+### 5. Point a client at it
 
 - Base URL: `http://localhost:8080/v1`
 - API key: your `PROXY_API_KEY`
+
+For an Anthropic client or Claude Code:
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:8080
+export ANTHROPIC_API_KEY="${PROXY_API_KEY}"
+export ANTHROPIC_MODEL=gpt-5.6-sol
+```
+
+Use a model ID returned by `GET /v1/models`; the proxy does not invent `claude-*` aliases for Codex models.
 
 ## Authentication
 
@@ -175,6 +201,8 @@ Routes:
 - `POST /v1/responses/compact`
 - `POST /v1/images/generations`
 - `POST /v1/images/edits`
+- `POST /v1/messages`
+- `POST /v1/messages/count_tokens`
 - `GET /v1/models`
 - `GET /v1/models/:model_id`
 - `GET /health/live`
@@ -199,6 +227,8 @@ Supported behavior:
 - Codex-backed image generation and editing with `gpt-image-1.5` and `gpt-image-2`
 - JSON image references and multipart image/mask uploads for edits
 - Images API partial-image streaming
+- Anthropic Messages text, image, tool-use, tool-result, thinking, structured-output, streaming, and non-streaming compatibility
+- Anthropic token-count estimates and Anthropic-shaped model discovery when `Anthropic-Version` is present
 
 Important notes:
 
@@ -215,6 +245,7 @@ Important notes:
 - Public WebSocket continuations stay on the reused upstream connection. JSON HTTP and compact continuations replay saved history locally and prefer the original account.
 - Explicit `prompt_cache_key` values are preserved. When omitted, the proxy derives a stable key when possible.
 - Some OpenAI compatibility fields are accepted and ignored. See [docs/TRANSLATION.md](docs/TRANSLATION.md) for exact behavior.
+- Anthropic requests require `Anthropic-Version: 2023-06-01`. Sampling controls, stop sequences, exact `max_tokens` truncation, and thinking budgets are accepted but are currently advisory because the private Codex request does not expose equivalent controls. See [docs/ANTHROPIC.md](docs/ANTHROPIC.md).
 
 ## Admin API
 
@@ -279,10 +310,10 @@ In-memory only:
 
 ## How It Works
 
-1. The Gin server accepts OpenAI-style requests.
-2. Both public request styles are normalized into one internal request model.
+1. The Gin server accepts OpenAI- or Anthropic-style requests.
+2. Public protocol adapters normalize requests into one internal turn model.
 3. The proxy selects a ready account, translates the request, and sends it to the private Codex backend over HTTP SSE or WebSocket.
-4. Upstream events are converted back into OpenAI-style JSON or SSE.
+4. Upstream events are converted back into the selected public protocol's JSON or SSE format.
 
 Architecture overview:
 
@@ -317,10 +348,14 @@ OPENAI_BASE_URL="${PROXY_URL}/v1" \
 go test -tags=live ./internal/integration -v -count=1
 ```
 
+The live suite exercises both OpenAI and Anthropic compatibility routes.
+
 ## Docs
 
 For the lower-level details moved out of this README:
 
+- [docs/ANTHROPIC.md](docs/ANTHROPIC.md)
+  Anthropic request mapping, streaming behavior, token counting, and compatibility limits
 - [docs/TRANSLATION.md](docs/TRANSLATION.md)
   Exact OpenAI-to-Codex translation behavior and compatibility rules
 - [docs/MULTI_ACCOUNT_ROTATION_STRATEGY.md](docs/MULTI_ACCOUNT_ROTATION_STRATEGY.md)

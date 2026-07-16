@@ -1,51 +1,11 @@
 package translate
 
-import "chatgpt-codex-proxy/internal/codex"
+import (
+	"chatgpt-codex-proxy/internal/codex"
+	"chatgpt-codex-proxy/internal/turn"
+)
 
-// NormalizedRequest extends the canonical codex request with translation-only
-// metadata that the proxy needs while mapping OpenAI payloads.
-type NormalizedRequest struct {
-	codex.Request
-	ModelExplicit   bool
-	Generate        *bool
-	WebSocketAppend bool
-	TupleSchema     map[string]any
-	ToolNameAliases map[string]string
-}
-
-func (n NormalizedRequest) ToCodexWSCreatePayload() map[string]any {
-	payload := map[string]any{
-		"type":         "response.create",
-		"model":        n.Model,
-		"input":        n.Input,
-		"instructions": n.Instructions,
-	}
-	if len(n.Tools) > 0 {
-		payload["tools"] = n.Tools
-	}
-	if len(n.ToolChoice) > 0 {
-		payload["tool_choice"] = n.ToolChoice
-	}
-	if n.Text != nil {
-		payload["text"] = n.Text
-	}
-	if n.Reasoning != nil {
-		payload["reasoning"] = n.Reasoning
-	}
-	if n.PreviousResponseID != "" {
-		payload["previous_response_id"] = n.PreviousResponseID
-	}
-	if n.PromptCacheKey != "" {
-		payload["prompt_cache_key"] = n.PromptCacheKey
-	}
-	if len(n.Include) > 0 {
-		payload["include"] = append([]string(nil), n.Include...)
-	}
-	if n.Generate != nil {
-		payload["generate"] = *n.Generate
-	}
-	return payload
-}
+type NormalizedRequest = turn.Request
 
 type NormalizedCompactRequest struct {
 	codex.CompactRequest
