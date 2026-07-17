@@ -7,14 +7,15 @@ import (
 
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/openai"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestBuildMessageMapsTextThinkingToolsAndUsage(t *testing.T) {
 	t.Parallel()
 
-	normalized := translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}, ToolNameAliases: map[string]string{"short": "original_long_name"}}
-	accumulator := translate.NewAccumulator(normalized)
+	normalized := turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}, ToolNameAliases: map[string]string{"short": "original_long_name"}}
+	accumulator := turn.NewAccumulator(normalized)
 	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id":     "resp_123",
@@ -56,7 +57,7 @@ func TestBuildMessageMapsTextThinkingToolsAndUsage(t *testing.T) {
 func TestBuildMessageMapsIncompleteToMaxTokens(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id":                 "resp_limit",
@@ -78,7 +79,7 @@ func TestBuildMessageMapsIncompleteToMaxTokens(t *testing.T) {
 func TestBuildMessageDoesNotExposeIncompleteToolCallAsToolUse(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id":                 "resp_partial_tool",
@@ -102,7 +103,7 @@ func TestBuildMessageDoesNotExposeIncompleteToolCallAsToolUse(t *testing.T) {
 func TestBuildMessagePreservesLargeToolArgumentNumbers(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_large_id", "status": "completed",
@@ -125,7 +126,7 @@ func TestBuildMessageShortensLongToolUseIDs(t *testing.T) {
 	t.Parallel()
 
 	longID := "call_" + strings.Repeat("a", 80)
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_long_call", "status": "completed",
@@ -148,7 +149,7 @@ func TestBuildMessageShortensLongToolUseIDs(t *testing.T) {
 func TestBuildMessageSerializesSignatureOnlyThinkingWithEmptyText(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{
 		Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"},
 	}})
 	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
@@ -170,7 +171,7 @@ func TestBuildMessageSerializesSignatureOnlyThinkingWithEmptyText(t *testing.T) 
 func TestBuildMessageOmitsUnsignedThinkingSummary(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{
 		Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"},
 	}})
 	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
@@ -189,7 +190,7 @@ func TestBuildMessageOmitsUnsignedThinkingSummary(t *testing.T) {
 func TestBuildMessageMapsHostedWebSearch(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_search", "model": "gpt-5.4", "status": "completed",
@@ -239,7 +240,7 @@ func TestBuildMessageMapsHostedWebSearch(t *testing.T) {
 func TestBuildMessageDoesNotReportFailedHostedWebSearchAsEmptySuccess(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_search_failed", "model": "gpt-5.4", "status": "completed",
@@ -422,13 +423,13 @@ func TestSchemaMatcherCompilesEachSchemaOnce(t *testing.T) {
 	}
 }
 
-func structuredOutputAccumulator(schema map[string]any) *translate.Accumulator {
-	responseSchema := translate.NormalizeSchema(schema)
+func structuredOutputAccumulator(schema map[string]any) *turn.Accumulator {
+	responseSchema := openai.NormalizeSchema(schema)
 	strictSchema := jsonutil.CloneMap(responseSchema)
 	if err := makeOpenAIStrictSchemaNode(strictSchema, newSchemaMatcher()); err != nil {
 		panic(err)
 	}
-	return translate.NewAccumulator(translate.NormalizedRequest{
+	return turn.NewAccumulator(turn.NormalizedRequest{
 		Request: codex.Request{
 			Model: "gpt-5.4",
 			Text: &codex.TextConfig{Format: codex.TextFormat{

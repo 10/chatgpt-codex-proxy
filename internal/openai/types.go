@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"chatgpt-codex-proxy/internal/conversation"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 type ChatCompletionsRequest struct {
@@ -133,74 +133,9 @@ func (i *ImageURLValue) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type ToolDefinition struct {
-	Type              string                     `json:"type"`
-	Function          *FunctionTool              `json:"function,omitempty"`
-	Name              string                     `json:"name,omitempty"`
-	Description       string                     `json:"description,omitempty"`
-	Parameters        map[string]any             `json:"parameters,omitempty"`
-	Format            map[string]any             `json:"format,omitempty"`
-	Strict            bool                       `json:"strict,omitempty"`
-	SearchContextSize string                     `json:"search_context_size,omitempty"`
-	UserLocation      map[string]any             `json:"user_location,omitempty"`
-	ExtraFields       map[string]json.RawMessage `json:"-"`
-}
+type ToolDefinition = turn.ToolDefinition
 
-func (t *ToolDefinition) UnmarshalJSON(data []byte) error {
-	type alias ToolDefinition
-	var decoded alias
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
-	}
-	delete(raw, "type")
-	delete(raw, "function")
-	delete(raw, "name")
-	delete(raw, "description")
-	delete(raw, "parameters")
-	delete(raw, "format")
-	delete(raw, "strict")
-	delete(raw, "search_context_size")
-	delete(raw, "user_location")
-
-	decoded.ExtraFields = raw
-	*t = ToolDefinition(decoded)
-	return nil
-}
-
-func (t ToolDefinition) MarshalJSON() ([]byte, error) {
-	type alias ToolDefinition
-	base, err := json.Marshal(alias(t))
-	if err != nil {
-		return nil, err
-	}
-	if len(t.ExtraFields) == 0 {
-		return base, nil
-	}
-
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(base, &payload); err != nil {
-		return nil, err
-	}
-	for key, value := range t.ExtraFields {
-		if _, exists := payload[key]; exists {
-			continue
-		}
-		payload[key] = append(json.RawMessage(nil), value...)
-	}
-	return json.Marshal(payload)
-}
-
-type FunctionTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Parameters  map[string]any `json:"parameters,omitempty"`
-	Strict      bool           `json:"strict,omitempty"`
-}
+type FunctionTool = turn.FunctionTool
 
 type ToolCall struct {
 	ID       string             `json:"id"`
@@ -243,21 +178,13 @@ type ResponsesCompactRequest struct {
 	Reasoning          *Reasoning     `json:"reasoning,omitempty"`
 }
 
-type Reasoning struct {
-	Effort  string `json:"effort,omitempty"`
-	Summary string `json:"summary,omitempty"`
-}
+type Reasoning = turn.Reasoning
 
 type ResponsesText struct {
 	Format *ResponsesTextFormat `json:"format,omitempty"`
 }
 
-type ResponsesTextFormat struct {
-	Type   string         `json:"type"`
-	Name   string         `json:"name,omitempty"`
-	Schema map[string]any `json:"schema,omitempty"`
-	Strict bool           `json:"strict,omitempty"`
-}
+type ResponsesTextFormat = turn.TextFormat
 
 type ResponsesInput struct {
 	String string
@@ -366,4 +293,4 @@ func isResponseOutputContentPart(part ContentPart) bool {
 	return part.Type == "input_text" || part.Type == "output_text" || part.Type == "input_image" || part.Type == "input_file"
 }
 
-type ReasoningPart = conversation.ReasoningPart
+type ReasoningPart = turn.ReasoningPart

@@ -5,7 +5,7 @@ This document explains exactly how account rotation works in `chatgpt-codex-prox
 It is written to match the current implementation in:
 
 - [internal/accounts/service.go](../internal/accounts/service.go)
-- [internal/codex/account_manager.go](../internal/codex/account_manager.go)
+- [internal/accountmanager/manager.go](../internal/accountmanager/manager.go)
 - [internal/server/app.go](../internal/server/app.go)
 - [internal/server/public.go](../internal/server/public.go)
 - [internal/server/admin.go](../internal/server/admin.go)

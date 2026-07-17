@@ -7,7 +7,7 @@ import (
 
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 type StreamEvent = map[string]any
@@ -27,7 +27,7 @@ type StreamEncoder struct {
 	thinkDeltas   []string
 	toolSent      map[string]int
 	toolDone      map[string]bool
-	toolStates    map[string]*translate.ToolCallState
+	toolStates    map[string]*turn.ToolCallState
 	toolDeltas    map[string][]string
 	toolOrder     []string
 	webSearchDone map[string]bool
@@ -38,14 +38,14 @@ func NewStreamEncoder(inputTokens int64) *StreamEncoder {
 	return &StreamEncoder{
 		toolSent:      make(map[string]int),
 		toolDone:      make(map[string]bool),
-		toolStates:    make(map[string]*translate.ToolCallState),
+		toolStates:    make(map[string]*turn.ToolCallState),
 		toolDeltas:    make(map[string][]string),
 		webSearchDone: make(map[string]bool),
 		inputTokens:   max(0, inputTokens),
 	}
 }
 
-func (e *StreamEncoder) Events(event *codex.StreamEvent, accumulator *translate.Accumulator) []StreamEvent {
+func (e *StreamEncoder) Events(event *codex.StreamEvent, accumulator *turn.Accumulator) []StreamEvent {
 	result := e.ensureStarted(accumulator)
 
 	switch event.Type {
@@ -145,7 +145,7 @@ func (e *StreamEncoder) Events(event *codex.StreamEvent, accumulator *translate.
 	return result
 }
 
-func (e *StreamEncoder) ensureStarted(accumulator *translate.Accumulator) []StreamEvent {
+func (e *StreamEncoder) ensureStarted(accumulator *turn.Accumulator) []StreamEvent {
 	if e.started {
 		return nil
 	}
@@ -213,7 +213,7 @@ func (e *StreamEncoder) completeThinking(thinking, signature string) []StreamEve
 	return events
 }
 
-func (e *StreamEncoder) openTool(state *translate.ToolCallState) []StreamEvent {
+func (e *StreamEncoder) openTool(state *turn.ToolCallState) []StreamEvent {
 	block := &streamBlock{Index: e.nextIndex, Type: "tool_use", CallID: state.CallID}
 	e.nextIndex++
 	e.open = block
@@ -241,7 +241,7 @@ func (e *StreamEncoder) delta(deltaType, field, value string) StreamEvent {
 	}
 }
 
-func (e *StreamEncoder) toolRemainder(state *translate.ToolCallState) []StreamEvent {
+func (e *StreamEncoder) toolRemainder(state *turn.ToolCallState) []StreamEvent {
 	value := state.Arguments
 	if state.ToolType == "custom" {
 		value = state.Input
@@ -255,7 +255,7 @@ func (e *StreamEncoder) toolRemainder(state *translate.ToolCallState) []StreamEv
 	return []StreamEvent{e.delta("input_json_delta", "partial_json", remainder)}
 }
 
-func (e *StreamEncoder) hydrateTerminal(accumulator *translate.Accumulator) []StreamEvent {
+func (e *StreamEncoder) hydrateTerminal(accumulator *turn.Accumulator) []StreamEvent {
 	var events []StreamEvent
 	toolStreamStarted := e.open != nil && e.open.Type == "tool_use" || len(e.toolSent) > 0 || len(e.toolDeltas) > 0
 	response := jsonutil.MapValue(accumulator.RawFinal, "response")
@@ -382,14 +382,14 @@ func (e *StreamEncoder) completeWebSearch(item map[string]any, fallbackID string
 	return events
 }
 
-func (e *StreamEncoder) registerTool(state *translate.ToolCallState) {
+func (e *StreamEncoder) registerTool(state *turn.ToolCallState) {
 	if _, exists := e.toolStates[state.CallID]; !exists {
 		e.toolOrder = append(e.toolOrder, state.CallID)
 	}
 	e.toolStates[state.CallID] = state
 }
 
-func (e *StreamEncoder) completeTool(state *translate.ToolCallState) []StreamEvent {
+func (e *StreamEncoder) completeTool(state *turn.ToolCallState) []StreamEvent {
 	e.registerTool(state)
 	e.toolDone[state.CallID] = true
 	return e.flushTools()

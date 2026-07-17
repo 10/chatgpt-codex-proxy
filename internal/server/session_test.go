@@ -5,20 +5,22 @@ import (
 	"testing"
 	"time"
 
+	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
+	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/models"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestResolveSessionImplicitResumeTrimsHistoryAndSetsContinuationState(t *testing.T) {
 	t.Parallel()
 
 	app := &App{
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
-	normalized := translate.NormalizedRequest{
+	normalized := turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:        "gpt-5.4",
 			Instructions: "Be concise.",
@@ -31,7 +33,7 @@ func TestResolveSessionImplicitResumeTrimsHistoryAndSetsContinuationState(t *tes
 			},
 		},
 	}
-	app.continuations.Put(accounts.ContinuationRecord{
+	app.continuations.Put(conversation.ContinuationRecord{
 		ResponseID:      "resp_1",
 		AccountID:       "acct_1",
 		ConversationKey: resolutionConversationKey(normalized),
@@ -75,15 +77,15 @@ func TestResolveSessionImplicitResumeTrimsHistoryAndSetsContinuationState(t *tes
 func TestResolveSessionCarriesToolNameAliasesAcrossExplicitContinuation(t *testing.T) {
 	t.Parallel()
 
-	app := &App{continuations: accounts.NewContinuationManager(time.Minute)}
-	app.continuations.Put(accounts.ContinuationRecord{
+	app := &App{continuations: conversation.NewContinuationManager(time.Minute)}
+	app.continuations.Put(conversation.ContinuationRecord{
 		ResponseID:      "resp_long_tool",
 		AccountID:       "acct_1",
 		Model:           "gpt-5.4",
 		ToolNameAliases: map[string]string{"mcp__short": "mcp__original_long_tool_name"},
 	})
 
-	resolution, err := app.resolveSession(translate.NormalizedRequest{Request: codex.Request{
+	resolution, err := app.resolveSession(turn.NormalizedRequest{Request: codex.Request{
 		Model:              "gpt-5.4",
 		PreviousResponseID: "resp_long_tool",
 	}})
@@ -98,18 +100,18 @@ func TestResolveSessionCarriesToolNameAliasesAcrossExplicitContinuation(t *testi
 func TestResolveSessionBuildsReplayForExplicitHTTPContinuation(t *testing.T) {
 	t.Parallel()
 
-	app := &App{continuations: accounts.NewContinuationManager(time.Minute)}
-	app.continuations.Put(accounts.ContinuationRecord{
+	app := &App{continuations: conversation.NewContinuationManager(time.Minute)}
+	app.continuations.Put(conversation.ContinuationRecord{
 		ResponseID: "resp_replay",
 		AccountID:  "acct_1",
 		Model:      "gpt-5.4",
-		InputHistory: []accounts.ContinuationInputItem{
+		InputHistory: []conversation.ContinuationInputItem{
 			continuationInputItemFromCodex(userText("first")),
 			continuationInputItemFromCodex(assistantText("first answer")),
 		},
 	})
 
-	resolution, err := app.resolveSession(translate.NormalizedRequest{Request: codex.Request{
+	resolution, err := app.resolveSession(turn.NormalizedRequest{Request: codex.Request{
 		Model:              "gpt-5.4",
 		PreviousResponseID: "resp_replay",
 		Input:              []codex.InputItem{userText("second")},
@@ -128,8 +130,8 @@ func TestResolveSessionBuildsReplayForExplicitHTTPContinuation(t *testing.T) {
 func TestResolveSessionPreservesExplicitPromptCacheKey(t *testing.T) {
 	t.Parallel()
 
-	app := &App{continuations: accounts.NewContinuationManager(time.Minute)}
-	normalized := translate.NormalizedRequest{Request: codex.Request{
+	app := &App{continuations: conversation.NewContinuationManager(time.Minute)}
+	normalized := turn.NormalizedRequest{Request: codex.Request{
 		Model:          "gpt-5.4",
 		PromptCacheKey: "client-cache-key",
 		Input:          []codex.InputItem{userText("hello")},
@@ -151,9 +153,9 @@ func TestResolveSessionSkipsImplicitResumeForUnknownToolOutputCallID(t *testing.
 	t.Parallel()
 
 	app := &App{
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
-	normalized := translate.NormalizedRequest{
+	normalized := turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:        "gpt-5.4",
 			Instructions: "Be concise.",
@@ -165,7 +167,7 @@ func TestResolveSessionSkipsImplicitResumeForUnknownToolOutputCallID(t *testing.
 			},
 		},
 	}
-	app.continuations.Put(accounts.ContinuationRecord{
+	app.continuations.Put(conversation.ContinuationRecord{
 		ResponseID:      "resp_1",
 		AccountID:       "acct_1",
 		ConversationKey: resolutionConversationKey(normalized),
@@ -195,9 +197,9 @@ func TestResolveSessionChoosesMatchingHistoryWithinConversationBucket(t *testing
 	t.Parallel()
 
 	app := &App{
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
-	normalized := translate.NormalizedRequest{
+	normalized := turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:        "gpt-5.4",
 			Instructions: "Be concise.",
@@ -210,7 +212,7 @@ func TestResolveSessionChoosesMatchingHistoryWithinConversationBucket(t *testing
 	}
 	conversationKey := resolutionConversationKey(normalized)
 
-	app.continuations.Put(accounts.ContinuationRecord{
+	app.continuations.Put(conversation.ContinuationRecord{
 		ResponseID:      "resp_other",
 		AccountID:       "acct_other",
 		ConversationKey: conversationKey,
@@ -222,7 +224,7 @@ func TestResolveSessionChoosesMatchingHistoryWithinConversationBucket(t *testing
 			assistantText("different assistant"),
 		}),
 	})
-	app.continuations.Put(accounts.ContinuationRecord{
+	app.continuations.Put(conversation.ContinuationRecord{
 		ResponseID:      "resp_match",
 		AccountID:       "acct_match",
 		ConversationKey: conversationKey,
@@ -257,9 +259,9 @@ func TestResolveSessionImplicitResumeFallsBackForHostedToolReplayWithoutConversa
 	t.Parallel()
 
 	app := &App{
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
-	firstTurn := translate.NormalizedRequest{
+	firstTurn := turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:        "gpt-5.4",
 			Instructions: "Be concise.",
@@ -268,7 +270,7 @@ func TestResolveSessionImplicitResumeFallsBackForHostedToolReplayWithoutConversa
 			},
 		},
 	}
-	app.continuations.Put(accounts.ContinuationRecord{
+	app.continuations.Put(conversation.ContinuationRecord{
 		ResponseID:      "resp_hosted",
 		AccountID:       "acct_hosted",
 		ConversationKey: resolutionConversationKey(firstTurn),
@@ -299,7 +301,7 @@ func TestResolveSessionImplicitResumeFallsBackForHostedToolReplayWithoutConversa
 		FunctionCallIDs: []string{"call_1"},
 	})
 
-	secondTurn := translate.NormalizedRequest{
+	secondTurn := turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:        "gpt-5.4",
 			Instructions: "Be concise.",
@@ -387,18 +389,18 @@ func TestAcquireAccountForResolutionOmittedModelUsesRouteScopedDefault(t *testin
 	app := &App{
 		cfg:        config.Config{DefaultModel: "gpt-premium-default"},
 		accounts:   accountsSvc,
-		accountMgr: codex.NewAccountManager(config.Config{}, accountsSvc, nil, nil, catalog),
+		accountMgr: accountmanager.NewAccountManager(config.Config{}, accountsSvc, nil, nil, catalog),
 		models:     catalog,
 	}
 	resolution := sessionResolution{
-		Request: translate.NormalizedRequest{
+		Request: turn.NormalizedRequest{
 			Request: codex.Request{
 				Instructions: "Be concise.",
 				Input:        []codex.InputItem{userText("hello")},
 			},
 			ModelExplicit: false,
 		},
-		Original: translate.NormalizedRequest{
+		Original: turn.NormalizedRequest{
 			Request: codex.Request{
 				Instructions: "Be concise.",
 				Input:        []codex.InputItem{userText("hello")},
@@ -425,8 +427,8 @@ func TestAcquireAccountForResolutionOmittedModelUsesRouteScopedDefault(t *testin
 func TestFunctionCallIDsDedupesAndPreservesOrder(t *testing.T) {
 	t.Parallel()
 
-	got := functionCallIDs(&translate.Accumulator{
-		ToolCalls: []*translate.ToolCallState{
+	got := functionCallIDs(&turn.Accumulator{
+		ToolCalls: []*turn.ToolCallState{
 			{CallID: " call_1 "},
 			{CallID: "call_2"},
 			{CallID: "call_1"},
@@ -466,8 +468,8 @@ func assistantText(text string) codex.InputItem {
 	}
 }
 
-func continuationHistoryPrefix(items []codex.InputItem) []accounts.ContinuationInputItem {
-	history := make([]accounts.ContinuationInputItem, 0, len(items))
+func continuationHistoryPrefix(items []codex.InputItem) []conversation.ContinuationInputItem {
+	history := make([]conversation.ContinuationInputItem, 0, len(items))
 	for _, item := range items {
 		history = append(history, continuationInputItemFromCodex(item))
 	}

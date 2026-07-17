@@ -14,12 +14,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
+	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/models"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func newFailoverTestApp(t *testing.T) *App {
@@ -35,8 +37,8 @@ func newFailoverTestApp(t *testing.T) *App {
 		cfg:           cfg,
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		accountMgr:    codex.NewAccountManager(cfg, accountsSvc, nil, nil, catalog),
-		continuations: accounts.NewContinuationManager(time.Minute),
+		accountMgr:    accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil, catalog),
+		continuations: conversation.NewContinuationManager(time.Minute),
 		models:        catalog,
 	}
 }
@@ -54,7 +56,7 @@ func TestOpenStreamFailsOverToAnotherAccount(t *testing.T) {
 		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed"}}}, nil
 	}
 
-	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Stream: true}, ModelExplicit: true}})
+	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Stream: true}, ModelExplicit: true}})
 	if err != nil {
 		t.Fatalf("openStream() error = %v", err)
 	}
@@ -83,7 +85,7 @@ func TestOpenStreamFailsOverWhenFirstEventIsRetryableFailure(t *testing.T) {
 		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.created", Raw: map[string]any{"type": "response.created"}}}}, nil
 	}
 
-	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Stream: true}, ModelExplicit: true}})
+	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Stream: true}, ModelExplicit: true}})
 	if err != nil {
 		t.Fatalf("openStream() error = %v", err)
 	}
@@ -232,7 +234,7 @@ func TestOpenStreamAttemptsEachAccountOnlyOnce(t *testing.T) {
 		return nil, &codex.UpstreamError{Op: "codex response", StatusCode: http.StatusServiceUnavailable}
 	}
 
-	account, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}, ModelExplicit: true}})
+	account, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}, ModelExplicit: true}})
 	if err == nil {
 		t.Fatal("openStream() error = nil, want upstream error")
 	}
@@ -254,7 +256,7 @@ func TestOpenStreamDoesNotFailOverNonRetryableRequestError(t *testing.T) {
 		return nil, &codex.UpstreamError{Op: "codex response", StatusCode: http.StatusBadRequest}
 	}
 
-	_, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}, ModelExplicit: true}})
+	_, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}, ModelExplicit: true}})
 	if err == nil {
 		t.Fatal("openStream() error = nil, want upstream error")
 	}
@@ -277,7 +279,7 @@ func TestOpenStreamDoesNotFailOverAfterRequestCancellation(t *testing.T) {
 		}, nil
 	}
 
-	_, _, _, err := app.openStream(nil, ctx, "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Stream: true}, ModelExplicit: true}})
+	_, _, _, err := app.openStream(nil, ctx, "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Stream: true}, ModelExplicit: true}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("openStream() error = %v, want context.Canceled", err)
 	}
@@ -297,7 +299,7 @@ func TestOpenStreamKeepsExplicitContinuationPinned(t *testing.T) {
 	}
 
 	account, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{
-		Request:            translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", PreviousResponseID: "resp_1"}, ModelExplicit: true},
+		Request:            turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", PreviousResponseID: "resp_1"}, ModelExplicit: true},
 		PreferredAccountID: "acct-a",
 		ExplicitPrevious:   true,
 	})
@@ -323,10 +325,10 @@ func TestOpenStreamReplaysExplicitHTTPContinuation(t *testing.T) {
 	}
 
 	resolution := sessionResolution{
-		Request: translate.NormalizedRequest{Request: codex.Request{
+		Request: turn.NormalizedRequest{Request: codex.Request{
 			Model: "gpt-5.4", PreviousResponseID: "resp_1", Input: []codex.InputItem{userText("second")},
 		}, ModelExplicit: true},
-		Original: translate.NormalizedRequest{Request: codex.Request{
+		Original: turn.NormalizedRequest{Request: codex.Request{
 			Model: "gpt-5.4", Input: []codex.InputItem{userText("first"), assistantText("first answer"), userText("second")},
 		}, ModelExplicit: true},
 		PreferredAccountID: "acct-a",
@@ -614,7 +616,7 @@ func TestStreamChatCompletionClassifiesStructuredRateLimitFailureAndSetsCooldown
 		},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_rate_limit")
@@ -635,7 +637,7 @@ func TestStreamChatCompletionClassifiesStructuredRateLimitFailureAndSetsCooldown
 		}},
 	}
 
-	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
+	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -691,7 +693,7 @@ func TestStreamResponsesClassifiesStructuredQuotaFailureAndSetsCooldown(t *testi
 		},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_quota")
@@ -714,7 +716,7 @@ func TestStreamResponsesClassifiesStructuredQuotaFailureAndSetsCooldown(t *testi
 		}},
 	}
 
-	app.streamResponses(ctx, record, translate.NormalizedRequest{
+	app.streamResponses(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -762,7 +764,7 @@ func TestStreamResponsesClassifiesStructuredUnauthorizedFailure(t *testing.T) {
 		},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_unauthorized")
@@ -781,7 +783,7 @@ func TestStreamResponsesClassifiesStructuredUnauthorizedFailure(t *testing.T) {
 		}},
 	}
 
-	app.streamResponses(ctx, record, translate.NormalizedRequest{
+	app.streamResponses(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -820,7 +822,7 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycle(t *testing.T) {
 		cfg:           config.Config{ContinuationTTL: time.Minute},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_stream_tools")
@@ -874,7 +876,7 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycle(t *testing.T) {
 		},
 	}
 
-	app.streamResponses(ctx, record, translate.NormalizedRequest{
+	app.streamResponses(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -948,7 +950,7 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycleWithoutDeltas(t *testing
 		cfg:           config.Config{ContinuationTTL: time.Minute},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_stream_done_only")
@@ -977,7 +979,7 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycleWithoutDeltas(t *testing
 		},
 	}
 
-	app.streamResponses(ctx, record, translate.NormalizedRequest{
+	app.streamResponses(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -1019,7 +1021,7 @@ func TestStreamResponsesTextOnlyPassthroughRemainsUnchanged(t *testing.T) {
 		cfg:           config.Config{ContinuationTTL: time.Minute},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_stream_text")
@@ -1046,7 +1048,7 @@ func TestStreamResponsesTextOnlyPassthroughRemainsUnchanged(t *testing.T) {
 		},
 	}
 
-	app.streamResponses(ctx, record, translate.NormalizedRequest{
+	app.streamResponses(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -1091,7 +1093,7 @@ func TestStreamResponsesWebSearchPassthroughAndCompletedOutput(t *testing.T) {
 		cfg:           config.Config{ContinuationTTL: time.Minute},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_stream_web_search")
@@ -1182,7 +1184,7 @@ func TestStreamResponsesWebSearchPassthroughAndCompletedOutput(t *testing.T) {
 		},
 	}
 
-	app.streamResponses(ctx, record, translate.NormalizedRequest{
+	app.streamResponses(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:  "gpt-5.5",
 			Stream: true,

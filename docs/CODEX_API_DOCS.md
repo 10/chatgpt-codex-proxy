@@ -7,7 +7,7 @@ It is not an official OpenAI or ChatGPT specification.
 Everything here is inferred from:
 
 - Request builders in `internal/codex`
-- Response parsers in `internal/codex`, `internal/server`, and `internal/translate`
+- Response parsers in `internal/codex`, `internal/server`, `internal/openai`, and `internal/turn`
 - Tests that lock in the currently observed behavior
 
 The upstream surface is private and may change without notice.

@@ -3,7 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"io"
@@ -16,12 +15,12 @@ import (
 
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/conversationkey"
+	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/openai"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 type eventStream interface {
@@ -31,8 +30,8 @@ type eventStream interface {
 }
 
 type sessionResolution struct {
-	Request            translate.NormalizedRequest
-	Original           translate.NormalizedRequest
+	Request            turn.NormalizedRequest
+	Original           turn.NormalizedRequest
 	PreferredAccountID string
 	TurnState          string
 	ConversationKey    string
@@ -71,12 +70,12 @@ func (a *App) handleChatCompletions(c *gin.Context) {
 	a.handlePublicRequest(
 		c,
 		"chat_completions",
-		func(body []byte) (translate.NormalizedRequest, error) {
+		func(body []byte) (turn.NormalizedRequest, error) {
 			return normalizeChatCompletionsBody(body, a.modelCatalog())
 		},
 		a.streamChatCompletion,
-		(*translate.Accumulator).ChatCompletionObject,
-		translate.PatchChatCompletionObjectForTuple,
+		(*turn.Accumulator).ChatCompletionObject,
+		openai.PatchChatCompletionObjectForTuple,
 	)
 }
 
@@ -84,21 +83,21 @@ func (a *App) handleResponses(c *gin.Context) {
 	a.handlePublicRequest(
 		c,
 		"responses",
-		func(body []byte) (translate.NormalizedRequest, error) {
+		func(body []byte) (turn.NormalizedRequest, error) {
 			return normalizeResponsesBody(body, a.modelCatalog())
 		},
 		a.streamResponses,
-		(*translate.Accumulator).ResponsesObject,
-		translate.PatchResponsesObjectForTuple,
+		(*turn.Accumulator).ResponsesObject,
+		openai.PatchResponsesObjectForTuple,
 	)
 }
 
 func (a *App) handlePublicRequest(
 	c *gin.Context,
 	endpoint string,
-	normalize func([]byte) (translate.NormalizedRequest, error),
-	stream func(*gin.Context, accounts.Record, translate.NormalizedRequest, eventStream),
-	buildResponse func(*translate.Accumulator) map[string]any,
+	normalize func([]byte) (turn.NormalizedRequest, error),
+	stream func(*gin.Context, accounts.Record, turn.NormalizedRequest, eventStream),
+	buildResponse func(*turn.Accumulator) map[string]any,
 	patchTuple func(map[string]any, map[string]any) error,
 ) {
 	body, err := readRequestBody(c.Request)
@@ -137,7 +136,7 @@ func (a *App) handlePublicRequest(
 	c.JSON(http.StatusOK, response)
 }
 
-func (a *App) resolveAndOpenRequest(c *gin.Context, endpoint string, normalized translate.NormalizedRequest) (openedRequest, bool) {
+func (a *App) resolveAndOpenRequest(c *gin.Context, endpoint string, normalized turn.NormalizedRequest) (openedRequest, bool) {
 	resolution, err := a.resolveSession(normalized)
 	if err != nil {
 		if a.writeRequestError(c, err) {
@@ -282,7 +281,7 @@ func shouldFailoverRequest(err error) bool {
 	}
 }
 
-func requestUsesHostedWebSearch(request translate.NormalizedRequest) bool {
+func requestUsesHostedWebSearch(request turn.NormalizedRequest) bool {
 	return slices.ContainsFunc(request.Tools, func(tool openai.ToolDefinition) bool {
 		return strings.TrimSpace(tool.Type) == "web_search"
 	})
@@ -329,8 +328,8 @@ func (a *App) openWSStream(c *gin.Context, ctx context.Context, endpoint string,
 	return account, stream, codex.ParseQuotaFromHeaders(stream.Headers()), nil
 }
 
-func (a *App) collectEvents(ctx context.Context, account accounts.Record, normalized translate.NormalizedRequest, stream eventStream) (*translate.Accumulator, error) {
-	accumulator := translate.NewAccumulator(normalized)
+func (a *App) collectEvents(ctx context.Context, account accounts.Record, normalized turn.NormalizedRequest, stream eventStream) (*turn.Accumulator, error) {
+	accumulator := turn.NewAccumulator(normalized)
 	for {
 		event, _, err := a.nextStreamEvent(ctx, account, accumulator, stream)
 		if err != nil {
@@ -352,10 +351,10 @@ func (a *App) collectEvents(ctx context.Context, account accounts.Record, normal
 	return accumulator, nil
 }
 
-func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, normalized translate.NormalizedRequest, stream eventStream) {
+func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, normalized turn.NormalizedRequest, stream eventStream) {
 	prepareStreamResponse(c)
 
-	accumulator := translate.NewAccumulator(normalized)
+	accumulator := turn.NewAccumulator(normalized)
 	createdAt := time.Now().UTC().Unix()
 	toolCalls := &chatToolCallStreamer{
 		indexByCallID: make(map[string]int),
@@ -365,7 +364,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 	}
 	images := newChatImageStreamer()
 	var tupleTextBuffer strings.Builder
-	writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk("", normalized.Model, map[string]any{"role": "assistant"}, "", createdAt)))
+	writeSSE(c.Writer, "", turn.MustJSON(turn.ChatChunk("", normalized.Model, map[string]any{"role": "assistant"}, "", createdAt)))
 	c.Writer.Flush()
 
 	for {
@@ -392,7 +391,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 			continue
 		}
 		for _, image := range images.imagesForEvent(event) {
-			writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(
+			writeSSE(c.Writer, "", turn.MustJSON(turn.ChatChunk(
 				accumulator.ResponseID,
 				jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model),
 				map[string]any{"role": "assistant", "images": []map[string]any{image}},
@@ -406,7 +405,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 			if normalized.Reasoning != nil {
 				delta := jsonutil.StringValue(event.Raw["delta"])
 				if delta != "" {
-					writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"reasoning_content": delta}, "", createdAt)))
+					writeSSE(c.Writer, "", turn.MustJSON(turn.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"reasoning_content": delta}, "", createdAt)))
 					c.Writer.Flush()
 				}
 			}
@@ -419,7 +418,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 				tupleTextBuffer.WriteString(delta)
 				continue
 			}
-			writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"content": delta}, "", createdAt)))
+			writeSSE(c.Writer, "", turn.MustJSON(turn.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"content": delta}, "", createdAt)))
 			c.Writer.Flush()
 		case "response.output_text.done":
 			if normalized.TupleSchema != nil {
@@ -431,12 +430,12 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 		case "response.completed", "response.incomplete":
 			if normalized.TupleSchema != nil && strings.TrimSpace(tupleTextBuffer.String()) != "" {
 				reconverted := tupleTextBuffer.String()
-				if patched, err := translate.ReconvertJSONText(reconverted, normalized.TupleSchema); err != nil {
+				if patched, err := openai.ReconvertJSONText(reconverted, normalized.TupleSchema); err != nil {
 					a.logTupleReconversionWarning(c, "chat_completions", accumulator.ResponseID, err)
 				} else {
 					reconverted = patched
 				}
-				writeSSE(c.Writer, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"content": reconverted}, "", createdAt)))
+				writeSSE(c.Writer, "", turn.MustJSON(turn.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{"content": reconverted}, "", createdAt)))
 				c.Writer.Flush()
 			}
 		}
@@ -448,7 +447,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
 
 	finalUsage := accumulator.ChatUsageObject()
-	finalChunk := translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{}, accumulator.ChatFinishReason(), createdAt)
+	finalChunk := turn.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{}, accumulator.ChatFinishReason(), createdAt)
 	if nativeFinishReason := accumulator.NativeFinishReason(); nativeFinishReason != "" {
 		choices := finalChunk["choices"].([]map[string]any)
 		choices[0]["native_finish_reason"] = nativeFinishReason
@@ -456,116 +455,12 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 	if finalUsage != nil {
 		finalChunk["usage"] = finalUsage
 	}
-	writeSSE(c.Writer, "", translate.MustJSON(finalChunk))
+	writeSSE(c.Writer, "", turn.MustJSON(finalChunk))
 	_, _ = io.WriteString(c.Writer, "data: [DONE]\n\n")
 	c.Writer.Flush()
 }
 
-type chatImageStreamer struct {
-	indexByItemID map[string]int
-	lastHash      map[string][32]byte
-	nextIndex     int
-}
-
-func newChatImageStreamer() *chatImageStreamer {
-	return &chatImageStreamer{
-		indexByItemID: make(map[string]int),
-		lastHash:      make(map[string][32]byte),
-	}
-}
-
-func (s *chatImageStreamer) imagesForEvent(event *codex.StreamEvent) []map[string]any {
-	if event == nil {
-		return nil
-	}
-	switch event.Type {
-	case "response.image_generation_call.partial_image":
-		image := s.image(
-			jsonutil.StringValue(event.Raw["item_id"]),
-			jsonutil.StringValue(event.Raw["output_format"]),
-			jsonutil.StringValue(event.Raw["partial_image_b64"]),
-		)
-		if image != nil {
-			return []map[string]any{image}
-		}
-	case "response.output_item.done":
-		item := jsonutil.FirstMap(jsonutil.MapValue(event.Raw, "item"), jsonutil.MapValue(event.Raw, "output_item"))
-		if jsonutil.StringValue(item["type"]) == "image_generation_call" {
-			image := s.image(jsonutil.StringValue(item["id"]), jsonutil.StringValue(item["output_format"]), jsonutil.StringValue(item["result"]))
-			if image != nil {
-				return []map[string]any{image}
-			}
-		}
-	case "response.completed":
-		response := jsonutil.MapValue(event.Raw, "response")
-		var images []map[string]any
-		for _, item := range jsonutil.SliceOfMaps(response["output"]) {
-			if jsonutil.StringValue(item["type"]) != "image_generation_call" {
-				continue
-			}
-			if image := s.image(jsonutil.StringValue(item["id"]), jsonutil.StringValue(item["output_format"]), jsonutil.StringValue(item["result"])); image != nil {
-				images = append(images, image)
-			}
-		}
-		return images
-	}
-	return nil
-}
-
-func (s *chatImageStreamer) image(itemID, outputFormat, base64Data string) map[string]any {
-	if strings.TrimSpace(base64Data) == "" {
-		return nil
-	}
-	hash := sha256.Sum256([]byte(base64Data))
-	key := strings.TrimSpace(itemID)
-	if key == "" {
-		key = string(hash[:])
-	}
-	if previous, ok := s.lastHash[key]; ok && previous == hash {
-		return nil
-	}
-	s.lastHash[key] = hash
-	index, ok := s.indexByItemID[key]
-	if !ok {
-		index = s.nextIndex
-		s.nextIndex++
-		s.indexByItemID[key] = index
-	}
-	return translate.ChatImage(index, outputFormat, base64Data)
-}
-
-func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalized translate.NormalizedRequest, stream eventStream) {
-	prepareStreamResponse(c)
-
-	accumulator := translate.NewAccumulator(normalized)
-	var tupleTextBuffer strings.Builder
-	for {
-		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), account, accumulator, stream)
-		if err != nil {
-			if err == io.EOF {
-				if !accumulator.IsTerminal() {
-					a.respondStreamError(c, "responses", account.ID, accumulator.ResponseID, "error", errIncompleteResponse, false)
-					return
-				}
-				break
-			}
-			a.respondStreamError(c, "responses", account.ID, accumulator.ResponseID, "error", err, upstreamErr)
-			return
-		}
-		for _, outgoing := range a.responsesStreamEvents(c, accumulator, normalized, &tupleTextBuffer, event) {
-			writeSSE(c.Writer, outgoing.Type, translate.ResponseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload))
-		}
-		c.Writer.Flush()
-		if event.IsTerminalResponse() {
-			break
-		}
-	}
-
-	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
-	c.Writer.Flush()
-}
-
-func (a *App) nextStreamEvent(ctx context.Context, account accounts.Record, accumulator *translate.Accumulator, stream eventStream) (*codex.StreamEvent, bool, error) {
+func (a *App) nextStreamEvent(ctx context.Context, account accounts.Record, accumulator *turn.Accumulator, stream eventStream) (*codex.StreamEvent, bool, error) {
 	for {
 		event, err := stream.NextEvent()
 		if err != nil {
@@ -582,118 +477,12 @@ func (a *App) nextStreamEvent(ctx context.Context, account accounts.Record, accu
 	}
 }
 
-func (a *App) finalizeSuccessfulStream(accountID string, accumulator *translate.Accumulator, stream eventStream) {
+func (a *App) finalizeSuccessfulStream(accountID string, accumulator *turn.Accumulator, stream eventStream) {
 	a.accounts.NoteSuccess(accountID)
 	a.rememberContinuation(accountID, accumulator, stream.Headers().Get("x-codex-turn-state"))
 }
 
-type chatToolCallStreamer struct {
-	indexByCallID map[string]int
-	initialized   map[string]bool
-	argumentsSent map[string]int
-	nextIndex     int
-	createdAt     int64
-}
-
-func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *translate.Accumulator, normalized translate.NormalizedRequest, event *codex.StreamEvent) bool {
-	if event == nil {
-		return false
-	}
-	state := accumulator.ToolCallStateForEvent(event)
-	if state == nil || strings.TrimSpace(state.CallID) == "" {
-		return false
-	}
-	callID := state.CallID
-
-	idx, exists := s.indexByCallID[callID]
-	if !exists {
-		idx = s.nextIndex
-		s.indexByCallID[callID] = idx
-		s.nextIndex++
-	}
-
-	emitted := false
-	if !s.initialized[callID] && strings.TrimSpace(state.Name) != "" {
-		// Chat Completions clients like Cursor reliably understand function-call
-		// deltas but may reject streamed custom-tool deltas. We expose every tool
-		// call as function-shaped here and map custom tools back upstream on replay.
-		chunkToolCall := map[string]any{
-			"index": idx,
-			"id":    callID,
-		}
-		chunkToolCall["type"] = "function"
-		chunkToolCall["function"] = map[string]any{
-			"name":      state.Name,
-			"arguments": "",
-		}
-		writeSSE(w, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{
-			"tool_calls": []map[string]any{chunkToolCall},
-		}, "", s.createdAt)))
-		s.initialized[callID] = true
-		emitted = true
-	}
-
-	if !s.initialized[callID] {
-		return emitted
-	}
-
-	value := state.Arguments
-	if state.ToolType == "custom" {
-		value = state.Input
-	}
-	sent := s.argumentsSent[callID]
-	if sent >= len(value) {
-		return emitted
-	}
-
-	writeSSE(w, "", translate.MustJSON(translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{
-		"tool_calls": []map[string]any{{
-			"index": idx,
-			"function": map[string]any{
-				"arguments": value[sent:],
-			},
-		}},
-	}, "", s.createdAt)))
-	s.argumentsSent[callID] = len(value)
-	return true
-}
-
-func responseStreamPayload(event *codex.StreamEvent, accumulator *translate.Accumulator) map[string]any {
-	if event == nil || event.Raw == nil {
-		return nil
-	}
-	if !event.IsTerminalResponse() {
-		return event.Raw
-	}
-
-	payload := jsonutil.CloneMap(event.Raw)
-	response, _ := payload["response"].(map[string]any)
-	if response == nil {
-		response = map[string]any{}
-	}
-
-	text := accumulator.Text()
-	response["output"] = accumulator.ResponsesObject()["output"]
-	if strings.TrimSpace(jsonutil.StringValue(response["output_text"])) == "" && strings.TrimSpace(text) != "" {
-		response["output_text"] = text
-	}
-	if strings.TrimSpace(jsonutil.StringValue(response["status"])) == "" {
-		response["status"] = strings.TrimPrefix(event.Type, "response.")
-	}
-	if accumulator.ResponseID != "" && strings.TrimSpace(jsonutil.StringValue(response["id"])) == "" {
-		response["id"] = accumulator.ResponseID
-	}
-	if accumulator.Model != "" && strings.TrimSpace(jsonutil.StringValue(response["model"])) == "" {
-		response["model"] = accumulator.Model
-	}
-	if rebuilt := accumulator.ResponsesUsageObject(); rebuilt != nil {
-		response["usage"] = rebuilt
-	}
-	payload["response"] = response
-	return payload
-}
-
-func (a *App) rememberContinuation(accountID string, accumulator *translate.Accumulator, turnState string) {
+func (a *App) rememberContinuation(accountID string, accumulator *turn.Accumulator, turnState string) {
 	if accumulator == nil || accumulator.ResponseID == "" {
 		return
 	}
@@ -701,7 +490,7 @@ func (a *App) rememberContinuation(accountID string, accumulator *translate.Accu
 	if strings.TrimSpace(conversationKey) == "" {
 		conversationKey = resolutionConversationKey(accumulator.Normalized)
 	}
-	a.continuations.Put(accounts.ContinuationRecord{
+	a.continuations.Put(conversation.ContinuationRecord{
 		ResponseID:      accumulator.ResponseID,
 		AccountID:       accountID,
 		ConversationKey: conversationKey,
@@ -721,14 +510,14 @@ func websocketEndpoint(baseURL string) string {
 	return value + "/codex/responses"
 }
 
-func normalizeChatCompletionsBody(body []byte, catalog *models.Catalog) (translate.NormalizedRequest, error) {
+func normalizeChatCompletionsBody(body []byte, catalog *models.Catalog) (turn.NormalizedRequest, error) {
 	var chatReq openai.ChatCompletionsRequest
 	if err := json.Unmarshal(body, &chatReq); err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 
 	if len(chatReq.Messages) > 0 {
-		return translate.ChatCompletions(chatReq, catalog)
+		return openai.ChatCompletions(chatReq, catalog)
 	}
 
 	var envelope struct {
@@ -739,7 +528,7 @@ func normalizeChatCompletionsBody(body []byte, catalog *models.Catalog) (transla
 		Reasoning          json.RawMessage `json:"reasoning"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 
 	if len(bytes.TrimSpace(envelope.Input)) == 0 &&
@@ -747,27 +536,27 @@ func normalizeChatCompletionsBody(body []byte, catalog *models.Catalog) (transla
 		strings.TrimSpace(envelope.PreviousResponseID) == "" &&
 		len(bytes.TrimSpace(envelope.Text)) == 0 &&
 		len(bytes.TrimSpace(envelope.Reasoning)) == 0 {
-		return translate.NormalizedRequest{}, errEmptyChatCompletionsBody
+		return turn.NormalizedRequest{}, errEmptyChatCompletionsBody
 	}
 
 	var responsesReq openai.ResponsesRequest
 	if err := json.Unmarshal(body, &responsesReq); err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 
-	normalized, err := translate.Responses(responsesReq, catalog)
+	normalized, err := openai.Responses(responsesReq, catalog)
 	if err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	return normalized, nil
 }
 
-func normalizeResponsesBody(body []byte, catalog *models.Catalog) (translate.NormalizedRequest, error) {
+func normalizeResponsesBody(body []byte, catalog *models.Catalog) (turn.NormalizedRequest, error) {
 	var req openai.ResponsesRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
-	return translate.Responses(req, catalog)
+	return openai.Responses(req, catalog)
 }
 
 func prepareStreamResponse(c *gin.Context) {
@@ -804,13 +593,13 @@ func (a *App) respondOpenAIInvalidRequest(c *gin.Context, err error) {
 }
 
 func (a *App) respondOpenAINormalizeError(c *gin.Context, err error) {
-	var modelErr *translate.ModelNotFoundError
+	var modelErr *openai.ModelNotFoundError
 	if errors.As(err, &modelErr) {
 		message := "Model '" + strings.TrimSpace(modelErr.Model) + "' not found"
 		a.writeOpenAIError(c, http.StatusNotFound, "model_not_found", message, "invalid_request_error")
 		return
 	}
-	var contentErr *translate.UnsupportedContentPartError
+	var contentErr *openai.UnsupportedContentPartError
 	if errors.As(err, &contentErr) {
 		a.writeOpenAIError(c, http.StatusBadRequest, "unsupported_content_part", contentErr.Error(), "invalid_request_error")
 		return
@@ -865,7 +654,7 @@ func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID
 		c.Writer.Flush()
 		return
 	}
-	writeSSE(c.Writer, eventName, translate.MustJSON(middleware.OpenAIErrorPayload(message, "api_error", code, "")))
+	writeSSE(c.Writer, eventName, turn.MustJSON(middleware.OpenAIErrorPayload(message, "api_error", code, "")))
 	c.Writer.Flush()
 }
 
@@ -889,7 +678,7 @@ func writeResponsesStreamError(writer io.Writer, status int, message string) {
 			code = "invalid_request_error"
 		}
 	}
-	writeSSE(writer, "error", translate.MustJSON(map[string]any{
+	writeSSE(writer, "error", turn.MustJSON(map[string]any{
 		"type":            "error",
 		"code":            code,
 		"message":         strings.TrimSpace(message),
@@ -946,7 +735,7 @@ func (a *App) acquireAccountForResolutionExcluding(ctx context.Context, resoluti
 		}
 		resolution.Request.Model = modelID
 		resolution.Original.Model = modelID
-		if key := conversationkey.Derive(resolution.Request.Request); key != "" {
+		if key := conversation.Derive(resolution.Request.Request); key != "" {
 			resolution.ConversationKey = key
 			resolution.Request.PromptCacheKey = key
 			resolution.Original.PromptCacheKey = key

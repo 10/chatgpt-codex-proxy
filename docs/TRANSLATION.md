@@ -8,12 +8,13 @@ It is based on the current implementation, not an external specification. The co
 - `internal/server/compact.go`
 - `internal/server/images.go`
 - `internal/server/session.go`
-- `internal/translate/request.go`
-- `internal/translate/response.go`
-- `internal/translate/schema.go`
-- `internal/translate/tuple.go`
+- `internal/openai/request.go`
+- `internal/openai/schema.go`
+- `internal/openai/tuple.go`
+- `internal/turn/normalized.go`
+- `internal/turn/accumulator.go`
 - `internal/codex/http_client.go`
-- `internal/codex/request.go`
+- `internal/turn/request.go`
 - `internal/codex/ws_client.go`
 - `internal/openai/types.go`
 
@@ -32,7 +33,7 @@ The high-level streaming pipeline is:
 The compact pipeline is:
 
 1. Accept OpenAI-compatible JSON on `/v1/responses/compact`.
-2. Normalize that payload into `translate.NormalizedCompactRequest`, which embeds `codex.CompactRequest`.
+2. Normalize that payload into `turn.NormalizedCompactRequest`, which embeds `turn.CompactRequest`.
 3. If `previous_response_id` is present, expand saved continuation history locally.
 4. Call the private compact backend over JSON HTTP.
 5. Rebuild an OpenAI-style `response.compaction` object.
@@ -47,7 +48,7 @@ The image pipeline is:
 
 ## Canonical Internal Request
 
-The canonical streaming request is `codex.Request` plus translation metadata in `translate.NormalizedRequest`.
+The canonical streaming request is `turn.Request` plus protocol-neutral metadata in `turn.NormalizedRequest`.
 
 The Codex request fields used by the proxy are:
 
@@ -70,7 +71,7 @@ The translation-only fields are:
 - `ModelExplicit`
 - `TupleSchema`
 
-The canonical compact request is `codex.CompactRequest` plus translation metadata in `translate.NormalizedCompactRequest`.
+The canonical compact request is `turn.CompactRequest` plus protocol-neutral metadata in `turn.NormalizedCompactRequest`.
 
 The Codex compact fields used by the proxy are:
 
@@ -96,13 +97,13 @@ The compact translation-only fields are:
 - Otherwise, if the body has Responses-style fields like `input`, `instructions`, `previous_response_id`, `text`, or `reasoning`, it is accepted as a compatibility path and parsed as a Responses request.
 - If neither shape has meaningful content, the proxy returns `400` with `request body must include chat messages or responses input`.
 
-When the compatibility path is used, the request is normalized with `translate.Responses(...)`; the `/v1/chat/completions` handler still selects Chat Completions response shaping.
+When the compatibility path is used, the request is normalized with `openai.Responses(...)`; the `/v1/chat/completions` handler still selects Chat Completions response shaping.
 
 If both `messages` and Responses-style fields are present, `messages` wins.
 
 ### `/v1/responses`
 
-`POST /v1/responses` binds directly to `openai.ResponsesRequest` and normalizes with `translate.Responses(...)`.
+`POST /v1/responses` binds directly to `openai.ResponsesRequest` and normalizes with `openai.Responses(...)`.
 
 `GET /v1/responses` upgrades to a persistent WebSocket connection. The client sends one JSON `response.create` event per turn. WebSocket streaming is implicit, so a supplied `stream` field is ignored. `background: true` is rejected, while an optional `generate` boolean is forwarded only on the upstream WebSocket payload.
 
@@ -112,7 +113,7 @@ Malformed JSON, unsupported event types, and other request-level protocol errors
 
 ### `/v1/responses/compact`
 
-`POST /v1/responses/compact` binds directly to `openai.ResponsesCompactRequest` and normalizes with `translate.Compact(...)`.
+`POST /v1/responses/compact` binds directly to `openai.ResponsesCompactRequest` and normalizes with `openai.Compact(...)`.
 
 Unlike `/v1/responses`, this endpoint does not use the SSE streaming path. It sends a dedicated JSON request to `/codex/responses/compact` and always returns non-streaming JSON.
 

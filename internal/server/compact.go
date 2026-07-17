@@ -17,7 +17,7 @@ import (
 	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/openai"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func (a *App) handleResponsesCompact(c *gin.Context) {
@@ -72,33 +72,33 @@ func (a *App) handleResponsesCompact(c *gin.Context) {
 	a.accounts.NoteSuccess(account.ID)
 
 	response := compactResponseObject(upstream)
-	if err := translate.PatchResponsesObjectForTuple(response, normalized.TupleSchema); err != nil {
+	if err := openai.PatchResponsesObjectForTuple(response, normalized.TupleSchema); err != nil {
 		a.logTupleReconversionWarning(c, "responses_compact", jsonutil.StringValue(response["id"]), err)
 	}
 	c.JSON(http.StatusOK, response)
 }
 
-func normalizeResponsesCompactBody(body []byte, catalog *models.Catalog) (translate.NormalizedCompactRequest, error) {
+func normalizeResponsesCompactBody(body []byte, catalog *models.Catalog) (turn.NormalizedCompactRequest, error) {
 	var req openai.ResponsesCompactRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		return translate.NormalizedCompactRequest{}, err
+		return turn.NormalizedCompactRequest{}, err
 	}
-	return translate.Compact(req, catalog)
+	return openai.Compact(req, catalog)
 }
 
-func (a *App) resolveCompactRequest(normalized translate.NormalizedCompactRequest) (translate.NormalizedCompactRequest, string, error) {
+func (a *App) resolveCompactRequest(normalized turn.NormalizedCompactRequest) (turn.NormalizedCompactRequest, string, error) {
 	if strings.TrimSpace(normalized.PreviousResponseID) == "" {
 		return normalized, "", nil
 	}
 
 	record, ok := a.continuations.Get(normalized.PreviousResponseID)
 	if !ok {
-		return translate.NormalizedCompactRequest{}, "", errInvalidPreviousResponseID
+		return turn.NormalizedCompactRequest{}, "", errInvalidPreviousResponseID
 	}
 	if strings.TrimSpace(normalized.Model) == "" {
 		normalized.Model = record.Model
 	}
-	normalized.ToolNameAliases = translate.MergeToolNameAliases(normalized.ToolNameAliases, record.ToolNameAliases)
+	normalized.ToolNameAliases = turn.MergeToolNameAliases(normalized.ToolNameAliases, record.ToolNameAliases)
 
 	history := continuationInputItemsToCodex(record.InputHistory)
 	if len(history) > 0 {
@@ -108,7 +108,7 @@ func (a *App) resolveCompactRequest(normalized translate.NormalizedCompactReques
 	return normalized, strings.TrimSpace(record.AccountID), nil
 }
 
-func (a *App) acquireAccountForCompact(ctx context.Context, preferredAccountID string, normalized *translate.NormalizedCompactRequest) (accounts.Record, error) {
+func (a *App) acquireAccountForCompact(ctx context.Context, preferredAccountID string, normalized *turn.NormalizedCompactRequest) (accounts.Record, error) {
 	if normalized == nil {
 		return accounts.Record{}, errContinuationAccountUnavailable
 	}

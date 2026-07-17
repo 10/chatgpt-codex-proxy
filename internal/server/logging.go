@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"chatgpt-codex-proxy/internal/middleware"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func (a *App) logUpstreamRequestFailure(c *gin.Context, endpoint, accountID string, status int, code string, err error) {
@@ -90,7 +90,7 @@ func (a *App) logUpstreamPayload(c *gin.Context, endpoint, transport, accountID 
 	a.logger.Info("payload debug", attrs...)
 }
 
-func (a *App) logCustomToolTrace(c *gin.Context, endpoint, phase string, eventType string, state *translate.ToolCallState) {
+func (a *App) logCustomToolTrace(c *gin.Context, endpoint, phase string, eventType string, state *turn.ToolCallState) {
 	if a == nil || a.logger == nil || !a.cfg.DebugLogPayloads || state == nil {
 		return
 	}

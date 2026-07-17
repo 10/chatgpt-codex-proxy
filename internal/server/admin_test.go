@@ -11,8 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
 )
 
@@ -50,7 +50,7 @@ func TestHandleAdminAccountUsageReturnsQuotaOnlyFields(t *testing.T) {
 	app := &App{
 		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:   accountsSvc,
-		accountMgr: codex.NewAccountManager(config.Config{}, accountsSvc, nil, nil, nil),
+		accountMgr: accountmanager.NewAccountManager(config.Config{}, accountsSvc, nil, nil, nil),
 	}
 
 	recorder := httptest.NewRecorder()

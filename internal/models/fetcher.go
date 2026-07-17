@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
@@ -23,12 +24,12 @@ type Fetcher struct {
 	cfg        config.Config
 	logger     *slog.Logger
 	accounts   *accounts.Service
-	accountMgr *codex.AccountManager
+	accountMgr *accountmanager.AccountManager
 	http       *codex.HTTPClient
 	catalog    *Catalog
 }
 
-func NewFetcher(cfg config.Config, logger *slog.Logger, accountsSvc *accounts.Service, accountMgr *codex.AccountManager, httpClient *codex.HTTPClient, catalog *Catalog) *Fetcher {
+func NewFetcher(cfg config.Config, logger *slog.Logger, accountsSvc *accounts.Service, accountMgr *accountmanager.AccountManager, httpClient *codex.HTTPClient, catalog *Catalog) *Fetcher {
 	return &Fetcher{
 		cfg:        cfg,
 		logger:     logger,

@@ -15,17 +15,19 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
+	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/models"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestImagesGenerationsUsesDirectCodexEndpoint(t *testing.T) {
 	t.Parallel()
 
-	app := newImagesTestApp(t, func(translate.NormalizedRequest) eventStream {
+	app := newImagesTestApp(t, func(turn.NormalizedRequest) eventStream {
 		t.Fatal("tool fallback should not be used")
 		return nil
 	})
@@ -171,7 +173,7 @@ func TestImagesGenerationsReturnsOpenAIImageResponse(t *testing.T) {
 	t.Parallel()
 
 	var upstreamRequest codex.Request
-	app := newImagesTestApp(t, func(normalized translate.NormalizedRequest) eventStream {
+	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
 		upstreamRequest = normalized.Request
 		return &fakeEventStream{events: []*codex.StreamEvent{
 			{
@@ -264,7 +266,7 @@ func TestImagesGenerationsDefaultsImageModel(t *testing.T) {
 	t.Parallel()
 
 	var upstreamRequest codex.Request
-	app := newImagesTestApp(t, func(normalized translate.NormalizedRequest) eventStream {
+	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
 		upstreamRequest = normalized.Request
 		return completedImageStream("generated")
 	})
@@ -286,7 +288,7 @@ func TestImagesGenerationsDefaultsImageModel(t *testing.T) {
 func TestImagesGenerationsRejectsUnsupportedImageModel(t *testing.T) {
 	t.Parallel()
 
-	app := newImagesTestApp(t, func(translate.NormalizedRequest) eventStream {
+	app := newImagesTestApp(t, func(turn.NormalizedRequest) eventStream {
 		return completedImageStream("unexpected")
 	})
 	recorder := httptest.NewRecorder()
@@ -308,7 +310,7 @@ func TestImagesEditsAcceptsJSONImageReferences(t *testing.T) {
 	t.Parallel()
 
 	var upstreamRequest codex.Request
-	app := newImagesTestApp(t, func(normalized translate.NormalizedRequest) eventStream {
+	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
 		upstreamRequest = normalized.Request
 		return completedImageStream("edited")
 	})
@@ -363,7 +365,7 @@ func TestImagesEditsAcceptsMultipartUploads(t *testing.T) {
 	t.Parallel()
 
 	var upstreamRequest codex.Request
-	app := newImagesTestApp(t, func(normalized translate.NormalizedRequest) eventStream {
+	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
 		upstreamRequest = normalized.Request
 		return completedImageStream("edited-upload")
 	})
@@ -424,7 +426,7 @@ func TestImagesGenerationsStreamsPartialAndCompletedEvents(t *testing.T) {
 	t.Parallel()
 
 	var upstreamRequest codex.Request
-	app := newImagesTestApp(t, func(normalized translate.NormalizedRequest) eventStream {
+	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
 		upstreamRequest = normalized.Request
 		return &fakeEventStream{events: []*codex.StreamEvent{
 			{
@@ -484,7 +486,7 @@ func TestImagesEditsStreamsMultipartRequests(t *testing.T) {
 	t.Parallel()
 
 	var upstreamRequest codex.Request
-	app := newImagesTestApp(t, func(normalized translate.NormalizedRequest) eventStream {
+	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
 		upstreamRequest = normalized.Request
 		return &fakeEventStream{events: []*codex.StreamEvent{
 			{
@@ -555,7 +557,7 @@ func completedImageStream(result string) eventStream {
 	}}
 }
 
-func newImagesTestApp(t *testing.T, opener func(translate.NormalizedRequest) eventStream) *App {
+func newImagesTestApp(t *testing.T, opener func(turn.NormalizedRequest) eventStream) *App {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -587,7 +589,7 @@ func newImagesTestApp(t *testing.T, opener func(translate.NormalizedRequest) eve
 		engine:        gin.New(),
 		accounts:      accountsSvc,
 		httpClient:    httpClient,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 		models:        catalog,
 	}
 	app.directImageOpen = func(context.Context, accounts.Record, string, []byte, bool) (*http.Response, error) {
@@ -595,7 +597,7 @@ func newImagesTestApp(t *testing.T, opener func(translate.NormalizedRequest) eve
 	}
 	if opener != nil {
 		record := mustGetAccount(t, accountsSvc, "acct_images")
-		app.imageOpener = func(_ *gin.Context, _ string, normalized translate.NormalizedRequest) (openedRequest, bool) {
+		app.imageOpener = func(_ *gin.Context, _ string, normalized turn.NormalizedRequest) (openedRequest, bool) {
 			return openedRequest{
 				Resolution: sessionResolution{Request: normalized},
 				Account:    record,
@@ -603,7 +605,7 @@ func newImagesTestApp(t *testing.T, opener func(translate.NormalizedRequest) eve
 			}, true
 		}
 	}
-	app.accountMgr = codex.NewAccountManager(cfg, accountsSvc, nil, httpClient, catalog)
+	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, catalog)
 	app.routes()
 	return app
 }

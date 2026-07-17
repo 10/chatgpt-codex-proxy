@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"chatgpt-codex-proxy/internal/jsonutil"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -72,7 +72,7 @@ type Usage struct {
 	CacheReadInputTokens int64 `json:"cache_read_input_tokens,omitempty"`
 }
 
-func BuildMessage(accumulator *translate.Accumulator) MessageResponse {
+func BuildMessage(accumulator *turn.Accumulator) MessageResponse {
 	response := MessageResponse{
 		ID:      MessageID(accumulator.ResponseID),
 		Type:    "message",
@@ -100,7 +100,7 @@ func MessageID(responseID string) string {
 	return "msg_" + strings.TrimPrefix(responseID, "resp_")
 }
 
-func responseBlocks(accumulator *translate.Accumulator) []ResponseBlock {
+func responseBlocks(accumulator *turn.Accumulator) []ResponseBlock {
 	response := accumulator.ResponsesObject()
 	output := jsonutil.SliceOfMaps(response["output"])
 	blocks := make([]ResponseBlock, 0, len(output))
@@ -218,7 +218,7 @@ func nullableWebSearchPageAge(value any) any {
 	return nil
 }
 
-func normalizedOutputText(accumulator *translate.Accumulator, text string) string {
+func normalizedOutputText(accumulator *turn.Accumulator, text string) string {
 	if accumulator == nil || len(accumulator.Normalized.ResponseSchema) == 0 || strings.TrimSpace(text) == "" {
 		return text
 	}
@@ -386,7 +386,7 @@ func compileSchema(schema map[string]any) *jsonschema.Schema {
 	return compiled
 }
 
-func shouldExposeThinking(accumulator *translate.Accumulator) bool {
+func shouldExposeThinking(accumulator *turn.Accumulator) bool {
 	if accumulator.Normalized.Reasoning != nil && strings.TrimSpace(accumulator.Normalized.Reasoning.Summary) != "" {
 		return true
 	}
@@ -422,7 +422,7 @@ func decodeToolArguments(arguments string) json.RawMessage {
 	return json.RawMessage(fallback)
 }
 
-func isExecutableToolCall(item, response map[string]any, accumulator *translate.Accumulator) bool {
+func isExecutableToolCall(item, response map[string]any, accumulator *turn.Accumulator) bool {
 	callID := cmp.Or(jsonutil.StringValue(item["call_id"]), jsonutil.StringValue(item["id"]))
 	for _, call := range accumulator.ToolCalls {
 		if call.CallID != callID && call.ItemID != callID {
@@ -438,7 +438,7 @@ func isExecutableToolCall(item, response map[string]any, accumulator *translate.
 	return responseStatus != "incomplete" && responseStatus != "failed" && responseStatus != "cancelled"
 }
 
-func isExecutableToolState(call *translate.ToolCallState, response map[string]any) bool {
+func isExecutableToolState(call *turn.ToolCallState, response map[string]any) bool {
 	if call == nil {
 		return false
 	}
@@ -452,7 +452,7 @@ func isExecutableToolState(call *translate.ToolCallState, response map[string]an
 	return responseStatus != "incomplete" && responseStatus != "failed" && responseStatus != "cancelled"
 }
 
-func usageFromAccumulator(accumulator *translate.Accumulator) Usage {
+func usageFromAccumulator(accumulator *turn.Accumulator) Usage {
 	if accumulator == nil || accumulator.Usage == nil {
 		return Usage{}
 	}
@@ -472,7 +472,7 @@ func usageFromAccumulator(accumulator *translate.Accumulator) Usage {
 	}
 }
 
-func stopFromAccumulator(accumulator *translate.Accumulator) (string, string) {
+func stopFromAccumulator(accumulator *turn.Accumulator) (string, string) {
 	response := jsonutil.MapValue(accumulator.RawFinal, "response")
 	if stopSequence := jsonutil.StringValue(response["stop_sequence"]); stopSequence != "" {
 		return "stop_sequence", stopSequence

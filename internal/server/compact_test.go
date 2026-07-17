@@ -13,11 +13,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
+	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/models"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestResponsesCompactRouteRequiresAuth(t *testing.T) {
@@ -157,15 +159,15 @@ func TestHandleResponsesCompactPreservesUsageAndExpandsPreviousResponse(t *testi
 		}, nil, nil
 	})
 
-	app.continuations.Put(accounts.ContinuationRecord{
+	app.continuations.Put(conversation.ContinuationRecord{
 		ResponseID: "resp_prev_compact",
 		AccountID:  "acct_compact",
 		Model:      "gpt-5.4",
-		InputHistory: []accounts.ContinuationInputItem{{
+		InputHistory: []conversation.ContinuationInputItem{{
 			Role:  "assistant",
 			Type:  "message",
 			Phase: "output",
-			Content: []accounts.ContinuationContentPart{{
+			Content: []conversation.ContinuationContentPart{{
 				Type: "output_text",
 				Text: "Earlier compacted output",
 			}},
@@ -213,10 +215,10 @@ func TestResolveCompactRequestRejectsUnknownPreviousResponseID(t *testing.T) {
 	t.Parallel()
 
 	app := &App{
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
-	_, _, err := app.resolveCompactRequest(translate.NormalizedCompactRequest{
+	_, _, err := app.resolveCompactRequest(turn.NormalizedCompactRequest{
 		PreviousResponseID: "resp_missing",
 	})
 	if err == nil {
@@ -260,10 +262,10 @@ func newCompactTestApp(t *testing.T, caller func(context.Context, accounts.Recor
 		accounts:      accountsSvc,
 		httpClient:    httpClient,
 		compactCaller: caller,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 		models:        modelCatalog,
 	}
-	app.accountMgr = codex.NewAccountManager(cfg, accountsSvc, nil, httpClient, modelCatalog)
+	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, modelCatalog)
 	app.routes()
 	return app
 }

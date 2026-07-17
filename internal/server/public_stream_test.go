@@ -14,14 +14,15 @@ import (
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
+	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/middleware"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestRequestUsesHostedWebSearch(t *testing.T) {
 	t.Parallel()
 
-	if !requestUsesHostedWebSearch(translate.NormalizedRequest{
+	if !requestUsesHostedWebSearch(turn.NormalizedRequest{
 		Request: codex.Request{
 			Tools: []codex.Tool{{Type: "web_search"}},
 		},
@@ -29,7 +30,7 @@ func TestRequestUsesHostedWebSearch(t *testing.T) {
 		t.Fatal("requestUsesHostedWebSearch = false, want true")
 	}
 
-	if requestUsesHostedWebSearch(translate.NormalizedRequest{
+	if requestUsesHostedWebSearch(turn.NormalizedRequest{
 		Request: codex.Request{
 			Tools: []codex.Tool{{Type: "function", Name: "lookup"}},
 		},
@@ -73,7 +74,7 @@ func TestPrepareStreamResponseDisablesTransformAndBuffering(t *testing.T) {
 func TestContinuationInputHistoryIncludesAssistantReplay(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{})
 	accumulator.Normalized.Input = []codex.InputItem{{
 		Role: "user",
 		Type: "message",
@@ -175,7 +176,7 @@ func TestStreamChatCompletionEndsNormallyOnIncompleteResponse(t *testing.T) {
 		},
 	}}
 
-	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
+	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{Model: "gpt-5.4", Stream: true},
 	}, stream)
 
@@ -216,7 +217,7 @@ func TestStreamResponsesPassesThroughIncompleteTerminalEvent(t *testing.T) {
 		},
 	}}
 
-	app.streamResponses(ctx, record, translate.NormalizedRequest{
+	app.streamResponses(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{Model: "gpt-5.4", Stream: true},
 	}, stream)
 
@@ -254,7 +255,7 @@ func TestStreamChatCompletionEmitsReasoningContentAndStrictUsage(t *testing.T) {
 		cfg:           config.Config{ContinuationTTL: time.Minute},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_chat_reasoning")
@@ -298,7 +299,7 @@ func TestStreamChatCompletionEmitsReasoningContentAndStrictUsage(t *testing.T) {
 		},
 	}
 
-	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
+	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:     "gpt-5.4",
 			Stream:    true,
@@ -369,7 +370,7 @@ func TestStreamChatCompletionDoesNotSynthesizeReasoningContentFromCompletedOutpu
 		cfg:           config.Config{ContinuationTTL: time.Minute},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_chat_reasoning_fallback")
@@ -420,7 +421,7 @@ func TestStreamChatCompletionDoesNotSynthesizeReasoningContentFromCompletedOutpu
 		},
 	}
 
-	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
+	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:     "gpt-5.4",
 			Stream:    true,
@@ -466,7 +467,7 @@ func TestStreamChatCompletionUsesToolNameFromOutputItemWhenArgumentEventsOmitIt(
 		cfg:           config.Config{ContinuationTTL: time.Minute},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_chat_tool_name")
@@ -518,7 +519,7 @@ func TestStreamChatCompletionUsesToolNameFromOutputItemWhenArgumentEventsOmitIt(
 		},
 	}
 
-	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
+	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -590,7 +591,7 @@ func TestStreamChatCompletionSupportsCustomToolCalls(t *testing.T) {
 		cfg:           config.Config{ContinuationTTL: time.Minute},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_chat_custom_tool")
@@ -642,7 +643,7 @@ func TestStreamChatCompletionSupportsCustomToolCalls(t *testing.T) {
 		},
 	}
 
-	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
+	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -726,7 +727,7 @@ func TestStreamResponsesPreservesReasoningItemsAndEvents(t *testing.T) {
 		cfg:           config.Config{ContinuationTTL: time.Minute},
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 
 	record := mustGetAccount(t, accountsSvc, "acct_responses_reasoning")
@@ -785,7 +786,7 @@ func TestStreamResponsesPreservesReasoningItemsAndEvents(t *testing.T) {
 		},
 	}
 
-	app.streamResponses(ctx, record, translate.NormalizedRequest{
+	app.streamResponses(ctx, record, turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:  "gpt-5.4",
 			Stream: true,
@@ -819,7 +820,7 @@ func TestStreamResponsesPreservesReasoningItemsAndEvents(t *testing.T) {
 func TestContinuationInputHistoryIncludesReasoningReplay(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{
 		Request: codex.Request{
 			Input: []codex.InputItem{{
 				Role: "user",
@@ -898,7 +899,7 @@ func TestContinuationInputHistoryKeepsShortToolNameForUpstreamReplay(t *testing.
 
 	shortName := "mcp__read_project_file"
 	originalName := "mcp__filesystem__read_project_file_with_a_name_longer_than_sixty_four_characters"
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{
 		Request: codex.Request{
 			Input: []codex.InputItem{userText("inspect the project")},
 		},

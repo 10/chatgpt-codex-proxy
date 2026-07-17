@@ -8,10 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/conversationkey"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/conversation"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 var (
@@ -19,7 +18,7 @@ var (
 	errInvalidPreviousResponseID      = errors.New("unknown or expired previous_response_id")
 )
 
-func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionResolution, error) {
+func (a *App) resolveSession(normalized turn.NormalizedRequest) (sessionResolution, error) {
 	resolution := sessionResolution{
 		Request:  normalized,
 		Original: normalized,
@@ -37,15 +36,15 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 			resolution.ConversationKey = key
 			resolution.Request.PromptCacheKey = key
 			resolution.Original.PromptCacheKey = key
-		} else if key := conversationkey.Derive(resolution.Request.Request); key != "" {
+		} else if key := conversation.Derive(resolution.Request.Request); key != "" {
 			resolution.ConversationKey = key
 			resolution.Request.PromptCacheKey = key
 			resolution.Original.PromptCacheKey = key
 		}
 		resolution.PreferredAccountID = record.AccountID
 		resolution.TurnState = strings.TrimSpace(record.TurnState)
-		resolution.Request.ToolNameAliases = translate.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
-		resolution.Original.ToolNameAliases = translate.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
+		resolution.Request.ToolNameAliases = turn.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
+		resolution.Original.ToolNameAliases = turn.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
 		if history := continuationInputItemsToCodex(record.InputHistory); len(history) > 0 {
 			resolution.Original.Input = append(history, normalized.Input...)
 			resolution.Original.PreviousResponseID = ""
@@ -61,7 +60,7 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 
 	if key := strings.TrimSpace(normalized.PromptCacheKey); key != "" {
 		resolution.ConversationKey = key
-	} else if key := conversationkey.Derive(normalized.Request); key != "" {
+	} else if key := conversation.Derive(normalized.Request); key != "" {
 		resolution.ConversationKey = key
 		resolution.Request.PromptCacheKey = key
 		resolution.Original.PromptCacheKey = key
@@ -86,15 +85,15 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 		resolution.Original.Model = record.Model
 		resolution.PreferredAccountID = record.AccountID
 		resolution.TurnState = strings.TrimSpace(record.TurnState)
-		resolution.Request.ToolNameAliases = translate.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
-		resolution.Original.ToolNameAliases = translate.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
+		resolution.Request.ToolNameAliases = turn.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
+		resolution.Original.ToolNameAliases = turn.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
 		resolution.ImplicitResume = true
 		return resolution, nil
 	}
 	return a.resolveImplicitResumeFallback(resolution, records), nil
 }
 
-func canImplicitlyResume(record accounts.ContinuationRecord, normalized translate.NormalizedRequest) bool {
+func canImplicitlyResume(record conversation.ContinuationRecord, normalized turn.NormalizedRequest) bool {
 	if strings.TrimSpace(record.ResponseID) == "" {
 		return false
 	}
@@ -120,7 +119,7 @@ func hasPriorAssistantOrToolHistory(input []codex.InputItem) bool {
 	return false
 }
 
-func (a *App) resolveImplicitResumeFallback(resolution sessionResolution, excluded []accounts.ContinuationRecord) sessionResolution {
+func (a *App) resolveImplicitResumeFallback(resolution sessionResolution, excluded []conversation.ContinuationRecord) sessionResolution {
 	if a == nil || a.continuations == nil || !hasPriorAssistantOrToolHistory(resolution.Request.Input) {
 		return resolution
 	}
@@ -150,8 +149,8 @@ func (a *App) resolveImplicitResumeFallback(resolution sessionResolution, exclud
 		resolution.Original.Model = record.Model
 		resolution.PreferredAccountID = record.AccountID
 		resolution.TurnState = strings.TrimSpace(record.TurnState)
-		resolution.Request.ToolNameAliases = translate.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
-		resolution.Original.ToolNameAliases = translate.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
+		resolution.Request.ToolNameAliases = turn.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
+		resolution.Original.ToolNameAliases = turn.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
 		resolution.ImplicitResume = true
 		if key := strings.TrimSpace(record.ConversationKey); key != "" {
 			resolution.ConversationKey = key
@@ -163,7 +162,7 @@ func (a *App) resolveImplicitResumeFallback(resolution sessionResolution, exclud
 	return resolution
 }
 
-func trimmedContinuationInput(input []codex.InputItem, record accounts.ContinuationRecord) ([]codex.InputItem, bool) {
+func trimmedContinuationInput(input []codex.InputItem, record conversation.ContinuationRecord) ([]codex.InputItem, bool) {
 	if len(input) == 0 {
 		return nil, false
 	}
@@ -210,7 +209,7 @@ func (a *App) writeRequestError(c *gin.Context, err error) bool {
 	return true
 }
 
-func functionCallIDs(accumulator *translate.Accumulator) []string {
+func functionCallIDs(accumulator *turn.Accumulator) []string {
 	if accumulator == nil || len(accumulator.ToolCalls) == 0 {
 		return nil
 	}
@@ -230,9 +229,9 @@ func functionCallIDs(accumulator *translate.Accumulator) []string {
 	return ids
 }
 
-func resolutionConversationKey(normalized translate.NormalizedRequest) string {
+func resolutionConversationKey(normalized turn.NormalizedRequest) string {
 	if key := strings.TrimSpace(normalized.PromptCacheKey); key != "" {
 		return key
 	}
-	return conversationkey.Derive(normalized.Request)
+	return conversation.Derive(normalized.Request)
 }

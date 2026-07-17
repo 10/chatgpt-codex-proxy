@@ -8,12 +8,12 @@ import (
 
 	"github.com/tiktoken-go/tokenizer"
 
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 const estimatedImageTokens int64 = 256
 
-func CountInputTokens(normalized translate.NormalizedRequest) (int64, error) {
+func CountInputTokens(normalized turn.NormalizedRequest) (int64, error) {
 	codec, err := tokenizer.Get(tokenizer.O200kBase)
 	if err != nil {
 		return 0, fmt.Errorf("initialize tokenizer: %w", err)

@@ -5,13 +5,13 @@ import (
 	"testing"
 
 	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestStreamEncoderEmitsAnthropicEventOrder(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_stream", "model": "gpt-5.4"}}},
@@ -67,7 +67,7 @@ func TestStreamEncoderBuffersAndCleansStructuredOutput(t *testing.T) {
 func TestStreamEncoderStreamsFragmentedToolJSON(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.output_item.added", Raw: map[string]any{"output_index": 0, "item": map[string]any{"type": "function_call", "id": "item_1", "call_id": "call_1", "name": "weather", "arguments": ""}}},
@@ -96,7 +96,7 @@ func TestStreamEncoderShortensLongToolUseIDs(t *testing.T) {
 	t.Parallel()
 
 	longID := "call_" + strings.Repeat("a", 80)
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.function_call_arguments.done", Raw: map[string]any{
@@ -117,7 +117,7 @@ func TestStreamEncoderShortensLongToolUseIDs(t *testing.T) {
 func TestStreamEncoderEmitsThinkingSignatureBeforeBlockStop(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.reasoning_summary_text.delta", Raw: map[string]any{"delta": "considering"}},
@@ -146,7 +146,7 @@ func TestStreamEncoderEmitsThinkingSignatureBeforeBlockStop(t *testing.T) {
 func TestStreamEncoderEmitsSignatureOnlyThinkingBlockBeforeText(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
@@ -176,7 +176,7 @@ func TestStreamEncoderEmitsSignatureOnlyThinkingBlockBeforeText(t *testing.T) {
 func TestStreamEncoderBuffersInterleavedParallelToolCalls(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_a", "call_id": "call_a", "name": "first", "delta": `{"a":`}},
@@ -210,7 +210,7 @@ func TestStreamEncoderBuffersInterleavedParallelToolCalls(t *testing.T) {
 func TestStreamEncoderFlushesActiveToolBeforeTerminalFallbackText(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_1", "call_id": "call_1", "name": "lookup", "delta": `{"query":`}},
@@ -239,7 +239,7 @@ func TestStreamEncoderFlushesActiveToolBeforeTerminalFallbackText(t *testing.T) 
 func TestStreamEncoderSuppressesIncompleteTerminalToolCall(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
@@ -261,7 +261,7 @@ func TestStreamEncoderSuppressesIncompleteTerminalToolCall(t *testing.T) {
 func TestStreamEncoderSuppressesIncompleteToolCallAfterDeltas(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{
@@ -283,7 +283,7 @@ func TestStreamEncoderSuppressesIncompleteToolCallAfterDeltas(t *testing.T) {
 func TestStreamEncoderSuppressesThinkingWhenNotEnabled(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{
 		Model: "gpt-5.4", Reasoning: &codex.Reasoning{Effort: "low"},
 	}})
 	encoder := NewStreamEncoder(0)
@@ -307,7 +307,7 @@ func TestStreamEncoderSuppressesThinkingWhenNotEnabled(t *testing.T) {
 func TestStreamEncoderSuppressesUnsignedThinking(t *testing.T) {
 	t.Parallel()
 
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{
 		Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"},
 	}})
 	encoder := NewStreamEncoder(0)
@@ -338,7 +338,7 @@ func TestStreamEncoderMapsHostedWebSearchWithoutTerminalDuplicates(t *testing.T)
 			map[string]any{"title": "OpenAI Codex", "url": "https://openai.com/codex"},
 		},
 	}
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.output_item.added", Raw: map[string]any{
@@ -397,7 +397,7 @@ func TestStreamEncoderDeduplicatesIDlessHostedWebSearchAtTerminal(t *testing.T) 
 		"type": "web_search_call", "status": "completed",
 		"action": map[string]any{"type": "search", "query": "Codex API"},
 	}
-	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{
@@ -421,7 +421,7 @@ func TestStreamEncoderDeduplicatesIDlessHostedWebSearchAtTerminal(t *testing.T) 
 	}
 }
 
-func applyAndEncode(accumulator *translate.Accumulator, encoder *StreamEncoder, input ...*codex.StreamEvent) []StreamEvent {
+func applyAndEncode(accumulator *turn.Accumulator, encoder *StreamEncoder, input ...*codex.StreamEvent) []StreamEvent {
 	var result []StreamEvent
 	for _, event := range input {
 		accumulator.Apply(event)

@@ -1,10 +1,8 @@
 package server
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -16,11 +14,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/openai"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 const defaultImageModel = "gpt-image-2"
@@ -215,126 +212,6 @@ func resolvedImageModel(model string) string {
 	return defaultImageModel
 }
 
-func prepareDirectImagePayload(body []byte, model string, stream bool) ([]byte, error) {
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, err
-	}
-	payload["model"] = mustRawJSON(model)
-	if stream {
-		payload["stream"] = json.RawMessage("true")
-	} else {
-		delete(payload, "stream")
-	}
-	return json.Marshal(payload)
-}
-
-func (a *App) handleDirectImageResponse(c *gin.Context, endpoint, path string, payload []byte, stream bool) bool {
-	account, response, err := a.openDirectImageWithFailover(c.Request.Context(), c, endpoint, path, payload, stream)
-	if err != nil {
-		if directImageEndpointUnavailable(err) {
-			return false
-		}
-		a.setRequestAccount(c, account)
-		a.handleOpenStreamError(c, endpoint, account.ID, account.ID, err)
-		return true
-	}
-	defer response.Body.Close()
-
-	a.setRequestAccount(c, account)
-	a.observeQuotaSnapshot(account.ID, codex.ParseQuotaFromHeaders(response.Header))
-	contentType := strings.TrimSpace(response.Header.Get("Content-Type"))
-	if stream {
-		prepareStreamResponse(c)
-		if contentType != "" {
-			c.Header("Content-Type", contentType)
-		}
-		buffer := make([]byte, 32*1024)
-		for {
-			n, readErr := response.Body.Read(buffer)
-			if n > 0 {
-				_, _ = c.Writer.Write(buffer[:n])
-				c.Writer.Flush()
-			}
-			if readErr != nil {
-				if readErr != io.EOF {
-					a.respondStreamError(c, endpoint, account.ID, "", "error", readErr, false)
-					return true
-				}
-				break
-			}
-		}
-	} else {
-		body, readErr := io.ReadAll(response.Body)
-		if readErr != nil {
-			a.handleOpenStreamError(c, endpoint, account.ID, account.ID, readErr)
-			return true
-		}
-		if contentType == "" {
-			contentType = "application/json"
-		}
-		c.Data(http.StatusOK, contentType, body)
-	}
-	a.accounts.NoteSuccess(account.ID)
-	return true
-}
-
-func (a *App) openDirectImageWithFailover(ctx context.Context, c *gin.Context, endpoint, path string, payload []byte, stream bool) (accounts.Record, *http.Response, error) {
-	attempted := make(map[string]struct{})
-	var lastAccount accounts.Record
-	var lastErr error
-	for {
-		account, err := a.accounts.AcquireMatching("", func(record accounts.Record) bool {
-			_, alreadyAttempted := attempted[record.ID]
-			return !alreadyAttempted
-		})
-		if err != nil {
-			if lastErr != nil && strings.Contains(strings.ToLower(err.Error()), "no active accounts") {
-				return lastAccount, nil, lastErr
-			}
-			return account, nil, err
-		}
-		selected := account
-		account, err = a.accountMgr.EnsureReady(ctx, selected.ID)
-		if err != nil {
-			account = selected
-		}
-		if err == nil {
-			a.logUpstreamPayload(c, endpoint, "http", account.ID, json.RawMessage(payload))
-			open := a.directImageOpen
-			if open == nil {
-				open = a.httpClient.OpenImage
-			}
-			var response *http.Response
-			response, err = open(ctx, account, path, payload, stream)
-			if err == nil {
-				return account, response, nil
-			}
-		}
-		err = normalizeRequestContextError(ctx, err)
-		if directImageEndpointUnavailable(err) || !shouldFailoverRequest(err) {
-			return account, nil, err
-		}
-		attempted[account.ID] = struct{}{}
-		lastAccount = account
-		lastErr = err
-		a.classifyUpstreamError(account.ID, err)
-	}
-}
-
-func directImageEndpointUnavailable(err error) bool {
-	var upstreamErr *codex.UpstreamError
-	if !errors.As(err, &upstreamErr) {
-		return false
-	}
-	switch upstreamErr.StatusCode {
-	case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
-		return true
-	default:
-		return false
-	}
-}
-
 func multipartValue(form *multipart.Form, key string) string {
 	if form == nil || len(form.Value[key]) == 0 {
 		return ""
@@ -377,14 +254,14 @@ func multipartImageDataURL(file *multipart.FileHeader) (string, error) {
 	return "data:" + contentType + ";base64," + base64.StdEncoding.EncodeToString(data), nil
 }
 
-func normalizedImageRequest(req imageGenerationRequest) translate.NormalizedRequest {
+func normalizedImageRequest(req imageGenerationRequest) turn.NormalizedRequest {
 	tool := newImageTool(req.Model, "generate")
 	appendImageToolOptions(&tool, req)
 
 	return normalizedImageToolRequest(req.Prompt, nil, tool, req.Stream)
 }
 
-func normalizedImageEditRequest(req imageEditRequest) translate.NormalizedRequest {
+func normalizedImageEditRequest(req imageEditRequest) turn.NormalizedRequest {
 	tool := newImageTool(req.Model, "edit")
 	appendImageToolOptions(&tool, req.imageGenerationRequest)
 	appendImageToolString(&tool, "input_fidelity", req.InputFidelity)
@@ -423,11 +300,11 @@ func newImageTool(model, action string) openai.ToolDefinition {
 	}
 }
 
-func normalizedImageToolRequest(prompt string, images []codex.ContentPart, tool openai.ToolDefinition, stream bool) translate.NormalizedRequest {
+func normalizedImageToolRequest(prompt string, images []codex.ContentPart, tool openai.ToolDefinition, stream bool) turn.NormalizedRequest {
 	content := make([]codex.ContentPart, 0, 1+len(images))
 	content = append(content, codex.ContentPart{Type: "input_text", Text: strings.TrimSpace(prompt)})
 	content = append(content, images...)
-	return translate.NormalizedRequest{Request: codex.Request{
+	return turn.NormalizedRequest{Request: codex.Request{
 		Instructions: "You are a helpful assistant.",
 		Stream:       stream,
 		Input: []codex.InputItem{{
@@ -469,7 +346,7 @@ func mustRawJSON(value any) json.RawMessage {
 	return payload
 }
 
-func (a *App) handleImageResponse(c *gin.Context, endpoint, streamPrefix, responseFormat string, normalized translate.NormalizedRequest) {
+func (a *App) handleImageResponse(c *gin.Context, endpoint, streamPrefix, responseFormat string, normalized turn.NormalizedRequest) {
 	if normalized.Stream {
 		a.streamImageResponse(c, endpoint, streamPrefix, responseFormat, normalized)
 		return
@@ -477,14 +354,14 @@ func (a *App) handleImageResponse(c *gin.Context, endpoint, streamPrefix, respon
 	a.collectImageResponse(c, endpoint, responseFormat, normalized)
 }
 
-func (a *App) collectImageResponse(c *gin.Context, endpoint, responseFormat string, normalized translate.NormalizedRequest) {
+func (a *App) collectImageResponse(c *gin.Context, endpoint, responseFormat string, normalized turn.NormalizedRequest) {
 	opened, ok := a.openImageRequest(c, endpoint, normalized)
 	if !ok {
 		return
 	}
 	defer opened.Stream.Close()
 
-	accumulator := translate.NewAccumulator(opened.Resolution.Request)
+	accumulator := turn.NewAccumulator(opened.Resolution.Request)
 	for {
 		event, _, err := a.nextStreamEvent(c.Request.Context(), opened.Account, accumulator, opened.Stream)
 		if err != nil {
@@ -527,7 +404,7 @@ func (a *App) collectImageResponse(c *gin.Context, endpoint, responseFormat stri
 	})
 }
 
-func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, responseFormat string, normalized translate.NormalizedRequest) {
+func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, responseFormat string, normalized turn.NormalizedRequest) {
 	opened, ok := a.openImageRequest(c, endpoint, normalized)
 	if !ok {
 		return
@@ -535,7 +412,7 @@ func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, respon
 	defer opened.Stream.Close()
 	prepareStreamResponse(c)
 
-	accumulator := translate.NewAccumulator(opened.Resolution.Request)
+	accumulator := turn.NewAccumulator(opened.Resolution.Request)
 	for {
 		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), opened.Account, accumulator, opened.Stream)
 		if err != nil {
@@ -549,7 +426,7 @@ func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, respon
 		if event.Type == "response.image_generation_call.partial_image" {
 			payload := imagePartialEventPayload(event, streamPrefix, responseFormat)
 			if payload != nil {
-				writeSSE(c.Writer, streamPrefix+".partial_image", translate.MustJSON(payload))
+				writeSSE(c.Writer, streamPrefix+".partial_image", turn.MustJSON(payload))
 				c.Writer.Flush()
 			}
 		}
@@ -572,7 +449,7 @@ func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, respon
 			if usage := imageUsage(accumulator); len(usage) > 0 {
 				payload["usage"] = usage
 			}
-			writeSSE(c.Writer, streamPrefix+".completed", translate.MustJSON(payload))
+			writeSSE(c.Writer, streamPrefix+".completed", turn.MustJSON(payload))
 			c.Writer.Flush()
 		}
 		a.accounts.NoteSuccess(opened.Account.ID)
@@ -580,14 +457,14 @@ func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, respon
 	}
 }
 
-func (a *App) openImageRequest(c *gin.Context, endpoint string, normalized translate.NormalizedRequest) (openedRequest, bool) {
+func (a *App) openImageRequest(c *gin.Context, endpoint string, normalized turn.NormalizedRequest) (openedRequest, bool) {
 	if a.imageOpener != nil {
 		return a.imageOpener(c, endpoint, normalized)
 	}
 	return a.resolveAndOpenRequest(c, endpoint, normalized)
 }
 
-func imageResultsFromAccumulator(accumulator *translate.Accumulator, responseFormat string) []imageResult {
+func imageResultsFromAccumulator(accumulator *turn.Accumulator, responseFormat string) []imageResult {
 	response := accumulator.ResponsesObject()
 	output := jsonutil.SliceOfMaps(response["output"])
 	results := make([]imageResult, 0, len(output))
@@ -643,7 +520,7 @@ func imageMIMEType(outputFormat string) string {
 	}
 }
 
-func imageCreatedAt(accumulator *translate.Accumulator) int64 {
+func imageCreatedAt(accumulator *turn.Accumulator) int64 {
 	response := jsonutil.MapValue(accumulator.RawFinal, "response")
 	if created, ok := serverIntValue(response["created_at"]); ok && created > 0 {
 		return int64(created)
@@ -651,7 +528,7 @@ func imageCreatedAt(accumulator *translate.Accumulator) int64 {
 	return time.Now().UTC().Unix()
 }
 
-func imageUsage(accumulator *translate.Accumulator) map[string]any {
+func imageUsage(accumulator *turn.Accumulator) map[string]any {
 	response := jsonutil.MapValue(accumulator.RawFinal, "response")
 	toolUsage := jsonutil.MapValue(response, "tool_usage")
 	if usage := jsonutil.MapValue(toolUsage, "image_gen"); len(usage) > 0 {

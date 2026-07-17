@@ -15,9 +15,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
+	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/models"
 )
 
@@ -368,9 +370,9 @@ func newResponsesWebSocketTestApp(t *testing.T, stream *fakeResponsesWebSocketSt
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		engine:        engine,
 		accounts:      accountsSvc,
-		accountMgr:    codex.NewAccountManager(cfg, accountsSvc, nil, httpClient, catalog),
+		accountMgr:    accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, catalog),
 		httpClient:    httpClient,
-		continuations: accounts.NewContinuationManager(time.Minute),
+		continuations: conversation.NewContinuationManager(time.Minute),
 		models:        catalog,
 	}
 	app.wsConnector = func(_ context.Context, _ string, _ http.Header, body any) (responsesWebSocketStream, error) {

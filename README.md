@@ -345,7 +345,7 @@ Live compatibility tests against a running local proxy:
 OPENAI_API_KEY=change-me-to-a-long-random-string \
 OPENAI_MODEL=gpt-5.6-sol \
 OPENAI_BASE_URL="${PROXY_URL}/v1" \
-go test -tags=live ./internal/integration -v -count=1
+go test -tags=live ./test/integration -v -count=1
 ```
 
 The live suite exercises both OpenAI and Anthropic compatibility routes.

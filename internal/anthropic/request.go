@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"slices"
 	"strings"
@@ -18,78 +17,62 @@ import (
 	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/models"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/openai"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 const defaultInstructions = "You are a helpful assistant."
 const claudeCodeAttributionSystemPrefix = "x-anthropic-billing-header:"
 
-func DecodeMessages(data []byte) (MessagesRequest, error) {
-	var request MessagesRequest
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		return MessagesRequest{}, err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return MessagesRequest{}, errors.New("request body must contain one JSON object")
-		}
-		return MessagesRequest{}, err
-	}
-	return request, nil
-}
-
-func Normalize(request MessagesRequest, catalog *models.Catalog) (translate.NormalizedRequest, error) {
+func Normalize(request MessagesRequest, catalog *models.Catalog) (turn.NormalizedRequest, error) {
 	model := strings.TrimSpace(request.Model)
 	if model == "" {
-		return translate.NormalizedRequest{}, errors.New("model is required")
+		return turn.NormalizedRequest{}, errors.New("model is required")
 	}
 	if catalog != nil && !catalog.Has(model) {
-		return translate.NormalizedRequest{}, &translate.ModelNotFoundError{Model: model}
+		return turn.NormalizedRequest{}, &openai.ModelNotFoundError{Model: model}
 	}
 	if request.MaxTokens == nil {
-		return translate.NormalizedRequest{}, errors.New("max_tokens is required")
+		return turn.NormalizedRequest{}, errors.New("max_tokens is required")
 	}
 	if *request.MaxTokens < 0 {
-		return translate.NormalizedRequest{}, errors.New("max_tokens must be greater than or equal to 0")
+		return turn.NormalizedRequest{}, errors.New("max_tokens must be greater than or equal to 0")
 	}
 	if len(request.Messages) == 0 {
-		return translate.NormalizedRequest{}, errors.New("messages must contain at least one message")
+		return turn.NormalizedRequest{}, errors.New("messages must contain at least one message")
 	}
 
-	toolNames := translate.NewToolNames(requestToolNames(request))
+	toolNames := turn.NewToolNames(requestToolNames(request))
 	tools, err := normalizeTools(request.Tools, toolNames)
 	if err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	toolChoice, parallelToolCalls, err := normalizeToolChoice(request.ToolChoice, toolNames, request.Tools)
 	if err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	instructions, err := normalizeSystem(request.System)
 	if err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	input, err := normalizeMessages(request.Messages, toolNames)
 	if err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	reasoning, include, err := normalizeThinking(request, catalog)
 	if err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	text, responseSchema, err := normalizeOutputFormat(request.OutputConfig)
 	if err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	serviceTier, err := normalizeServiceTier(request.ServiceTier)
 	if err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 
-	normalized := translate.NormalizedRequest{
+	normalized := turn.NormalizedRequest{
 		ModelExplicit:   true,
 		ResponseSchema:  responseSchema,
 		ToolNameAliases: toolNames.Aliases(),
@@ -127,7 +110,7 @@ func normalizeSystem(content Content) (string, error) {
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func normalizeMessages(messages []Message, toolNames *translate.ToolNames) ([]codex.InputItem, error) {
+func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.InputItem, error) {
 	knownCalls := make(map[string]struct{})
 	knownSearches := make(map[string]struct{})
 	result := make([]codex.InputItem, 0, len(messages))
@@ -350,105 +333,6 @@ func normalizeToolResult(content Content) (string, []codex.ContentPart, error) {
 	return "", parts, nil
 }
 
-func normalizeTools(tools []Tool, names *translate.ToolNames) ([]codex.Tool, error) {
-	result := make([]codex.Tool, 0, len(tools))
-	for _, tool := range tools {
-		toolType := strings.TrimSpace(tool.Type)
-		if isHostedWebSearchToolType(toolType) {
-			if tool.MaxUses != nil {
-				return nil, errors.New("max_uses is not supported for hosted web search")
-			}
-			if len(tool.BlockedDomains) > 0 {
-				return nil, errors.New("blocked_domains is not supported for hosted web search")
-			}
-			result = append(result, normalizeHostedWebSearchTool(tool))
-			continue
-		}
-		if toolType != "" && toolType != "custom" {
-			return nil, fmt.Errorf("unsupported tool type %q", toolType)
-		}
-		if strings.TrimSpace(tool.Name) == "" {
-			return nil, errors.New("tool name is required")
-		}
-		if len(tool.InputSchema) == 0 {
-			return nil, errors.New("input_schema is required")
-		}
-		result = append(result, codex.Tool{
-			Type:        "function",
-			Name:        names.Shorten(tool.Name),
-			Description: tool.Description,
-			Parameters:  translate.NormalizeSchema(tool.InputSchema),
-		})
-	}
-	return result, nil
-}
-
-func normalizeHostedWebSearchTool(tool Tool) codex.Tool {
-	normalized := codex.Tool{
-		Type:         "web_search",
-		UserLocation: maps.Clone(tool.UserLocation),
-	}
-	if len(tool.AllowedDomains) > 0 {
-		filters, _ := json.Marshal(map[string]any{"allowed_domains": tool.AllowedDomains})
-		normalized.ExtraFields = map[string]json.RawMessage{"filters": filters}
-	}
-	return normalized
-}
-
-func isHostedWebSearchToolType(toolType string) bool {
-	return toolType == "web_search_20250305" || toolType == "web_search_20260209"
-}
-
-func normalizeToolChoice(choice *ToolChoice, names *translate.ToolNames, tools []Tool) (json.RawMessage, *bool, error) {
-	if choice == nil {
-		return nil, nil, nil
-	}
-	var encoded json.RawMessage
-	switch strings.TrimSpace(choice.Type) {
-	case "", "auto":
-		encoded = json.RawMessage(`"auto"`)
-	case "any":
-		encoded = json.RawMessage(`"required"`)
-	case "none":
-		encoded = json.RawMessage(`"none"`)
-	case "tool":
-		if strings.TrimSpace(choice.Name) == "" {
-			return nil, nil, errors.New("name is required for tool choice type tool")
-		}
-		selection := map[string]any{"type": "function", "name": names.Shorten(choice.Name)}
-		if isHostedWebSearchToolName(choice.Name, tools) {
-			selection = map[string]any{"type": "web_search"}
-		}
-		value, _ := json.Marshal(selection)
-		encoded = value
-	default:
-		return nil, nil, fmt.Errorf("unsupported tool choice type %q", choice.Type)
-	}
-	var parallel *bool
-	if choice.DisableParallelToolUse != nil {
-		value := !*choice.DisableParallelToolUse
-		parallel = &value
-	}
-	return encoded, parallel, nil
-}
-
-func isHostedWebSearchToolName(name string, tools []Tool) bool {
-	name = strings.TrimSpace(name)
-	for _, tool := range tools {
-		if !isHostedWebSearchToolType(strings.TrimSpace(tool.Type)) {
-			continue
-		}
-		toolName := strings.TrimSpace(tool.Name)
-		if toolName == "" {
-			toolName = "web_search"
-		}
-		if toolName == name {
-			return true
-		}
-	}
-	return false
-}
-
 func normalizeThinking(request MessagesRequest, catalog *models.Catalog) (*codex.Reasoning, []string, error) {
 	typeName := ""
 	if request.Thinking != nil {
@@ -499,7 +383,7 @@ func normalizeOutputFormat(config *OutputConfig) (*codex.TextConfig, map[string]
 	if len(format.Schema) == 0 {
 		return nil, nil, errors.New("schema is required")
 	}
-	responseSchema := translate.NormalizeSchema(format.Schema)
+	responseSchema := openai.NormalizeSchema(format.Schema)
 	strictSchema := jsonutil.CloneMap(responseSchema)
 	if err := makeOpenAIStrictSchema(strictSchema); err != nil {
 		return nil, nil, err

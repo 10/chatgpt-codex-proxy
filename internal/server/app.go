@@ -6,20 +6,21 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
-	"chatgpt-codex-proxy/internal/admin"
-	"chatgpt-codex-proxy/internal/anthropic"
+	"chatgpt-codex-proxy/internal/accounts/jsonstore"
 	"chatgpt-codex-proxy/internal/codex"
+	"chatgpt-codex-proxy/internal/codexauth"
 	"chatgpt-codex-proxy/internal/config"
+	"chatgpt-codex-proxy/internal/conversation"
+	"chatgpt-codex-proxy/internal/devicelogin"
 	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/models"
-	"chatgpt-codex-proxy/internal/store"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 type App struct {
@@ -27,21 +28,21 @@ type App struct {
 	logger          *slog.Logger
 	engine          *gin.Engine
 	accounts        *accounts.Service
-	deviceLogins    *admin.DeviceLoginService
-	accountMgr      *codex.AccountManager
+	deviceLogins    *devicelogin.DeviceLoginService
+	accountMgr      *accountmanager.AccountManager
 	httpClient      *codex.HTTPClient
 	httpStream      func(context.Context, accounts.Record, codex.Request, string) (eventStream, error)
 	compactCaller   func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
-	imageOpener     func(*gin.Context, string, translate.NormalizedRequest) (openedRequest, bool)
+	imageOpener     func(*gin.Context, string, turn.NormalizedRequest) (openedRequest, bool)
 	directImageOpen func(context.Context, accounts.Record, string, []byte, bool) (*http.Response, error)
 	wsConnector     responsesWebSocketConnector
-	continuations   *accounts.ContinuationManager
+	continuations   *conversation.ContinuationManager
 	models          *models.Catalog
 	cancel          context.CancelFunc
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
-	accountsStore := store.NewJSONAccountsStore(cfg.DataDir)
+	accountsStore := jsonstore.NewJSONAccountsStore(cfg.DataDir)
 	accountsSvc, err := accounts.NewService(accountsStore, accounts.RotationLeastUsed)
 	if err != nil {
 		return nil, err
@@ -55,9 +56,9 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	}
 
 	httpClient := codex.NewHTTPClient(cfg)
-	oauthSvc := codex.NewOAuthService(cfg)
-	accountMgr := codex.NewAccountManager(cfg, accountsSvc, oauthSvc, httpClient, modelCatalog)
-	deviceLogins := admin.NewDeviceLoginService(oauthSvc, accountsSvc, cfg.LoginTimeout)
+	oauthSvc := codexauth.NewOAuthService(cfg)
+	accountMgr := accountmanager.NewAccountManager(cfg, accountsSvc, oauthSvc, httpClient, modelCatalog)
+	deviceLogins := devicelogin.NewDeviceLoginService(oauthSvc, accountsSvc, cfg.LoginTimeout)
 	modelRefresher := models.NewFetcher(cfg, logger, accountsSvc, accountMgr, httpClient, modelCatalog)
 
 	engine := gin.New()
@@ -74,7 +75,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		deviceLogins:  deviceLogins,
 		accountMgr:    accountMgr,
 		httpClient:    httpClient,
-		continuations: accounts.NewContinuationManager(cfg.ContinuationTTL),
+		continuations: conversation.NewContinuationManager(cfg.ContinuationTTL),
 		models:        modelCatalog,
 	}
 	app.routes()
@@ -115,159 +116,4 @@ func (a *App) housekeeping(ctx context.Context) {
 			a.deviceLogins.DeleteExpired(time.Now().UTC())
 		}
 	}
-}
-
-func (a *App) routes() {
-	a.engine.GET("/health/live", a.handleHealthLive)
-
-	protected := a.engine.Group("/")
-	protected.Use(middleware.APIKeyWithUnauthorized(a.cfg.ProxyAPIKey, func(c *gin.Context) {
-		if strings.TrimSpace(c.GetHeader("anthropic-version")) != "" || strings.HasPrefix(c.Request.URL.Path, "/v1/messages") {
-			a.prepareAnthropicHeaders(c)
-			middleware.SetRequestError(c, "authentication_error", "invalid x-api-key")
-			c.AbortWithStatusJSON(http.StatusUnauthorized, anthropic.ErrorPayload("authentication_error", "invalid x-api-key", middleware.GetRequestID(c)))
-			return
-		}
-		middleware.SetRequestError(c, "invalid_api_key", "invalid_api_key")
-		c.AbortWithStatusJSON(http.StatusUnauthorized, middleware.OpenAIErrorPayload("invalid_api_key", "authentication_error", "invalid_api_key", ""))
-	}))
-	protected.GET("/health", a.handleHealth)
-	protected.GET("/v1/models", a.handleModels)
-	protected.GET("/v1/models/:model_id", a.handleModelByID)
-	protected.POST("/v1/completions", a.handleCompletions)
-	protected.POST("/v1/chat/completions", a.handleChatCompletions)
-	protected.GET("/v1/responses", a.handleResponsesWebSocket)
-	protected.POST("/v1/responses", a.handleResponses)
-	protected.POST("/v1/responses/compact", a.handleResponsesCompact)
-	protected.POST("/v1/images/generations", a.handleImageGenerations)
-	protected.POST("/v1/images/edits", a.handleImageEdits)
-	protected.POST("/v1/messages", a.handleAnthropicMessages)
-	protected.POST("/v1/messages/count_tokens", a.handleAnthropicCountTokens)
-
-	adminGroup := protected.Group("/admin")
-	adminGroup.GET("/accounts", a.handleAdminAccounts)
-	adminGroup.POST("/accounts/device-login/start", a.handleAdminDeviceLoginStart)
-	adminGroup.GET("/accounts/device-login/:login_id", a.handleAdminDeviceLoginGet)
-	adminGroup.DELETE("/accounts/:account_id", a.handleAdminAccountDelete)
-	adminGroup.PATCH("/accounts/:account_id", a.handleAdminAccountPatch)
-	adminGroup.GET("/accounts/:account_id/usage", a.handleAdminAccountUsage)
-	adminGroup.POST("/accounts/:account_id/refresh", a.handleAdminAccountRefresh)
-	adminGroup.GET("/rotation", a.handleAdminRotationGet)
-	adminGroup.PUT("/rotation", a.handleAdminRotationPut)
-}
-
-func (a *App) writeOpenAIError(c *gin.Context, status int, code, message, errType string) {
-	middleware.SetRequestError(c, code, message)
-	c.AbortWithStatusJSON(status, middleware.OpenAIErrorPayload(message, errType, code, ""))
-}
-
-func (a *App) writeAdminError(c *gin.Context, status int, code, message string) {
-	middleware.SetRequestError(c, code, message)
-	c.AbortWithStatusJSON(status, gin.H{"error": code, "message": message})
-}
-
-func (a *App) classifyUpstreamError(accountID string, err error) (int, string, string) {
-	var upstreamErr *codex.UpstreamError
-	if errors.As(err, &upstreamErr) {
-		text := strings.ToLower(upstreamErr.Message())
-		switch upstreamErr.StatusCode {
-		case http.StatusUnauthorized:
-			a.markAccountError(accountID, accounts.StatusExpired, err)
-			return http.StatusUnauthorized, "upstream_unauthorized", "upstream account unauthorized"
-		case http.StatusForbidden:
-			if !looksLikeCloudflareBlock(text) {
-				a.setAccountCooldown(accountID, fallbackUntil(time.Now().UTC(), accounts.DefaultRateLimitFallback), err)
-			}
-		case http.StatusPaymentRequired:
-			a.setAccountCooldown(accountID, a.quotaCooldownUntil(accountID, time.Now().UTC()), err)
-			return http.StatusPaymentRequired, "quota_exhausted", "upstream account quota exhausted"
-		case http.StatusTooManyRequests:
-			a.setAccountCooldown(accountID, a.rateLimitCooldownUntil(accountID, err, time.Now().UTC()), err)
-			return http.StatusTooManyRequests, "rate_limited", "upstream account rate limited"
-		}
-		return clampUpstreamStatus(upstreamErr.StatusCode), "upstream_error", upstreamErr.Message()
-	}
-	return http.StatusBadGateway, "upstream_error", err.Error()
-}
-
-func (a *App) markAccountError(accountID string, status accounts.Status, cause error) {
-	if err := a.accounts.MarkError(accountID, status, cause.Error()); err != nil {
-		a.logger.Error("persist account error status failed",
-			"account_id", accountID,
-			"status", string(status),
-			"error", err.Error(),
-		)
-	}
-}
-
-func (a *App) setAccountCooldown(accountID string, until *time.Time, cause error) {
-	if strings.TrimSpace(accountID) == "" {
-		return
-	}
-	if err := a.accounts.SetCooldown(accountID, until, cause.Error()); err != nil {
-		a.logger.Error("persist account cooldown failed",
-			"account_id", accountID,
-			"error", err.Error(),
-		)
-	}
-}
-
-func (a *App) rateLimitCooldownUntil(accountID string, cause error, now time.Time) *time.Time {
-	var upstreamErr *codex.UpstreamError
-	if errors.As(cause, &upstreamErr) && upstreamErr.RetryAfter > 0 {
-		return fallbackUntil(now, time.Duration(upstreamErr.RetryAfter)*time.Second)
-	}
-	record, ok, err := a.accounts.Get(accountID)
-	if err != nil {
-		a.logger.Warn("load account cooldown failed", "account_id", accountID, "error", err.Error())
-		return fallbackUntil(now, accounts.DefaultRateLimitFallback)
-	}
-	if ok {
-		if reset := accounts.PrimaryRateLimitReset(record.CachedQuota, now); reset != nil {
-			return reset
-		}
-	}
-	return fallbackUntil(now, accounts.DefaultRateLimitFallback)
-}
-
-func (a *App) quotaCooldownUntil(accountID string, now time.Time) *time.Time {
-	record, ok, err := a.accounts.Get(accountID)
-	if err != nil {
-		a.logger.Warn("load account cooldown failed", "account_id", accountID, "error", err.Error())
-		return fallbackUntil(now, accounts.DefaultQuotaFallback)
-	}
-	if ok {
-		if reset := accounts.QuotaReset(record.CachedQuota, now); reset != nil {
-			return reset
-		}
-	}
-	return fallbackUntil(now, accounts.DefaultQuotaFallback)
-}
-
-func clampUpstreamStatus(status int) int {
-	if status >= 400 && status < 600 {
-		return status
-	}
-	return http.StatusBadGateway
-}
-
-func looksLikeCloudflareBlock(text string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(text))
-	return strings.Contains(normalized, "cf_chl") ||
-		strings.Contains(normalized, "<!doctype") ||
-		strings.Contains(normalized, "<html")
-}
-
-func fallbackUntil(now time.Time, duration time.Duration) *time.Time {
-	until := now.Add(duration).UTC()
-	return &until
-}
-
-func writeSSE(w io.Writer, eventName string, payload []byte) {
-	if eventName != "" {
-		_, _ = io.WriteString(w, "event: "+eventName+"\n")
-	}
-	_, _ = io.WriteString(w, "data: ")
-	_, _ = w.Write(payload)
-	_, _ = io.WriteString(w, "\n\n")
 }

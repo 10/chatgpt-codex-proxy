@@ -18,7 +18,8 @@ import (
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/models"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/openai"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 var responsesWebSocketUpgrader = websocket.Upgrader{
@@ -96,17 +97,17 @@ type responsesWebSocketEnvelope struct {
 
 var errResponsesWebSocketBackground = errors.New("background responses are not supported over WebSocket")
 
-func normalizeResponsesWebSocketMessage(body []byte, catalog *models.Catalog) (translate.NormalizedRequest, error) {
+func normalizeResponsesWebSocketMessage(body []byte, catalog *models.Catalog) (turn.NormalizedRequest, error) {
 	var envelope responsesWebSocketEnvelope
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	eventType := strings.TrimSpace(envelope.Type)
 	if eventType != "response.create" && eventType != "response.append" {
-		return translate.NormalizedRequest{}, fmt.Errorf("unsupported websocket event type %q", envelope.Type)
+		return turn.NormalizedRequest{}, fmt.Errorf("unsupported websocket event type %q", envelope.Type)
 	}
 	if envelope.Background {
-		return translate.NormalizedRequest{}, errResponsesWebSocketBackground
+		return turn.NormalizedRequest{}, errResponsesWebSocketBackground
 	}
 
 	// The regular Responses normalizer intentionally ignores transport-only
@@ -114,7 +115,7 @@ func normalizeResponsesWebSocketMessage(body []byte, catalog *models.Catalog) (t
 	// the upstream WebSocket payload.
 	normalized, err := normalizeResponsesBody(body, catalog)
 	if err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	normalized.Stream = true
 	normalized.Generate = envelope.Generate
@@ -122,13 +123,13 @@ func normalizeResponsesWebSocketMessage(body []byte, catalog *models.Catalog) (t
 	if normalized.WebSocketAppend {
 		input := bytes.TrimSpace(envelope.Input)
 		if len(input) == 0 || input[0] != '[' {
-			return translate.NormalizedRequest{}, errors.New("response.append requires array field: input")
+			return turn.NormalizedRequest{}, errors.New("response.append requires array field: input")
 		}
 	}
 	return normalized, nil
 }
 
-func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn, normalized translate.NormalizedRequest, session *responsesWebSocketSession) bool {
+func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn, normalized turn.NormalizedRequest, session *responsesWebSocketSession) bool {
 	if normalized.WebSocketAppend && session.lastResponseID == "" {
 		return writeResponsesWebSocketError(conn, http.StatusBadRequest, "invalid_request_error", "response.append received before response.create", "invalid_request_error", "")
 	}
@@ -190,7 +191,7 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 		}
 	}
 
-	accumulator := translate.NewAccumulator(resolution.Request)
+	accumulator := turn.NewAccumulator(resolution.Request)
 	var tupleTextBuffer strings.Builder
 	for {
 		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), account, accumulator, session.stream)
@@ -215,7 +216,7 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 		}
 
 		for _, outgoing := range a.responsesStreamEvents(c, accumulator, resolution.Request, &tupleTextBuffer, event) {
-			payload := translate.ResponseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload)
+			payload := turn.ResponseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload)
 			if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 				return false
 			}
@@ -230,7 +231,7 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 	return true
 }
 
-func (a *App) responsesStreamEvents(c *gin.Context, accumulator *translate.Accumulator, normalized translate.NormalizedRequest, tupleTextBuffer *strings.Builder, event *codex.StreamEvent) []translate.ResponseStreamEvent {
+func (a *App) responsesStreamEvents(c *gin.Context, accumulator *turn.Accumulator, normalized turn.NormalizedRequest, tupleTextBuffer *strings.Builder, event *codex.StreamEvent) []turn.ResponseStreamEvent {
 	if normalized.TupleSchema != nil {
 		switch event.Type {
 		case "response.output_text.delta":
@@ -249,16 +250,16 @@ func (a *App) responsesStreamEvents(c *gin.Context, accumulator *translate.Accum
 		return toolEvents
 	}
 
-	events := make([]translate.ResponseStreamEvent, 0, 3)
+	events := make([]turn.ResponseStreamEvent, 0, 3)
 	if event.IsTerminalResponse() {
 		if normalized.TupleSchema != nil && strings.TrimSpace(tupleTextBuffer.String()) != "" {
 			reconverted := tupleTextBuffer.String()
-			if patched, err := translate.ReconvertJSONText(reconverted, normalized.TupleSchema); err != nil {
+			if patched, err := openai.ReconvertJSONText(reconverted, normalized.TupleSchema); err != nil {
 				a.logTupleReconversionWarning(c, "responses", accumulator.ResponseID, err)
 			} else {
 				reconverted = patched
 			}
-			events = append(events, translate.ResponseStreamEvent{
+			events = append(events, turn.ResponseStreamEvent{
 				Type:    "response.output_text.delta",
 				Payload: map[string]any{"delta": reconverted},
 			})
@@ -268,19 +269,19 @@ func (a *App) responsesStreamEvents(c *gin.Context, accumulator *translate.Accum
 
 	payload := responseStreamPayload(event, accumulator)
 	if normalized.TupleSchema != nil && event.IsTerminalResponse() {
-		if err := translate.PatchResponseCompletedPayloadForTuple(payload, normalized.TupleSchema); err != nil {
+		if err := openai.PatchResponseCompletedPayloadForTuple(payload, normalized.TupleSchema); err != nil {
 			a.logTupleReconversionWarning(c, "responses", accumulator.ResponseID, err)
 		}
 	}
-	return append(events, translate.ResponseStreamEvent{Type: event.Type, Payload: payload})
+	return append(events, turn.ResponseStreamEvent{Type: event.Type, Payload: payload})
 }
 
 func responsesWebSocketRequestError(err error) (int, string, string, string) {
-	var modelErr *translate.ModelNotFoundError
+	var modelErr *openai.ModelNotFoundError
 	if errors.As(err, &modelErr) {
 		return http.StatusNotFound, "model_not_found", "Model '" + strings.TrimSpace(modelErr.Model) + "' not found", "model"
 	}
-	var contentErr *translate.UnsupportedContentPartError
+	var contentErr *openai.UnsupportedContentPartError
 	if errors.As(err, &contentErr) {
 		return http.StatusBadRequest, "unsupported_content_part", contentErr.Error(), "input"
 	}

@@ -13,7 +13,7 @@ import (
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/openai"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 var errUnsupportedMultiplePrompts = errors.New("multiple prompts are not supported")
@@ -28,34 +28,34 @@ func (a *App) handleCompletions(c *gin.Context) {
 	a.handlePublicRequest(
 		c,
 		"completions",
-		func(body []byte) (translate.NormalizedRequest, error) {
+		func(body []byte) (turn.NormalizedRequest, error) {
 			return normalizeCompletionsBody(body, a.modelCatalog())
 		},
 		a.streamCompletion,
-		(*translate.Accumulator).CompletionObject,
+		(*turn.Accumulator).CompletionObject,
 		func(map[string]any, map[string]any) error { return nil },
 	)
 }
 
-func normalizeCompletionsBody(body []byte, catalog *models.Catalog) (translate.NormalizedRequest, error) {
+func normalizeCompletionsBody(body []byte, catalog *models.Catalog) (turn.NormalizedRequest, error) {
 	var req completionsRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		return translate.NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 
 	var prompt string
 	if err := json.Unmarshal(req.Prompt, &prompt); err != nil {
 		var prompts []string
 		if arrayErr := json.Unmarshal(req.Prompt, &prompts); arrayErr != nil {
-			return translate.NormalizedRequest{}, errors.New("prompt must be a string or an array containing one string")
+			return turn.NormalizedRequest{}, errors.New("prompt must be a string or an array containing one string")
 		}
 		if len(prompts) != 1 {
-			return translate.NormalizedRequest{}, errUnsupportedMultiplePrompts
+			return turn.NormalizedRequest{}, errUnsupportedMultiplePrompts
 		}
 		prompt = prompts[0]
 	}
 
-	return translate.ChatCompletions(openai.ChatCompletionsRequest{
+	return openai.ChatCompletions(openai.ChatCompletionsRequest{
 		Model:  req.Model,
 		Stream: req.Stream,
 		Messages: []openai.ChatMessage{{
@@ -65,9 +65,9 @@ func normalizeCompletionsBody(body []byte, catalog *models.Catalog) (translate.N
 	}, catalog)
 }
 
-func (a *App) streamCompletion(c *gin.Context, account accounts.Record, normalized translate.NormalizedRequest, stream eventStream) {
+func (a *App) streamCompletion(c *gin.Context, account accounts.Record, normalized turn.NormalizedRequest, stream eventStream) {
 	prepareStreamResponse(c)
-	accumulator := translate.NewAccumulator(normalized)
+	accumulator := turn.NewAccumulator(normalized)
 	createdAt := time.Now().UTC().Unix()
 
 	for {
@@ -84,7 +84,7 @@ func (a *App) streamCompletion(c *gin.Context, account accounts.Record, normaliz
 		}
 		if event.Type == "response.output_text.delta" {
 			if delta := jsonutil.StringValue(event.Raw["delta"]); delta != "" {
-				writeSSE(c.Writer, "", translate.MustJSON(completionChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), delta, "", createdAt)))
+				writeSSE(c.Writer, "", turn.MustJSON(completionChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), delta, "", createdAt)))
 				c.Writer.Flush()
 			}
 		}
@@ -98,7 +98,7 @@ func (a *App) streamCompletion(c *gin.Context, account accounts.Record, normaliz
 	if usage := accumulator.ChatUsageObject(); usage != nil {
 		final["usage"] = usage
 	}
-	writeSSE(c.Writer, "", translate.MustJSON(final))
+	writeSSE(c.Writer, "", turn.MustJSON(final))
 	_, _ = io.WriteString(c.Writer, "data: [DONE]\n\n")
 	c.Writer.Flush()
 }

@@ -13,7 +13,8 @@ import (
 	"chatgpt-codex-proxy/internal/anthropic"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/middleware"
-	"chatgpt-codex-proxy/internal/translate"
+	"chatgpt-codex-proxy/internal/openai"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 const anthropicMessagesBodyLimit = 32 << 20
@@ -104,9 +105,9 @@ func (a *App) decodeAnthropicRequest(c *gin.Context, logLabel string) (anthropic
 	return request, true
 }
 
-func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, normalized translate.NormalizedRequest, stream eventStream) {
+func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, normalized turn.NormalizedRequest, stream eventStream) {
 	prepareStreamResponse(c)
-	accumulator := translate.NewAccumulator(normalized)
+	accumulator := turn.NewAccumulator(normalized)
 	inputTokens, _ := anthropic.CountInputTokens(normalized)
 	encoder := anthropic.NewStreamEncoder(inputTokens)
 
@@ -151,7 +152,7 @@ func (a *App) validateAnthropicVersion(c *gin.Context) bool {
 }
 
 func (a *App) respondAnthropicNormalizeError(c *gin.Context, err error) {
-	var modelErr *translate.ModelNotFoundError
+	var modelErr *openai.ModelNotFoundError
 	if errors.As(err, &modelErr) {
 		a.writeAnthropicError(c, http.StatusNotFound, "Model '"+strings.TrimSpace(modelErr.Model)+"' not found")
 		return
