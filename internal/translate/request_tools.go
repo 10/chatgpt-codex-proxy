@@ -27,7 +27,7 @@ func legacyFunctionsAsTools(functions []openai.LegacyFunctionDefinition) []opena
 	return tools
 }
 
-func normalizeTools(tools []openai.ToolDefinition, toolNames *toolNameMapper) []codex.Tool {
+func normalizeTools(tools []openai.ToolDefinition, toolNames *ToolNames) []codex.Tool {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -71,7 +71,7 @@ func normalizeTools(tools []openai.ToolDefinition, toolNames *toolNameMapper) []
 	return result
 }
 
-func normalizeToolChoice(raw json.RawMessage, toolNames *toolNameMapper) json.RawMessage {
+func normalizeToolChoice(raw json.RawMessage, toolNames *ToolNames) json.RawMessage {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -112,7 +112,7 @@ func normalizeToolChoice(raw json.RawMessage, toolNames *toolNameMapper) json.Ra
 	return append(json.RawMessage(nil), raw...)
 }
 
-func normalizeLegacyFunctionChoice(choice *openai.LegacyFunctionCallChoice, toolNames *toolNameMapper) json.RawMessage {
+func normalizeLegacyFunctionChoice(choice *openai.LegacyFunctionCallChoice, toolNames *ToolNames) json.RawMessage {
 	if choice == nil || (choice.Mode == "" && choice.Name == "") {
 		return nil
 	}

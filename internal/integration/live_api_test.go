@@ -144,7 +144,7 @@ func applyPatchToolDefinition() map[string]any {
 	}
 }
 
-func postJSON(t *testing.T, cfg liveConfig, path string, payload any) []byte {
+func postJSON(t *testing.T, cfg liveConfig, path string, payload any, headers ...map[string]string) []byte {
 	t.Helper()
 
 	body, err := json.Marshal(payload)
@@ -156,7 +156,14 @@ func postJSON(t *testing.T, cfg liveConfig, path string, payload any) []byte {
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	if len(headers) == 0 {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
+	for _, header := range headers {
+		for name, value := range header {
+			req.Header.Set(name, value)
+		}
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 90 * time.Second}

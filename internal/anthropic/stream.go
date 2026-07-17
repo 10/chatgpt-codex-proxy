@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"cmp"
 	"strings"
 
 	"chatgpt-codex-proxy/internal/codex"
@@ -8,10 +9,7 @@ import (
 	"chatgpt-codex-proxy/internal/translate"
 )
 
-type StreamEvent struct {
-	Type string
-	Data map[string]any
-}
+type StreamEvent = map[string]any
 
 type streamBlock struct {
 	Index  int
@@ -21,13 +19,11 @@ type streamBlock struct {
 
 type StreamEncoder struct {
 	started      bool
-	finished     bool
 	nextIndex    int
 	open         *streamBlock
 	textEmitted  bool
 	thinkEmitted bool
 	thinkDeltas  []string
-	toolEmitted  map[string]bool
 	toolSent     map[string]int
 	toolDone     map[string]bool
 	toolStates   map[string]*translate.ToolCallState
@@ -36,24 +32,17 @@ type StreamEncoder struct {
 	inputTokens  int64
 }
 
-func NewStreamEncoder(inputTokens ...int64) *StreamEncoder {
-	encoder := &StreamEncoder{
-		toolEmitted: make(map[string]bool),
+func NewStreamEncoder(inputTokens int64) *StreamEncoder {
+	return &StreamEncoder{
 		toolSent:    make(map[string]int),
 		toolDone:    make(map[string]bool),
 		toolStates:  make(map[string]*translate.ToolCallState),
 		toolDeltas:  make(map[string][]string),
+		inputTokens: max(0, inputTokens),
 	}
-	if len(inputTokens) > 0 && inputTokens[0] > 0 {
-		encoder.inputTokens = inputTokens[0]
-	}
-	return encoder
 }
 
 func (e *StreamEncoder) Events(event *codex.StreamEvent, accumulator *translate.Accumulator) []StreamEvent {
-	if e == nil || e.finished || event == nil || accumulator == nil {
-		return nil
-	}
 	result := e.ensureStarted(accumulator)
 
 	switch event.Type {
@@ -69,7 +58,11 @@ func (e *StreamEncoder) Events(event *codex.StreamEvent, accumulator *translate.
 		if !shouldExposeThinking(accumulator) {
 			break
 		}
-		if signature := signatureFromEvent(event); signature != "" {
+		if signature := cmp.Or(
+			jsonutil.StringValue(event.Raw["signature"]),
+			jsonutil.StringValue(event.Raw["encrypted_content"]),
+			jsonutil.StringValue(jsonutil.MapValue(event.Raw, "item")["encrypted_content"]),
+		); signature != "" {
 			result = append(result, e.completeThinking(accumulator.ReasoningSummary(), signature)...)
 		}
 	case "response.output_text.delta":
@@ -122,17 +115,16 @@ func (e *StreamEncoder) Events(event *codex.StreamEvent, accumulator *translate.
 		result = append(result, e.closeBlock()...)
 		stopReason, stopSequence := stopFromAccumulator(accumulator)
 		result = append(result,
-			StreamEvent{Type: "message_delta", Data: map[string]any{
+			StreamEvent{
 				"type": "message_delta",
 				"delta": map[string]any{
 					"stop_reason":   stopReason,
 					"stop_sequence": nullableString(stopSequence),
 				},
 				"usage": map[string]any{"output_tokens": usageFromAccumulator(accumulator).OutputTokens},
-			}},
-			StreamEvent{Type: "message_stop", Data: map[string]any{"type": "message_stop"}},
+			},
+			StreamEvent{"type": "message_stop"},
 		)
-		e.finished = true
 	}
 	return result
 }
@@ -146,21 +138,16 @@ func (e *StreamEncoder) ensureStarted(accumulator *translate.Accumulator) []Stre
 	if usage.InputTokens == 0 {
 		usage.InputTokens = e.inputTokens
 	}
+	usage.OutputTokens = 0
 	message := MessageResponse{
-		ID:         MessageID(accumulator.ResponseID),
-		Type:       "message",
-		Role:       "assistant",
-		Model:      firstNonEmpty(accumulator.Model, accumulator.Normalized.Model),
-		Content:    []ResponseBlock{},
-		StopReason: nil,
-		Usage: Usage{
-			InputTokens:              usage.InputTokens,
-			OutputTokens:             0,
-			CacheCreationInputTokens: usage.CacheCreationInputTokens,
-			CacheReadInputTokens:     usage.CacheReadInputTokens,
-		},
+		ID:      MessageID(accumulator.ResponseID),
+		Type:    "message",
+		Role:    "assistant",
+		Model:   cmp.Or(accumulator.Model, accumulator.Normalized.Model),
+		Content: []ResponseBlock{},
+		Usage:   usage,
 	}
-	return []StreamEvent{{Type: "message_start", Data: map[string]any{"type": "message_start", "message": message}}}
+	return []StreamEvent{{"type": "message_start", "message": message}}
 }
 
 func (e *StreamEncoder) openText() []StreamEvent {
@@ -171,10 +158,10 @@ func (e *StreamEncoder) openText() []StreamEvent {
 	block := &streamBlock{Index: e.nextIndex, Type: "text"}
 	e.nextIndex++
 	e.open = block
-	return append(events, StreamEvent{Type: "content_block_start", Data: map[string]any{
+	return append(events, StreamEvent{
 		"type": "content_block_start", "index": block.Index,
 		"content_block": map[string]any{"type": "text", "text": ""},
-	}})
+	})
 }
 
 func (e *StreamEncoder) openThinking() []StreamEvent {
@@ -185,10 +172,10 @@ func (e *StreamEncoder) openThinking() []StreamEvent {
 	block := &streamBlock{Index: e.nextIndex, Type: "thinking"}
 	e.nextIndex++
 	e.open = block
-	return append(events, StreamEvent{Type: "content_block_start", Data: map[string]any{
+	return append(events, StreamEvent{
 		"type": "content_block_start", "index": block.Index,
 		"content_block": map[string]any{"type": "thinking", "thinking": "", "signature": ""},
-	}})
+	})
 }
 
 func (e *StreamEncoder) completeThinking(thinking, signature string) []StreamEvent {
@@ -211,27 +198,14 @@ func (e *StreamEncoder) completeThinking(thinking, signature string) []StreamEve
 }
 
 func (e *StreamEncoder) openTool(state *translate.ToolCallState) []StreamEvent {
-	if state == nil || strings.TrimSpace(state.CallID) == "" {
-		return nil
-	}
-	if e.open != nil && e.open.Type == "tool_use" && e.open.CallID == state.CallID {
-		return nil
-	}
-	if e.open != nil {
-		return nil
-	}
-	if e.toolEmitted[state.CallID] {
-		return nil
-	}
-	events := e.closeBlock()
 	block := &streamBlock{Index: e.nextIndex, Type: "tool_use", CallID: state.CallID}
 	e.nextIndex++
 	e.open = block
-	e.toolEmitted[state.CallID] = true
-	return append(events, StreamEvent{Type: "content_block_start", Data: map[string]any{
+	e.toolSent[state.CallID] = 0
+	return []StreamEvent{{
 		"type": "content_block_start", "index": block.Index,
 		"content_block": map[string]any{"type": "tool_use", "id": state.CallID, "name": state.Name, "input": map[string]any{}},
-	}})
+	}}
 }
 
 func (e *StreamEncoder) closeBlock() []StreamEvent {
@@ -240,21 +214,18 @@ func (e *StreamEncoder) closeBlock() []StreamEvent {
 	}
 	index := e.open.Index
 	e.open = nil
-	return []StreamEvent{{Type: "content_block_stop", Data: map[string]any{"type": "content_block_stop", "index": index}}}
+	return []StreamEvent{{"type": "content_block_stop", "index": index}}
 }
 
 func (e *StreamEncoder) delta(deltaType, field, value string) StreamEvent {
-	return StreamEvent{Type: "content_block_delta", Data: map[string]any{
+	return StreamEvent{
 		"type":  "content_block_delta",
 		"index": e.open.Index,
 		"delta": map[string]any{"type": deltaType, field: value},
-	}}
+	}
 }
 
 func (e *StreamEncoder) toolRemainder(state *translate.ToolCallState) []StreamEvent {
-	if state == nil || e.open == nil {
-		return nil
-	}
 	value := state.Arguments
 	if state.ToolType == "custom" {
 		value = state.Input
@@ -270,7 +241,7 @@ func (e *StreamEncoder) toolRemainder(state *translate.ToolCallState) []StreamEv
 
 func (e *StreamEncoder) hydrateTerminal(accumulator *translate.Accumulator) []StreamEvent {
 	var events []StreamEvent
-	toolStreamStarted := e.open != nil && e.open.Type == "tool_use" || len(e.toolEmitted) > 0 || len(e.toolDeltas) > 0
+	toolStreamStarted := e.open != nil && e.open.Type == "tool_use" || len(e.toolSent) > 0 || len(e.toolDeltas) > 0
 	response := jsonutil.MapValue(accumulator.RawFinal, "response")
 	for _, state := range accumulator.ToolCalls {
 		if !isExecutableToolState(state, response) {
@@ -322,9 +293,6 @@ func (e *StreamEncoder) hydrateTerminal(accumulator *translate.Accumulator) []St
 }
 
 func (e *StreamEncoder) registerTool(state *translate.ToolCallState) {
-	if state == nil || strings.TrimSpace(state.CallID) == "" {
-		return
-	}
 	if _, exists := e.toolStates[state.CallID]; !exists {
 		e.toolOrder = append(e.toolOrder, state.CallID)
 	}
@@ -333,9 +301,6 @@ func (e *StreamEncoder) registerTool(state *translate.ToolCallState) {
 
 func (e *StreamEncoder) completeTool(state *translate.ToolCallState) []StreamEvent {
 	e.registerTool(state)
-	if state == nil || strings.TrimSpace(state.CallID) == "" {
-		return nil
-	}
 	e.toolDone[state.CallID] = true
 	return e.flushTools()
 }
@@ -346,7 +311,7 @@ func (e *StreamEncoder) flushTools() []StreamEvent {
 	}
 	var events []StreamEvent
 	for _, callID := range e.toolOrder {
-		if e.toolEmitted[callID] {
+		if _, emitted := e.toolSent[callID]; emitted {
 			continue
 		}
 		state := e.toolStates[callID]
@@ -366,17 +331,6 @@ func (e *StreamEncoder) flushTools() []StreamEvent {
 		events = append(events, e.closeBlock()...)
 	}
 	return events
-}
-
-func signatureFromEvent(event *codex.StreamEvent) string {
-	if event == nil {
-		return ""
-	}
-	return firstNonEmpty(
-		jsonutil.StringValue(event.Raw["signature"]),
-		jsonutil.StringValue(event.Raw["encrypted_content"]),
-		jsonutil.StringValue(jsonutil.MapValue(event.Raw, "item")["encrypted_content"]),
-	)
 }
 
 func nullableString(value string) any {

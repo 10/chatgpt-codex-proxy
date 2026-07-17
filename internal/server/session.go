@@ -24,10 +24,6 @@ func (a *App) resolveSession(normalized translate.NormalizedRequest) (sessionRes
 		Request:  normalized,
 		Original: normalized,
 	}
-	if normalized.DisableContinuation {
-		return resolution, nil
-	}
-
 	if normalized.PreviousResponseID != "" {
 		record, ok := a.continuations.Get(normalized.PreviousResponseID)
 		if !ok {

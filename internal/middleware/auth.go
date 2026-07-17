@@ -34,10 +34,6 @@ func APIKeyWithUnauthorized(required string, unauthorized func(*gin.Context)) gi
 			return
 		}
 
-		if unauthorized != nil {
-			unauthorized(c)
-			return
-		}
-		c.AbortWithStatus(http.StatusUnauthorized)
+		unauthorized(c)
 	}
 }

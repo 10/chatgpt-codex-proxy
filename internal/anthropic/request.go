@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,7 @@ import (
 	"strings"
 
 	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/generation"
+	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/translate"
 )
@@ -22,14 +23,14 @@ func DecodeMessages(data []byte) (MessagesRequest, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		return MessagesRequest{}, invalid("", err.Error())
+		return MessagesRequest{}, err
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return MessagesRequest{}, invalid("", "request body must contain one JSON object")
+			return MessagesRequest{}, errors.New("request body must contain one JSON object")
 		}
-		return MessagesRequest{}, invalid("", err.Error())
+		return MessagesRequest{}, err
 	}
 	return request, nil
 }
@@ -37,22 +38,22 @@ func DecodeMessages(data []byte) (MessagesRequest, error) {
 func Normalize(request MessagesRequest, catalog *models.Catalog) (translate.NormalizedRequest, error) {
 	model := strings.TrimSpace(request.Model)
 	if model == "" {
-		return translate.NormalizedRequest{}, invalid("model", "model is required")
+		return translate.NormalizedRequest{}, errors.New("model is required")
 	}
 	if catalog != nil && !catalog.Has(model) {
 		return translate.NormalizedRequest{}, &translate.ModelNotFoundError{Model: model}
 	}
 	if request.MaxTokens == nil {
-		return translate.NormalizedRequest{}, invalid("max_tokens", "max_tokens is required")
+		return translate.NormalizedRequest{}, errors.New("max_tokens is required")
 	}
 	if *request.MaxTokens < 0 {
-		return translate.NormalizedRequest{}, invalid("max_tokens", "max_tokens must be greater than or equal to 0")
+		return translate.NormalizedRequest{}, errors.New("max_tokens must be greater than or equal to 0")
 	}
 	if len(request.Messages) == 0 {
-		return translate.NormalizedRequest{}, invalid("messages", "messages must contain at least one message")
+		return translate.NormalizedRequest{}, errors.New("messages must contain at least one message")
 	}
 
-	toolNames := generation.NewToolNames(requestToolNames(request))
+	toolNames := translate.NewToolNames(requestToolNames(request))
 	tools, err := normalizeTools(request.Tools, toolNames)
 	if err != nil {
 		return translate.NormalizedRequest{}, err
@@ -83,12 +84,11 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (translate.Norm
 	}
 
 	normalized := translate.NormalizedRequest{
-		ModelExplicit:       true,
-		DisableContinuation: true,
-		ToolNameAliases:     toolNames.Aliases(),
+		ModelExplicit:   true,
+		ToolNameAliases: toolNames.Aliases(),
 		Request: codex.Request{
 			Model:             model,
-			Instructions:      firstNonEmpty(strings.TrimSpace(instructions), defaultInstructions),
+			Instructions:      cmp.Or(strings.TrimSpace(instructions), defaultInstructions),
 			Input:             input,
 			Stream:            request.Stream,
 			Tools:             tools,
@@ -106,26 +106,11 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (translate.Norm
 	}
 	return normalized, nil
 }
-
-func NormalizeTokenCount(request MessagesRequest, catalog *models.Catalog) (translate.NormalizedRequest, error) {
-	if request.MaxTokens == nil {
-		zero := 0
-		request.MaxTokens = &zero
-	}
-	normalized, err := Normalize(request, catalog)
-	if err != nil {
-		return translate.NormalizedRequest{}, err
-	}
-	normalized.Generate = nil
-	normalized.Stream = false
-	return normalized, nil
-}
-
 func normalizeSystem(content Content) (string, error) {
 	parts := make([]string, 0, len(content))
-	for index, block := range content {
+	for _, block := range content {
 		if block.Type != "text" {
-			return "", invalid(fmt.Sprintf("system.%d.type", index), "system only supports text blocks")
+			return "", errors.New("system only supports text blocks")
 		}
 		if text := strings.TrimSpace(block.Text); text != "" {
 			parts = append(parts, text)
@@ -134,13 +119,13 @@ func normalizeSystem(content Content) (string, error) {
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func normalizeMessages(messages []Message, toolNames *generation.ToolNames) ([]codex.InputItem, error) {
+func normalizeMessages(messages []Message, toolNames *translate.ToolNames) ([]codex.InputItem, error) {
 	knownCalls := make(map[string]struct{})
 	result := make([]codex.InputItem, 0, len(messages))
-	for messageIndex, message := range messages {
+	for _, message := range messages {
 		role := strings.TrimSpace(message.Role)
 		if role != "user" && role != "assistant" {
-			return nil, invalid(fmt.Sprintf("messages.%d.role", messageIndex), "role must be user or assistant")
+			return nil, errors.New("role must be user or assistant")
 		}
 		var content []codex.ContentPart
 		flushContent := func() {
@@ -151,8 +136,7 @@ func normalizeMessages(messages []Message, toolNames *generation.ToolNames) ([]c
 			content = nil
 		}
 
-		for blockIndex, block := range message.Content {
-			field := fmt.Sprintf("messages.%d.content.%d", messageIndex, blockIndex)
+		for _, block := range message.Content {
 			switch block.Type {
 			case "text":
 				partType := "input_text"
@@ -162,43 +146,43 @@ func normalizeMessages(messages []Message, toolNames *generation.ToolNames) ([]c
 				content = append(content, codex.ContentPart{Type: partType, Text: block.Text})
 			case "image":
 				if role != "user" {
-					return nil, invalid(field, "image blocks are only supported in user messages")
+					return nil, errors.New("image blocks are only supported in user messages")
 				}
 				imageURL, err := normalizeImageSource(block.Source)
 				if err != nil {
-					return nil, invalid(field+".source", err.Error())
+					return nil, err
 				}
 				content = append(content, codex.ContentPart{Type: "input_image", ImageURL: imageURL})
 			case "tool_use":
 				if role != "assistant" {
-					return nil, invalid(field, "tool_use blocks require the assistant role")
+					return nil, errors.New("tool_use blocks require the assistant role")
 				}
 				flushContent()
 				callID := strings.TrimSpace(block.ID)
 				if callID == "" || strings.TrimSpace(block.Name) == "" {
-					return nil, invalid(field, "tool_use requires id and name")
+					return nil, errors.New("tool_use requires id and name")
 				}
 				arguments, err := normalizeToolInput(block.Input)
 				if err != nil {
-					return nil, invalid(field+".input", err.Error())
+					return nil, err
 				}
 				knownCalls[callID] = struct{}{}
 				result = append(result, codex.InputItem{Type: "function_call", CallID: callID, Name: toolNames.Shorten(block.Name), Arguments: arguments})
 			case "tool_result":
 				if role != "user" {
-					return nil, invalid(field, "tool_result blocks require the user role")
+					return nil, errors.New("tool_result blocks require the user role")
 				}
 				flushContent()
 				callID := strings.TrimSpace(block.ToolUseID)
 				if callID == "" {
-					return nil, invalid(field+".tool_use_id", "tool_use_id is required")
+					return nil, errors.New("tool_use_id is required")
 				}
 				if _, ok := knownCalls[callID]; !ok {
-					return nil, invalid(field+".tool_use_id", "tool_result references an unknown tool_use id")
+					return nil, errors.New("tool_result references an unknown tool_use id")
 				}
 				text, output, err := normalizeToolResult(block.Content)
 				if err != nil {
-					return nil, invalid(field+".content", err.Error())
+					return nil, err
 				}
 				if block.IsError {
 					if text != "" {
@@ -210,17 +194,17 @@ func normalizeMessages(messages []Message, toolNames *generation.ToolNames) ([]c
 				result = append(result, codex.InputItem{Type: "function_call_output", CallID: callID, OutputText: text, OutputContent: output})
 			case "thinking", "redacted_thinking":
 				if role != "assistant" {
-					return nil, invalid(field, block.Type+" blocks require the assistant role")
+					return nil, errors.New(block.Type + " blocks require the assistant role")
 				}
 				flushContent()
-				encrypted := strings.TrimSpace(firstNonEmpty(block.Signature, block.Data))
+				encrypted := strings.TrimSpace(cmp.Or(block.Signature, block.Data))
 				item := codex.InputItem{Type: "reasoning", EncryptedContent: encrypted}
 				if text := strings.TrimSpace(block.Thinking); text != "" {
-					item.Summary = []generation.ReasoningPart{{Type: "summary_text", Text: text}}
+					item.Summary = []conversation.ReasoningPart{{Type: "summary_text", Text: text}}
 				}
 				result = append(result, item)
 			default:
-				return nil, invalid(field+".type", fmt.Sprintf("unsupported content block type %q", block.Type))
+				return nil, fmt.Errorf("unsupported content block type %q", block.Type)
 			}
 		}
 		flushContent()
@@ -286,21 +270,21 @@ func normalizeToolResult(content Content) (string, []codex.ContentPart, error) {
 	return "", parts, nil
 }
 
-func normalizeTools(tools []Tool, names *generation.ToolNames) ([]codex.Tool, error) {
+func normalizeTools(tools []Tool, names *translate.ToolNames) ([]codex.Tool, error) {
 	result := make([]codex.Tool, 0, len(tools))
-	for index, tool := range tools {
+	for _, tool := range tools {
 		toolType := strings.TrimSpace(tool.Type)
 		if strings.HasPrefix(toolType, "web_search") {
-			return nil, invalid(fmt.Sprintf("tools.%d.type", index), "hosted web search is not supported by the Anthropic adapter")
+			return nil, errors.New("hosted web search is not supported by the Anthropic adapter")
 		}
 		if toolType != "" && toolType != "custom" {
-			return nil, invalid(fmt.Sprintf("tools.%d.type", index), fmt.Sprintf("unsupported tool type %q", toolType))
+			return nil, fmt.Errorf("unsupported tool type %q", toolType)
 		}
 		if strings.TrimSpace(tool.Name) == "" {
-			return nil, invalid(fmt.Sprintf("tools.%d.name", index), "tool name is required")
+			return nil, errors.New("tool name is required")
 		}
 		if len(tool.InputSchema) == 0 {
-			return nil, invalid(fmt.Sprintf("tools.%d.input_schema", index), "input_schema is required")
+			return nil, errors.New("input_schema is required")
 		}
 		result = append(result, codex.Tool{
 			Type:        "function",
@@ -312,7 +296,7 @@ func normalizeTools(tools []Tool, names *generation.ToolNames) ([]codex.Tool, er
 	return result, nil
 }
 
-func normalizeToolChoice(choice *ToolChoice, names *generation.ToolNames) (json.RawMessage, *bool, error) {
+func normalizeToolChoice(choice *ToolChoice, names *translate.ToolNames) (json.RawMessage, *bool, error) {
 	if choice == nil {
 		return nil, nil, nil
 	}
@@ -326,13 +310,13 @@ func normalizeToolChoice(choice *ToolChoice, names *generation.ToolNames) (json.
 		encoded = json.RawMessage(`"none"`)
 	case "tool":
 		if strings.TrimSpace(choice.Name) == "" {
-			return nil, nil, invalid("tool_choice.name", "name is required for tool choice type tool")
+			return nil, nil, errors.New("name is required for tool choice type tool")
 		}
 		selection := map[string]any{"type": "function", "name": names.Shorten(choice.Name)}
 		value, _ := json.Marshal(selection)
 		encoded = value
 	default:
-		return nil, nil, invalid("tool_choice.type", fmt.Sprintf("unsupported tool choice type %q", choice.Type))
+		return nil, nil, fmt.Errorf("unsupported tool choice type %q", choice.Type)
 	}
 	var parallel *bool
 	if choice.DisableParallelToolUse != nil {
@@ -352,7 +336,7 @@ func normalizeThinking(request MessagesRequest, catalog *models.Catalog) (*codex
 		effort = strings.TrimSpace(request.OutputConfig.Effort)
 	}
 	if typeName != "" && typeName != "enabled" && typeName != "adaptive" && typeName != "disabled" {
-		return nil, nil, invalid("thinking.type", fmt.Sprintf("unsupported thinking type %q", typeName))
+		return nil, nil, fmt.Errorf("unsupported thinking type %q", typeName)
 	}
 	if typeName == "" && effort == "" {
 		return nil, nil, nil
@@ -370,7 +354,7 @@ func normalizeThinking(request MessagesRequest, catalog *models.Catalog) (*codex
 		if entry, ok := catalog.Get(strings.TrimSpace(request.Model)); ok && !slices.ContainsFunc(entry.SupportedReasoningEfforts, func(candidate models.ReasoningEffort) bool {
 			return candidate.ReasoningEffort == effort
 		}) {
-			return nil, nil, invalid("output_config.effort", fmt.Sprintf("unsupported reasoning effort %q for model %q", effort, request.Model))
+			return nil, nil, fmt.Errorf("unsupported reasoning effort %q for model %q", effort, request.Model)
 		}
 	}
 	reasoning := &codex.Reasoning{Effort: effort}
@@ -387,14 +371,14 @@ func normalizeOutputFormat(config *OutputConfig) (*codex.TextConfig, error) {
 	}
 	format := config.Format
 	if strings.TrimSpace(format.Type) != "json_schema" {
-		return nil, invalid("output_config.format.type", fmt.Sprintf("unsupported output format %q", format.Type))
+		return nil, fmt.Errorf("unsupported output format %q", format.Type)
 	}
 	if len(format.Schema) == 0 {
-		return nil, invalid("output_config.format.schema", "schema is required")
+		return nil, errors.New("schema is required")
 	}
 	return &codex.TextConfig{Format: codex.TextFormat{
 		Type:   "json_schema",
-		Name:   firstNonEmpty(strings.TrimSpace(format.Name), "anthropic_output"),
+		Name:   cmp.Or(strings.TrimSpace(format.Name), "anthropic_output"),
 		Schema: translate.NormalizeSchema(format.Schema),
 		Strict: true,
 	}}, nil
@@ -409,7 +393,7 @@ func normalizeServiceTier(raw string) (string, error) {
 	case "fast", "priority":
 		return "priority", nil
 	default:
-		return "", invalid("service_tier", fmt.Sprintf("unsupported service tier %q", raw))
+		return "", fmt.Errorf("unsupported service tier %q", raw)
 	}
 }
 
@@ -431,17 +415,4 @@ func requestToolNames(request MessagesRequest) []string {
 		}
 	}
 	return names
-}
-
-func invalid(field, message string) error {
-	return &RequestError{Field: field, Message: message}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }

@@ -11,7 +11,7 @@ func TestStreamEncoderEmitsAnthropicEventOrder(t *testing.T) {
 	t.Parallel()
 
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	encoder := NewStreamEncoder()
+	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_stream", "model": "gpt-5.4"}}},
 		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "hello"}},
@@ -24,13 +24,13 @@ func TestStreamEncoderEmitsAnthropicEventOrder(t *testing.T) {
 
 	want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
 	assertStreamTypes(t, events, want)
-	message := events[0].Data["message"].(MessageResponse)
+	message := events[0]["message"].(MessageResponse)
 	if message.ID != "msg_stream" || message.StopReason != nil {
 		t.Fatalf("message_start = %#v", message)
 	}
-	delta := events[len(events)-2].Data["delta"].(map[string]any)
+	delta := events[len(events)-2]["delta"].(map[string]any)
 	if delta["stop_reason"] != "end_turn" {
-		t.Fatalf("message_delta = %#v", events[len(events)-2].Data)
+		t.Fatalf("message_delta = %#v", events[len(events)-2])
 	}
 }
 
@@ -38,7 +38,7 @@ func TestStreamEncoderStreamsFragmentedToolJSON(t *testing.T) {
 	t.Parallel()
 
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	encoder := NewStreamEncoder()
+	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.output_item.added", Raw: map[string]any{"output_index": 0, "item": map[string]any{"type": "function_call", "id": "item_1", "call_id": "call_1", "name": "weather", "arguments": ""}}},
 		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_1", "output_index": 0, "delta": `{"city":`}},
@@ -50,14 +50,14 @@ func TestStreamEncoderStreamsFragmentedToolJSON(t *testing.T) {
 
 	want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
 	assertStreamTypes(t, events, want)
-	start := events[1].Data["content_block"].(map[string]any)
+	start := events[1]["content_block"].(map[string]any)
 	if start["type"] != "tool_use" || start["id"] != "call_1" || start["name"] != "weather" {
 		t.Fatalf("tool start = %#v", start)
 	}
-	if events[2].Data["delta"].(map[string]any)["partial_json"] != `{"city":` || events[3].Data["delta"].(map[string]any)["partial_json"] != `"Paris"}` {
+	if events[2]["delta"].(map[string]any)["partial_json"] != `{"city":` || events[3]["delta"].(map[string]any)["partial_json"] != `"Paris"}` {
 		t.Fatalf("tool deltas = %#v %#v", events[2], events[3])
 	}
-	if events[len(events)-2].Data["delta"].(map[string]any)["stop_reason"] != "tool_use" {
+	if events[len(events)-2]["delta"].(map[string]any)["stop_reason"] != "tool_use" {
 		t.Fatalf("stop = %#v", events[len(events)-2])
 	}
 }
@@ -66,7 +66,7 @@ func TestStreamEncoderEmitsThinkingSignatureBeforeBlockStop(t *testing.T) {
 	t.Parallel()
 
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}})
-	encoder := NewStreamEncoder()
+	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.reasoning_summary_text.delta", Raw: map[string]any{"delta": "considering"}},
 		&codex.StreamEvent{Type: "response.reasoning_summary_text.done", Raw: map[string]any{"text": "considering"}},
@@ -85,7 +85,7 @@ func TestStreamEncoderEmitsThinkingSignatureBeforeBlockStop(t *testing.T) {
 		"message_delta", "message_stop",
 	}
 	assertStreamTypes(t, events, want)
-	signature := events[3].Data["delta"].(map[string]any)
+	signature := events[3]["delta"].(map[string]any)
 	if signature["type"] != "signature_delta" || signature["signature"] != "signed" {
 		t.Fatalf("signature delta = %#v", signature)
 	}
@@ -95,7 +95,7 @@ func TestStreamEncoderEmitsSignatureOnlyThinkingBlockBeforeText(t *testing.T) {
 	t.Parallel()
 
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}})
-	encoder := NewStreamEncoder()
+	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
 			"type": "reasoning", "encrypted_content": "signed",
@@ -112,11 +112,11 @@ func TestStreamEncoderEmitsSignatureOnlyThinkingBlockBeforeText(t *testing.T) {
 		"message_delta", "message_stop",
 	}
 	assertStreamTypes(t, events, want)
-	firstBlock := events[1].Data["content_block"].(map[string]any)
+	firstBlock := events[1]["content_block"].(map[string]any)
 	if firstBlock["type"] != "thinking" {
 		t.Fatalf("first content block = %#v, want thinking", firstBlock)
 	}
-	if events[2].Data["delta"].(map[string]any)["type"] != "signature_delta" {
+	if events[2]["delta"].(map[string]any)["type"] != "signature_delta" {
 		t.Fatalf("thinking delta = %#v", events[2])
 	}
 }
@@ -125,7 +125,7 @@ func TestStreamEncoderBuffersInterleavedParallelToolCalls(t *testing.T) {
 	t.Parallel()
 
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	encoder := NewStreamEncoder()
+	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_a", "call_id": "call_a", "name": "first", "delta": `{"a":`}},
 		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_b", "call_id": "call_b", "name": "second", "delta": `{"b":`}},
@@ -143,13 +143,13 @@ func TestStreamEncoderBuffersInterleavedParallelToolCalls(t *testing.T) {
 		"message_delta", "message_stop",
 	}
 	assertStreamTypes(t, events, want)
-	firstStart := events[1].Data["content_block"].(map[string]any)
-	secondStart := events[5].Data["content_block"].(map[string]any)
+	firstStart := events[1]["content_block"].(map[string]any)
+	secondStart := events[5]["content_block"].(map[string]any)
 	if firstStart["id"] != "call_a" || secondStart["id"] != "call_b" {
 		t.Fatalf("tool starts = %#v %#v", firstStart, secondStart)
 	}
-	firstJSON := events[2].Data["delta"].(map[string]any)["partial_json"].(string) + events[3].Data["delta"].(map[string]any)["partial_json"].(string)
-	secondJSON := events[6].Data["delta"].(map[string]any)["partial_json"].(string) + events[7].Data["delta"].(map[string]any)["partial_json"].(string)
+	firstJSON := events[2]["delta"].(map[string]any)["partial_json"].(string) + events[3]["delta"].(map[string]any)["partial_json"].(string)
+	secondJSON := events[6]["delta"].(map[string]any)["partial_json"].(string) + events[7]["delta"].(map[string]any)["partial_json"].(string)
 	if firstJSON != `{"a":1}` || secondJSON != `{"b":2}` {
 		t.Fatalf("tool JSON = %q %q", firstJSON, secondJSON)
 	}
@@ -159,7 +159,7 @@ func TestStreamEncoderFlushesActiveToolBeforeTerminalFallbackText(t *testing.T) 
 	t.Parallel()
 
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	encoder := NewStreamEncoder()
+	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_1", "call_id": "call_1", "name": "lookup", "delta": `{"query":`}},
 		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
@@ -175,11 +175,11 @@ func TestStreamEncoderFlushesActiveToolBeforeTerminalFallbackText(t *testing.T) 
 		"message_delta", "message_stop",
 	}
 	assertStreamTypes(t, events, want)
-	firstJSON := events[2].Data["delta"].(map[string]any)["partial_json"].(string) + events[3].Data["delta"].(map[string]any)["partial_json"].(string)
+	firstJSON := events[2]["delta"].(map[string]any)["partial_json"].(string) + events[3]["delta"].(map[string]any)["partial_json"].(string)
 	if firstJSON != `{"query":"docs"}` {
 		t.Fatalf("tool JSON = %q", firstJSON)
 	}
-	if block := events[5].Data["content_block"].(map[string]any); block["type"] != "text" {
+	if block := events[5]["content_block"].(map[string]any); block["type"] != "text" {
 		t.Fatalf("terminal fallback block = %#v, want text", block)
 	}
 }
@@ -188,7 +188,7 @@ func TestStreamEncoderSuppressesIncompleteTerminalToolCall(t *testing.T) {
 	t.Parallel()
 
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	encoder := NewStreamEncoder()
+	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
 			"id": "resp_partial_tool", "status": "incomplete",
@@ -201,7 +201,7 @@ func TestStreamEncoderSuppressesIncompleteTerminalToolCall(t *testing.T) {
 
 	want := []string{"message_start", "message_delta", "message_stop"}
 	assertStreamTypes(t, events, want)
-	if stop := events[1].Data["delta"].(map[string]any)["stop_reason"]; stop != "max_tokens" {
+	if stop := events[1]["delta"].(map[string]any)["stop_reason"]; stop != "max_tokens" {
 		t.Fatalf("stop reason = %#v", stop)
 	}
 }
@@ -210,7 +210,7 @@ func TestStreamEncoderSuppressesIncompleteToolCallAfterDeltas(t *testing.T) {
 	t.Parallel()
 
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	encoder := NewStreamEncoder()
+	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{
 			"item_id": "item_1", "call_id": "call_1", "name": "lookup", "delta": `{"query":`,
@@ -234,7 +234,7 @@ func TestStreamEncoderSuppressesThinkingWhenNotEnabled(t *testing.T) {
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{
 		Model: "gpt-5.4", Reasoning: &codex.Reasoning{Effort: "low"},
 	}})
-	encoder := NewStreamEncoder()
+	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.reasoning_summary_text.delta", Raw: map[string]any{"delta": "hidden"}},
 		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
@@ -247,7 +247,7 @@ func TestStreamEncoderSuppressesThinkingWhenNotEnabled(t *testing.T) {
 
 	want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
 	assertStreamTypes(t, events, want)
-	if block := events[1].Data["content_block"].(map[string]any); block["type"] != "text" {
+	if block := events[1]["content_block"].(map[string]any); block["type"] != "text" {
 		t.Fatalf("content block = %#v, want text", block)
 	}
 }
@@ -258,7 +258,7 @@ func TestStreamEncoderSuppressesUnsignedThinking(t *testing.T) {
 	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{
 		Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"},
 	}})
-	encoder := NewStreamEncoder()
+	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
 		&codex.StreamEvent{Type: "response.reasoning_summary_text.delta", Raw: map[string]any{"delta": "unsigned"}},
 		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
@@ -271,7 +271,7 @@ func TestStreamEncoderSuppressesUnsignedThinking(t *testing.T) {
 
 	want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
 	assertStreamTypes(t, events, want)
-	if block := events[1].Data["content_block"].(map[string]any); block["type"] != "text" {
+	if block := events[1]["content_block"].(map[string]any); block["type"] != "text" {
 		t.Fatalf("content block = %#v, want text", block)
 	}
 }
@@ -291,8 +291,8 @@ func assertStreamTypes(t *testing.T, events []StreamEvent, want []string) {
 		t.Fatalf("event count = %d, want %d: %#v", len(events), len(want), events)
 	}
 	for index := range want {
-		if events[index].Type != want[index] {
-			t.Fatalf("event[%d] = %q, want %q", index, events[index].Type, want[index])
+		if events[index]["type"] != want[index] {
+			t.Fatalf("event[%d] = %q, want %q", index, events[index]["type"], want[index])
 		}
 	}
 }

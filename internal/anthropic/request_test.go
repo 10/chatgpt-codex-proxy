@@ -36,9 +36,6 @@ func TestNormalizeMessagesTextToolsAndThinking(t *testing.T) {
 	if normalized.Model != "gpt-5.4" || normalized.Instructions != "Be precise." || !normalized.Stream {
 		t.Fatalf("normalized metadata = %#v", normalized)
 	}
-	if !normalized.DisableContinuation {
-		t.Fatal("DisableContinuation = false, want true")
-	}
 	if normalized.Reasoning == nil || normalized.Reasoning.Effort != "medium" || normalized.Reasoning.Summary != "auto" {
 		t.Fatalf("reasoning = %#v", normalized.Reasoning)
 	}

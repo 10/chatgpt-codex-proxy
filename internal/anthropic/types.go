@@ -108,10 +108,3 @@ type OutputFormat struct {
 	Name   string         `json:"name,omitempty"`
 	Schema map[string]any `json:"schema,omitempty"`
 }
-
-type RequestError struct {
-	Field   string
-	Message string
-}
-
-func (e *RequestError) Error() string { return e.Message }

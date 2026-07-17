@@ -2,7 +2,9 @@ package anthropic
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"chatgpt-codex-proxy/internal/jsonutil"
@@ -43,10 +45,9 @@ func (b ResponseBlock) MarshalJSON() ([]byte, error) {
 }
 
 type Usage struct {
-	InputTokens              int64 `json:"input_tokens"`
-	OutputTokens             int64 `json:"output_tokens"`
-	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
+	InputTokens          int64 `json:"input_tokens"`
+	OutputTokens         int64 `json:"output_tokens"`
+	CacheReadInputTokens int64 `json:"cache_read_input_tokens,omitempty"`
 }
 
 func BuildMessage(accumulator *translate.Accumulator) MessageResponse {
@@ -54,7 +55,7 @@ func BuildMessage(accumulator *translate.Accumulator) MessageResponse {
 		ID:      MessageID(accumulator.ResponseID),
 		Type:    "message",
 		Role:    "assistant",
-		Model:   firstNonEmpty(accumulator.Model, accumulator.Normalized.Model),
+		Model:   cmp.Or(accumulator.Model, accumulator.Normalized.Model),
 		Content: responseBlocks(accumulator),
 		Usage:   usageFromAccumulator(accumulator),
 	}
@@ -68,22 +69,16 @@ func BuildMessage(accumulator *translate.Accumulator) MessageResponse {
 
 func MessageID(responseID string) string {
 	responseID = strings.TrimSpace(responseID)
-	if strings.HasPrefix(responseID, "resp_") {
-		return "msg_" + strings.TrimPrefix(responseID, "resp_")
-	}
 	if responseID == "" {
 		return "msg_proxy"
 	}
 	if strings.HasPrefix(responseID, "msg_") {
 		return responseID
 	}
-	return "msg_" + responseID
+	return "msg_" + strings.TrimPrefix(responseID, "resp_")
 }
 
 func responseBlocks(accumulator *translate.Accumulator) []ResponseBlock {
-	if accumulator == nil {
-		return []ResponseBlock{}
-	}
 	response := accumulator.ResponsesObject()
 	output := jsonutil.SliceOfMaps(response["output"])
 	blocks := make([]ResponseBlock, 0, len(output))
@@ -105,24 +100,24 @@ func responseBlocks(accumulator *translate.Accumulator) []ResponseBlock {
 				case "output_text", "text":
 					blocks = append(blocks, ResponseBlock{Type: "text", Text: jsonutil.StringValue(content["text"])})
 				case "refusal":
-					blocks = append(blocks, ResponseBlock{Type: "text", Text: firstNonEmpty(jsonutil.StringValue(content["refusal"]), jsonutil.StringValue(content["text"]))})
+					blocks = append(blocks, ResponseBlock{Type: "text", Text: cmp.Or(jsonutil.StringValue(content["refusal"]), jsonutil.StringValue(content["text"]))})
 				}
 			}
 		case "function_call", "custom_tool_call":
 			if !isExecutableToolCall(item, response, accumulator) {
 				continue
 			}
-			arguments := firstNonEmpty(jsonutil.StringValue(item["arguments"]), jsonutil.StringValue(item["input"]))
+			arguments := cmp.Or(jsonutil.StringValue(item["arguments"]), jsonutil.StringValue(item["input"]))
 			blocks = append(blocks, ResponseBlock{
 				Type:  "tool_use",
-				ID:    firstNonEmpty(jsonutil.StringValue(item["call_id"]), jsonutil.StringValue(item["id"])),
+				ID:    cmp.Or(jsonutil.StringValue(item["call_id"]), jsonutil.StringValue(item["id"])),
 				Name:  jsonutil.StringValue(item["name"]),
 				Input: decodeToolArguments(arguments),
 			})
 		}
 	}
 
-	if !hasBlockType(blocks, "text") {
+	if !slices.ContainsFunc(blocks, func(block ResponseBlock) bool { return block.Type == "text" }) {
 		if text := accumulator.Text(); text != "" {
 			blocks = append(blocks, ResponseBlock{Type: "text", Text: text})
 		}
@@ -131,18 +126,10 @@ func responseBlocks(accumulator *translate.Accumulator) []ResponseBlock {
 }
 
 func shouldExposeThinking(accumulator *translate.Accumulator) bool {
-	if accumulator == nil {
-		return false
-	}
 	if accumulator.Normalized.Reasoning != nil && strings.TrimSpace(accumulator.Normalized.Reasoning.Summary) != "" {
 		return true
 	}
-	for _, include := range accumulator.Normalized.Include {
-		if include == "reasoning.encrypted_content" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(accumulator.Normalized.Include, "reasoning.encrypted_content")
 }
 
 func reasoningText(item map[string]any) string {
@@ -168,16 +155,14 @@ func decodeToolArguments(arguments string) json.RawMessage {
 		return json.RawMessage(`{}`)
 	}
 	if json.Valid(raw) && raw[0] == '{' {
-		return json.RawMessage(bytes.Clone(raw))
+		return json.RawMessage(raw)
 	}
-	fallback, _ := json.Marshal(struct {
-		Input string `json:"input"`
-	}{Input: arguments})
+	fallback, _ := json.Marshal(map[string]string{"input": arguments})
 	return json.RawMessage(fallback)
 }
 
 func isExecutableToolCall(item, response map[string]any, accumulator *translate.Accumulator) bool {
-	callID := firstNonEmpty(jsonutil.StringValue(item["call_id"]), jsonutil.StringValue(item["id"]))
+	callID := cmp.Or(jsonutil.StringValue(item["call_id"]), jsonutil.StringValue(item["id"]))
 	for _, call := range accumulator.ToolCalls {
 		if call.CallID != callID && call.ItemID != callID {
 			continue
@@ -206,15 +191,6 @@ func isExecutableToolState(call *translate.ToolCallState, response map[string]an
 	return responseStatus != "incomplete" && responseStatus != "failed" && responseStatus != "cancelled"
 }
 
-func hasBlockType(blocks []ResponseBlock, blockType string) bool {
-	for _, block := range blocks {
-		if block.Type == blockType {
-			return true
-		}
-	}
-	return false
-}
-
 func usageFromAccumulator(accumulator *translate.Accumulator) Usage {
 	if accumulator == nil || accumulator.Usage == nil {
 		return Usage{}
@@ -236,22 +212,19 @@ func usageFromAccumulator(accumulator *translate.Accumulator) Usage {
 }
 
 func stopFromAccumulator(accumulator *translate.Accumulator) (string, string) {
-	if accumulator == nil {
-		return "end_turn", ""
-	}
 	response := jsonutil.MapValue(accumulator.RawFinal, "response")
 	if stopSequence := jsonutil.StringValue(response["stop_sequence"]); stopSequence != "" {
 		return "stop_sequence", stopSequence
 	}
 	incomplete := jsonutil.MapValue(response, "incomplete_details")
-	reason := firstNonEmpty(jsonutil.StringValue(incomplete["reason"]), jsonutil.StringValue(response["stop_reason"]))
+	reason := cmp.Or(jsonutil.StringValue(incomplete["reason"]), jsonutil.StringValue(response["stop_reason"]))
 	switch reason {
 	case "max_output_tokens", "max_tokens", "context_length_exceeded":
 		return "max_tokens", ""
 	case "content_filter", "refusal":
 		return "refusal", ""
 	}
-	if strings.EqualFold(firstNonEmpty(accumulator.Status, jsonutil.StringValue(response["status"])), "incomplete") {
+	if strings.EqualFold(cmp.Or(accumulator.Status, jsonutil.StringValue(response["status"])), "incomplete") {
 		return "max_tokens", ""
 	}
 	if responseContainsRefusal(response) {

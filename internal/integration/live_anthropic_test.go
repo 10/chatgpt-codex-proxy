@@ -3,13 +3,9 @@
 package integration_test
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
-	"net/http"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestLiveAnthropicMessagesAndTokenCount(t *testing.T) {
@@ -77,32 +73,7 @@ func TestLiveAnthropicStreamingEventOrder(t *testing.T) {
 }
 
 func postAnthropicJSON(t *testing.T, cfg liveConfig, path string, payload any) []byte {
-	t.Helper()
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal request: %v", err)
-	}
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(cfg.BaseURL, "/")+path, bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("build request: %v", err)
-	}
-	req.Header.Set("X-API-Key", cfg.APIKey)
-	req.Header.Set("Anthropic-Version", "2023-06-01")
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 90 * time.Second}
-	response, err := client.Do(req)
-	if err != nil {
-		t.Fatalf("request %s failed: %v", path, err)
-	}
-	defer response.Body.Close()
-	responseBody, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatalf("read response body: %v", err)
-	}
-	if response.StatusCode >= http.StatusBadRequest {
-		t.Fatalf("request %s returned %d: %s", path, response.StatusCode, string(responseBody))
-	}
-	return responseBody
+	return postJSON(t, cfg, path, payload, map[string]string{
+		"X-API-Key": cfg.APIKey, "Anthropic-Version": "2023-06-01",
+	})
 }

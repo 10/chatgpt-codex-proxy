@@ -122,7 +122,7 @@ func (a *App) routes() {
 
 	protected := a.engine.Group("/")
 	protected.Use(middleware.APIKeyWithUnauthorized(a.cfg.ProxyAPIKey, func(c *gin.Context) {
-		if strings.TrimSpace(c.GetHeader("anthropic-version")) != "" {
+		if strings.TrimSpace(c.GetHeader("anthropic-version")) != "" || strings.HasPrefix(c.Request.URL.Path, "/v1/messages") {
 			a.prepareAnthropicHeaders(c)
 			c.AbortWithStatusJSON(http.StatusUnauthorized, anthropic.ErrorPayload("authentication_error", "invalid x-api-key", middleware.GetRequestID(c)))
 			return
@@ -139,14 +139,8 @@ func (a *App) routes() {
 	protected.POST("/v1/responses/compact", a.handleResponsesCompact)
 	protected.POST("/v1/images/generations", a.handleImageGenerations)
 	protected.POST("/v1/images/edits", a.handleImageEdits)
-
-	anthropicProtected := a.engine.Group("/")
-	anthropicProtected.Use(middleware.APIKeyWithUnauthorized(a.cfg.ProxyAPIKey, func(c *gin.Context) {
-		a.prepareAnthropicHeaders(c)
-		c.AbortWithStatusJSON(http.StatusUnauthorized, anthropic.ErrorPayload("authentication_error", "invalid x-api-key", middleware.GetRequestID(c)))
-	}))
-	anthropicProtected.POST("/v1/messages", a.handleAnthropicMessages)
-	anthropicProtected.POST("/v1/messages/count_tokens", a.handleAnthropicCountTokens)
+	protected.POST("/v1/messages", a.handleAnthropicMessages)
+	protected.POST("/v1/messages/count_tokens", a.handleAnthropicCountTokens)
 
 	adminGroup := protected.Group("/admin")
 	adminGroup.GET("/accounts", a.handleAdminAccounts)

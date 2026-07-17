@@ -19,33 +19,15 @@ import (
 const anthropicMessagesBodyLimit = 32 << 20
 
 func (a *App) handleAnthropicCountTokens(c *gin.Context) {
-	a.prepareAnthropicHeaders(c)
-	if !a.validateAnthropicVersion(c) {
+	request, ok := a.decodeAnthropicRequest(c, "anthropic_count_tokens")
+	if !ok {
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, anthropicMessagesBodyLimit)
-	body, err := readRequestBody(c.Request)
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			a.writeAnthropicError(c, http.StatusRequestEntityTooLarge, "request body exceeds 32 MB")
-			return
-		}
-		a.writeAnthropicError(c, http.StatusBadRequest, err.Error())
-		return
+	if request.MaxTokens == nil {
+		zero := 0
+		request.MaxTokens = &zero
 	}
-	if len(body) > anthropicMessagesBodyLimit {
-		a.writeAnthropicError(c, http.StatusRequestEntityTooLarge, "request body exceeds 32 MB")
-		return
-	}
-	a.logIncomingPayload(c, "anthropic_count_tokens", body)
-
-	request, err := anthropic.DecodeMessages(body)
-	if err != nil {
-		a.writeAnthropicError(c, http.StatusBadRequest, err.Error())
-		return
-	}
-	normalized, err := anthropic.NormalizeTokenCount(request, a.modelCatalog())
+	normalized, err := anthropic.Normalize(request, a.modelCatalog())
 	if err != nil {
 		a.respondAnthropicNormalizeError(c, err)
 		return
@@ -59,30 +41,8 @@ func (a *App) handleAnthropicCountTokens(c *gin.Context) {
 }
 
 func (a *App) handleAnthropicMessages(c *gin.Context) {
-	a.prepareAnthropicHeaders(c)
-	if !a.validateAnthropicVersion(c) {
-		return
-	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, anthropicMessagesBodyLimit)
-	body, err := readRequestBody(c.Request)
-	if err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			a.writeAnthropicError(c, http.StatusRequestEntityTooLarge, "request body exceeds 32 MB")
-			return
-		}
-		a.writeAnthropicError(c, http.StatusBadRequest, err.Error())
-		return
-	}
-	if len(body) > anthropicMessagesBodyLimit {
-		a.writeAnthropicError(c, http.StatusRequestEntityTooLarge, "request body exceeds 32 MB")
-		return
-	}
-	a.logIncomingPayload(c, "anthropic_messages", body)
-
-	request, err := anthropic.DecodeMessages(body)
-	if err != nil {
-		a.writeAnthropicError(c, http.StatusBadRequest, err.Error())
+	request, ok := a.decodeAnthropicRequest(c, "anthropic_messages")
+	if !ok {
 		return
 	}
 	normalized, err := anthropic.Normalize(request, a.modelCatalog())
@@ -91,11 +51,7 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 		return
 	}
 
-	resolution, err := a.resolveSession(normalized)
-	if err != nil {
-		a.writeAnthropicError(c, http.StatusBadRequest, err.Error())
-		return
-	}
+	resolution := sessionResolution{Request: normalized, Original: normalized}
 	account, stream, quota, err := a.openStream(c, c.Request.Context(), "anthropic_messages", &resolution)
 	if err != nil {
 		a.setRequestAccount(c, account)
@@ -118,6 +74,36 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, anthropic.BuildMessage(accumulator))
 }
 
+func (a *App) decodeAnthropicRequest(c *gin.Context, logLabel string) (anthropic.MessagesRequest, bool) {
+	a.prepareAnthropicHeaders(c)
+	if !a.validateAnthropicVersion(c) {
+		return anthropic.MessagesRequest{}, false
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, anthropicMessagesBodyLimit)
+	body, err := readRequestBody(c.Request)
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			a.writeAnthropicError(c, http.StatusRequestEntityTooLarge, "request body exceeds 32 MB")
+			return anthropic.MessagesRequest{}, false
+		}
+		a.writeAnthropicError(c, http.StatusBadRequest, err.Error())
+		return anthropic.MessagesRequest{}, false
+	}
+	if len(body) > anthropicMessagesBodyLimit {
+		a.writeAnthropicError(c, http.StatusRequestEntityTooLarge, "request body exceeds 32 MB")
+		return anthropic.MessagesRequest{}, false
+	}
+	a.logIncomingPayload(c, logLabel, body)
+
+	request, err := anthropic.DecodeMessages(body)
+	if err != nil {
+		a.writeAnthropicError(c, http.StatusBadRequest, err.Error())
+		return anthropic.MessagesRequest{}, false
+	}
+	return request, true
+}
+
 func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, normalized translate.NormalizedRequest, stream eventStream) {
 	prepareStreamResponse(c)
 	accumulator := translate.NewAccumulator(normalized)
@@ -135,12 +121,12 @@ func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, no
 			return
 		}
 		for _, outgoing := range encoder.Events(event, accumulator) {
-			payload, marshalErr := json.Marshal(outgoing.Data)
+			payload, marshalErr := json.Marshal(outgoing)
 			if marshalErr != nil {
 				a.writeAnthropicStreamError(c, account.ID, accumulator.ResponseID, marshalErr, false)
 				return
 			}
-			writeSSE(c.Writer, outgoing.Type, payload)
+			writeSSE(c.Writer, jsonutil.StringValue(outgoing["type"]), payload)
 		}
 		c.Writer.Flush()
 		if event.Type == "response.completed" {
