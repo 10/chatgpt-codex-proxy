@@ -25,8 +25,12 @@ func (a *App) handleAnthropicCountTokens(c *gin.Context) {
 	if !ok {
 		return
 	}
-	sessionID := anthropic.SessionID(c.GetHeader("X-Claude-Code-Session-Id"), request.Metadata)
-	request, _ = a.claudeReplays.Apply(sessionID, request)
+	replayScope := anthropic.ExecutionScope(
+		c.GetHeader("X-Claude-Code-Session-Id"),
+		c.GetHeader("X-Claude-Code-Agent-Id"),
+		request.Metadata,
+	)
+	request, _ = a.claudeReplays.Apply(replayScope, request)
 	if request.MaxTokens == nil {
 		zero := 0
 		request.MaxTokens = &zero
@@ -49,8 +53,12 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 	if !ok {
 		return
 	}
-	sessionID := anthropic.SessionID(c.GetHeader("X-Claude-Code-Session-Id"), request.Metadata)
-	request, replay := a.claudeReplays.Apply(sessionID, request)
+	replayScope := anthropic.ExecutionScope(
+		c.GetHeader("X-Claude-Code-Session-Id"),
+		c.GetHeader("X-Claude-Code-Agent-Id"),
+		request.Metadata,
+	)
+	request, replay := a.claudeReplays.Apply(replayScope, request)
 	normalized, err := anthropic.Normalize(request, a.modelCatalog())
 	if err != nil {
 		a.respondAnthropicNormalizeError(c, err)
@@ -66,7 +74,7 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 	if err != nil && isInvalidAnthropicReasoningSignatureError(err) {
 		sanitized, changed := anthropic.WithoutThinking(request)
 		if changed {
-			a.claudeReplays.Delete(sessionID, request.Model)
+			a.claudeReplays.Delete(replayScope, request.Model)
 			normalized, normalizeErr := anthropic.Normalize(sanitized, a.modelCatalog())
 			if normalizeErr != nil {
 				a.respondAnthropicNormalizeError(c, normalizeErr)
@@ -90,7 +98,7 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 	defer stream.Close()
 
 	if resolution.Request.Stream {
-		a.streamAnthropicMessage(c, account, resolution.Request, stream, sessionID, request.Model)
+		a.streamAnthropicMessage(c, account, resolution.Request, stream, replayScope, request.Model)
 		return
 	}
 	accumulator, err := a.collectEvents(c.Request.Context(), account, resolution.Request, stream)
@@ -98,7 +106,7 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 		a.respondAnthropicStreamFailure(c, account.ID, "", err)
 		return
 	}
-	a.claudeReplays.Remember(sessionID, request.Model, account.ID, accumulator)
+	a.claudeReplays.Remember(replayScope, request.Model, account.ID, accumulator)
 	c.JSON(http.StatusOK, anthropic.BuildMessage(accumulator))
 }
 
@@ -132,7 +140,7 @@ func (a *App) decodeAnthropicRequest(c *gin.Context, logLabel string) (anthropic
 	return request, true
 }
 
-func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, normalized turn.NormalizedRequest, stream eventStream, sessionID, replayModel string) {
+func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, normalized turn.NormalizedRequest, stream eventStream, replayScope, replayModel string) {
 	prepareStreamResponse(c)
 	accumulator := turn.NewAccumulator(normalized)
 	inputTokens, _ := anthropic.CountInputTokens(normalized)
@@ -163,7 +171,7 @@ func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, no
 	}
 	// Every error path returns from the loop; reaching here requires a completed
 	// or incomplete terminal response whose executable tool calls are finalized.
-	a.claudeReplays.Remember(sessionID, replayModel, account.ID, accumulator)
+	a.claudeReplays.Remember(replayScope, replayModel, account.ID, accumulator)
 	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
 	c.Writer.Flush()
 }

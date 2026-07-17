@@ -204,6 +204,71 @@ func TestAnthropicMessagesReplaysMissingClaudeToolState(t *testing.T) {
 	}
 }
 
+func TestAnthropicMessagesDoesNotReplayToolStateAcrossClaudeCodeAgents(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.claudeReplays = anthropic.NewReplayManager(time.Minute)
+	requestNumber := 0
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		requestNumber++
+		if requestNumber == 1 {
+			return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+				"response": map[string]any{
+					"id": "resp_agent_a", "model": "gpt-5.4", "status": "completed",
+					"output": []any{
+						map[string]any{
+							"type": "function_call", "id": "fc_1", "call_id": "call_1",
+							"name": "lookup", "arguments": `{}`, "status": "completed",
+						},
+					},
+				},
+			}}}}, nil
+		}
+		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+			"response": map[string]any{
+				"id": "resp_agent_b", "model": "gpt-5.4", "status": "completed", "output_text": "unexpected replay",
+			},
+		}}}}, nil
+	}
+
+	first := httptest.NewRecorder()
+	firstContext, _ := gin.CreateTestContext(first)
+	firstContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4","max_tokens":256,
+		"messages":[{"role":"user","content":"call lookup"}],
+		"tools":[{"name":"lookup","input_schema":{"type":"object"}}]
+	}`))
+	firstContext.Request.Header.Set("anthropic-version", "2023-06-01")
+	firstContext.Request.Header.Set("X-Claude-Code-Session-Id", "shared-session")
+	firstContext.Request.Header.Set("X-Claude-Code-Agent-Id", "agent-a")
+	app.handleAnthropicMessages(firstContext)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status = %d, body = %s", first.Code, first.Body.String())
+	}
+
+	second := httptest.NewRecorder()
+	secondContext, _ := gin.CreateTestContext(second)
+	secondContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4","max_tokens":256,
+		"messages":[{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"call_1","content":"result"}
+		]}],
+		"tools":[{"name":"lookup","input_schema":{"type":"object"}}]
+	}`))
+	secondContext.Request.Header.Set("anthropic-version", "2023-06-01")
+	secondContext.Request.Header.Set("X-Claude-Code-Session-Id", "shared-session")
+	secondContext.Request.Header.Set("X-Claude-Code-Agent-Id", "agent-b")
+	app.handleAnthropicMessages(secondContext)
+
+	if second.Code != http.StatusBadRequest {
+		t.Fatalf("second status = %d, want %d; body = %s", second.Code, http.StatusBadRequest, second.Body.String())
+	}
+	if requestNumber != 1 {
+		t.Fatalf("upstream requests = %d, want 1", requestNumber)
+	}
+}
+
 func TestAnthropicMessagesRetriesOnceWithoutInvalidReasoningState(t *testing.T) {
 	t.Parallel()
 

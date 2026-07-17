@@ -54,6 +54,76 @@ func TestSessionIDUsesHeaderThenClaudeCodeMetadata(t *testing.T) {
 	}
 }
 
+func TestExecutionScopeSeparatesClaudeCodeAgents(t *testing.T) {
+	t.Parallel()
+
+	mainScope := ExecutionScope("shared-session", "", nil)
+	if mainScope == "" {
+		t.Fatal("root agent scope is empty")
+	}
+	if explicitMain := ExecutionScope("shared-session", " main ", nil); explicitMain != mainScope {
+		t.Fatalf("explicit main scope = %q, want %q", explicitMain, mainScope)
+	}
+
+	agentScope := ExecutionScope("shared-session", " agent-a ", nil)
+	if agentScope == "" || agentScope == mainScope {
+		t.Fatalf("agent scope = %q, main scope = %q", agentScope, mainScope)
+	}
+	metadataScope := ExecutionScope("", "agent-a", json.RawMessage(`{"session_id":"shared-session"}`))
+	if metadataScope != agentScope {
+		t.Fatalf("metadata scope = %q, want %q", metadataScope, agentScope)
+	}
+	if withoutSession := ExecutionScope("", "agent-a", nil); withoutSession != "" {
+		t.Fatalf("scope without session = %q, want empty", withoutSession)
+	}
+}
+
+func TestReplayManagerKeepsClaudeCodeAgentAffinityAndDeletionIsolated(t *testing.T) {
+	t.Parallel()
+
+	manager := NewReplayManager(time.Minute)
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+		"response": map[string]any{
+			"id": "resp_tool", "model": "gpt-5.4", "status": "completed",
+			"output": []any{map[string]any{
+				"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": `{}`,
+			}},
+		},
+	}})
+	agentA := ExecutionScope("shared-session", "agent-a", nil)
+	agentB := ExecutionScope("shared-session", "agent-b", nil)
+	if !manager.Remember(agentA, "gpt-5.4", "acct-a", accumulator) {
+		t.Fatal("Remember(agent-a) = false")
+	}
+	if !manager.Remember(agentB, "gpt-5.4", "acct-b", accumulator) {
+		t.Fatal("Remember(agent-b) = false")
+	}
+
+	maxTokens := 10
+	request := MessagesRequest{
+		Model:     "gpt-5.4",
+		MaxTokens: &maxTokens,
+		Messages: []Message{{Role: "user", Content: Content{{
+			Type: "tool_result", ToolUseID: "call_1", Content: Content{{Type: "text", Text: "result"}},
+		}}}},
+	}
+	if _, match := manager.Apply(agentA, request); !match.Applied || match.AccountID != "acct-a" {
+		t.Fatalf("agent A match = %#v", match)
+	}
+	if _, match := manager.Apply(agentB, request); !match.Applied || match.AccountID != "acct-b" {
+		t.Fatalf("agent B match = %#v", match)
+	}
+
+	manager.Delete(agentA, "gpt-5.4")
+	if _, match := manager.Apply(agentA, request); match.Applied || match.AccountID != "" {
+		t.Fatalf("deleted agent A match = %#v", match)
+	}
+	if _, match := manager.Apply(agentB, request); !match.Applied || match.AccountID != "acct-b" {
+		t.Fatalf("agent B match after deleting agent A = %#v", match)
+	}
+}
+
 func TestReplayManagerInjectsOnlyMatchingMissingToolState(t *testing.T) {
 	t.Parallel()
 

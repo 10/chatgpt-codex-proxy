@@ -16,6 +16,7 @@ const (
 	defaultReplayMaxEntries = 10240
 	defaultReplayMaxBytes   = 64 << 20
 	replayEvictBatchSize    = 128
+	claudeCodeMainAgentID   = "main"
 )
 
 var claudeCodeSessionSuffix = regexp.MustCompile(`_session_([A-Za-z0-9-]+)$`)
@@ -86,18 +87,30 @@ func SessionID(headerValue string, metadata json.RawMessage) string {
 	return ""
 }
 
-func (m *ReplayManager) Remember(sessionID, model, accountID string, accumulator *turn.Accumulator) bool {
+func ExecutionScope(sessionHeader, agentHeader string, metadata json.RawMessage) string {
+	sessionID := SessionID(sessionHeader, metadata)
+	if sessionID == "" {
+		return ""
+	}
+	agentID := strings.TrimSpace(agentHeader)
+	if agentID == "" {
+		agentID = claudeCodeMainAgentID
+	}
+	return strings.Join([]string{"claude", sessionID, "agent", agentID}, "\x00")
+}
+
+func (m *ReplayManager) Remember(scope, model, accountID string, accumulator *turn.Accumulator) bool {
 	if m == nil || accumulator == nil {
 		return false
 	}
-	sessionID = strings.TrimSpace(sessionID)
+	scope = strings.TrimSpace(scope)
 	model = strings.TrimSpace(model)
-	if sessionID == "" || model == "" {
+	if scope == "" || model == "" {
 		return false
 	}
 
 	blocks := replayBlocks(accumulator)
-	key := replayKey(sessionID, model)
+	key := replayKey(scope, model)
 	if !hasToolUseBlock(blocks) {
 		m.mu.Lock()
 		m.deleteLocked(key)
@@ -126,11 +139,11 @@ func (m *ReplayManager) Remember(sessionID, model, accountID string, accumulator
 	return retained
 }
 
-func (m *ReplayManager) Apply(sessionID string, request MessagesRequest) (MessagesRequest, ReplayMatch) {
+func (m *ReplayManager) Apply(scope string, request MessagesRequest) (MessagesRequest, ReplayMatch) {
 	if m == nil {
 		return request, ReplayMatch{}
 	}
-	record, ok := m.get(sessionID, request.Model)
+	record, ok := m.get(scope, request.Model)
 	if !ok {
 		return request, ReplayMatch{}
 	}
@@ -216,12 +229,12 @@ func (m *ReplayManager) Apply(sessionID string, request MessagesRequest) (Messag
 	return request, ReplayMatch{Applied: true, AccountID: record.AccountID}
 }
 
-func (m *ReplayManager) Delete(sessionID, model string) {
+func (m *ReplayManager) Delete(scope, model string) {
 	if m == nil {
 		return
 	}
 	m.mu.Lock()
-	m.deleteLocked(replayKey(sessionID, model))
+	m.deleteLocked(replayKey(scope, model))
 	m.mu.Unlock()
 }
 
@@ -257,8 +270,8 @@ func WithoutThinking(request MessagesRequest) (MessagesRequest, bool) {
 	return request, changed
 }
 
-func (m *ReplayManager) get(sessionID, model string) (replayRecord, bool) {
-	key := replayKey(sessionID, model)
+func (m *ReplayManager) get(scope, model string) (replayRecord, bool) {
+	key := replayKey(scope, model)
 	if key == "" {
 		return replayRecord{}, false
 	}
@@ -287,15 +300,15 @@ func (m *ReplayManager) currentTime() time.Time {
 	return time.Now()
 }
 
-func replayKey(sessionID, model string) string {
-	sessionID = strings.TrimSpace(sessionID)
+func replayKey(scope, model string) string {
+	scope = strings.TrimSpace(scope)
 	model = strings.TrimSpace(model)
-	if sessionID == "" || model == "" {
+	if scope == "" || model == "" {
 		return ""
 	}
 	// Protected routes share one configured proxy principal. The Claude session
-	// ID is the continuity boundary within that principal.
-	return sessionID + "\x00" + model
+	// and agent scope is the continuity boundary within that principal.
+	return scope + "\x00" + model
 }
 
 func (m *ReplayManager) deleteLocked(key string) {
