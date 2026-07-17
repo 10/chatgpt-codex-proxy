@@ -7,7 +7,7 @@ import (
 
 type Request struct {
 	Model              string           `json:"model"`
-	Instructions       string           `json:"instructions,omitempty"`
+	Instructions       string           `json:"instructions"`
 	Input              []InputItem      `json:"input"`
 	Stream             bool             `json:"stream"`
 	Store              bool             `json:"store"`
@@ -24,7 +24,7 @@ type Request struct {
 
 type CompactRequest struct {
 	Model        string      `json:"model"`
-	Instructions string      `json:"instructions,omitempty"`
+	Instructions string      `json:"instructions"`
 	Input        []InputItem `json:"input"`
 	Text         *TextConfig `json:"text,omitempty"`
 	Reasoning    *Reasoning  `json:"reasoning,omitempty"`

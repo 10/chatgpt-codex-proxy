@@ -171,7 +171,7 @@ The proxy collapses instruction-like content into one Codex `instructions` strin
 - Chat Completions `system` and `developer` messages are flattened as text and joined with `\n\n`.
 - Responses `instructions` is included first if present.
 - Responses input items with `role = system` or `role = developer` and no explicit `type` are also lifted into `instructions`.
-- If no instruction text is present, the proxy sends `You are a helpful assistant.`
+- If no instruction text is present, the proxy sends an explicit empty `instructions` string.
 
 Only text-like content is allowed in lifted instruction roles. Image content is rejected with `400`.
 

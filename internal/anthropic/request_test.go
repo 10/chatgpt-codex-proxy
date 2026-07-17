@@ -79,6 +79,26 @@ func TestNormalizeMessagesTextToolsAndThinking(t *testing.T) {
 	}
 }
 
+func TestNormalizeMessagesWithoutSystemStaysInstructionFree(t *testing.T) {
+	t.Parallel()
+
+	maxTokens := 10
+	normalized, err := Normalize(MessagesRequest{
+		Model:     "gpt-5.4",
+		MaxTokens: &maxTokens,
+		Messages: []Message{{
+			Role:    "user",
+			Content: Content{{Type: "text", Text: "Hello"}},
+		}},
+	}, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if normalized.Instructions != "" {
+		t.Fatalf("instructions = %q, want empty", normalized.Instructions)
+	}
+}
+
 func TestNormalizeMessagesMapsImagesAndLongToolNames(t *testing.T) {
 	t.Parallel()
 

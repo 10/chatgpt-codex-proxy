@@ -36,6 +36,9 @@ func TestCompactRequestMarshalOmitsStreamingOnlyFields(t *testing.T) {
 	if _, ok := body["previous_response_id"]; ok {
 		t.Fatalf("previous_response_id = %#v, want omitted", body["previous_response_id"])
 	}
+	if instructions, ok := body["instructions"]; !ok || instructions != "" {
+		t.Fatalf("instructions = %#v, present = %v; want explicit empty string", instructions, ok)
+	}
 
 	input, _ := body["input"].([]any)
 	if len(input) != 1 {
@@ -44,6 +47,29 @@ func TestCompactRequestMarshalOmitsStreamingOnlyFields(t *testing.T) {
 	item, _ := input[0].(map[string]any)
 	if got := item["phase"]; got != "output" {
 		t.Fatalf("phase = %#v, want output", got)
+	}
+}
+
+func TestRequestMarshalIncludesEmptyInstructions(t *testing.T) {
+	t.Parallel()
+
+	payload, err := json.Marshal(Request{
+		Model: "gpt-5.4",
+		Input: []InputItem{{
+			Role:    "user",
+			Content: []ContentPart{{Type: "input_text", Text: "hello"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if instructions, ok := body["instructions"]; !ok || instructions != "" {
+		t.Fatalf("instructions = %#v, present = %v; want explicit empty string", instructions, ok)
 	}
 }
 

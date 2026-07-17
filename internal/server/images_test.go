@@ -260,6 +260,9 @@ func TestImagesGenerationsReturnsOpenAIImageResponse(t *testing.T) {
 	if message["content"] != "A blue circle" {
 		t.Fatalf("upstream input = %#v", upstreamBody["input"])
 	}
+	if instructions, ok := upstreamBody["instructions"]; !ok || instructions != "" {
+		t.Fatalf("upstream instructions = %#v, present = %v; want explicit empty string", instructions, ok)
+	}
 }
 
 func TestImagesGenerationsDefaultsImageModel(t *testing.T) {

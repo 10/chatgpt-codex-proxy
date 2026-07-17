@@ -127,7 +127,7 @@ This is the canonical request shape the proxy sends to the HTTP Codex responses 
 ```json
 {
   "model": "gpt-5.6-sol",
-  "instructions": "You are a helpful assistant.",
+  "instructions": "",
   "input": [],
   "stream": true,
   "store": false,

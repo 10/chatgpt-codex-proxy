@@ -107,6 +107,52 @@ func TestChatCompletionsTranslation(t *testing.T) {
 	}
 }
 
+func TestInstructionFreeOpenAIRequestsStayInstructionFree(t *testing.T) {
+	t.Parallel()
+
+	chat, err := ChatCompletions(ChatCompletionsRequest{
+		Model: "gpt-5.4",
+		Messages: []ChatMessage{{
+			Role:    "user",
+			Content: MessageContent{{Type: "text", Text: "Hello"}},
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	if chat.Instructions != "" {
+		t.Fatalf("ChatCompletions() instructions = %q, want empty", chat.Instructions)
+	}
+
+	responses, err := Responses(ResponsesRequest{
+		Model: "gpt-5.4",
+		Input: ResponsesInput{Items: []ResponsesInputItem{{
+			Role:    "user",
+			Content: MessageContent{{Type: "text", Text: "Hello"}},
+		}}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
+	if responses.Instructions != "" {
+		t.Fatalf("Responses() instructions = %q, want empty", responses.Instructions)
+	}
+
+	compact, err := Compact(ResponsesCompactRequest{
+		Model: "gpt-5.4",
+		Input: ResponsesInput{Items: []ResponsesInputItem{{
+			Role:    "user",
+			Content: MessageContent{{Type: "text", Text: "Hello"}},
+		}}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if compact.Instructions != "" {
+		t.Fatalf("Compact() instructions = %q, want empty", compact.Instructions)
+	}
+}
+
 func TestResponsesTranslation(t *testing.T) {
 	t.Parallel()
 

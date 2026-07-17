@@ -305,8 +305,7 @@ func normalizedImageToolRequest(prompt string, images []codex.ContentPart, tool 
 	content = append(content, codex.ContentPart{Type: "input_text", Text: strings.TrimSpace(prompt)})
 	content = append(content, images...)
 	return turn.NormalizedRequest{Request: codex.Request{
-		Instructions: "You are a helpful assistant.",
-		Stream:       stream,
+		Stream: stream,
 		Input: []codex.InputItem{{
 			Role:    "user",
 			Content: content,

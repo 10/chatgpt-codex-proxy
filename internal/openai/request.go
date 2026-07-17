@@ -11,8 +11,6 @@ import (
 	"chatgpt-codex-proxy/internal/turn"
 )
 
-const defaultInstructions = "You are a helpful assistant."
-
 type ModelNotFoundError struct {
 	Model string
 }
@@ -84,7 +82,7 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 			}},
 		})
 	}
-	out.Instructions = jsonutil.FirstNonEmpty(strings.TrimSpace(strings.Join(instructions, "\n\n")), defaultInstructions)
+	out.Instructions = strings.TrimSpace(strings.Join(instructions, "\n\n"))
 	return out, nil
 }
 
@@ -223,7 +221,7 @@ func normalizeResponsesPayload(instructionsText string, textConfig *ResponsesTex
 		}
 	}
 
-	out.Instructions = jsonutil.FirstNonEmpty(strings.TrimSpace(strings.Join(instructions, "\n\n")), defaultInstructions)
+	out.Instructions = strings.TrimSpace(strings.Join(instructions, "\n\n"))
 	return out, nil
 }
 

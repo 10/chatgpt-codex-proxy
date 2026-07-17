@@ -20,7 +20,6 @@ import (
 	"chatgpt-codex-proxy/internal/turn"
 )
 
-const defaultInstructions = "You are a helpful assistant."
 const claudeCodeAttributionSystemPrefix = "x-anthropic-billing-header:"
 
 func Normalize(request MessagesRequest, catalog *models.Catalog) (turn.NormalizedRequest, error) {
@@ -77,7 +76,7 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (turn.Normalize
 		ToolNameAliases: toolNames.Aliases(),
 		Request: codex.Request{
 			Model:             model,
-			Instructions:      cmp.Or(strings.TrimSpace(instructions), defaultInstructions),
+			Instructions:      strings.TrimSpace(instructions),
 			Input:             input,
 			Stream:            request.Stream,
 			Tools:             tools,
