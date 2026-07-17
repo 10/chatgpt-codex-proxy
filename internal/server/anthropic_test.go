@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,13 +12,24 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"chatgpt-codex-proxy/internal/accounts"
+	"chatgpt-codex-proxy/internal/anthropic"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/middleware"
 )
+
+func serverTestCodexReasoningSignature() string {
+	payload := make([]byte, 1+8+16+16+32)
+	payload[0] = 0x80
+	for index := 9; index < len(payload); index++ {
+		payload[index] = byte(index)
+	}
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
 
 func TestAnthropicMessagesNonStreaming(t *testing.T) {
 	t.Parallel()
@@ -112,6 +124,161 @@ func TestAnthropicMessagesAcceptsCurrentClaudeCodeRequestShape(t *testing.T) {
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestAnthropicMessagesReplaysMissingClaudeToolState(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.claudeReplays = anthropic.NewReplayManager(time.Minute)
+	requestNumber := 0
+	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
+		requestNumber++
+		if requestNumber == 1 {
+			return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+				"response": map[string]any{
+					"id": "resp_tool", "model": "gpt-5.4", "status": "completed",
+					"output": []any{
+						map[string]any{
+							"type":              "reasoning",
+							"summary":           []any{map[string]any{"type": "summary_text", "text": "use lookup"}},
+							"encrypted_content": serverTestCodexReasoningSignature(),
+						},
+						map[string]any{
+							"type": "function_call", "id": "fc_1", "call_id": "call_1",
+							"name": "lookup", "arguments": `{}`, "status": "completed",
+						},
+					},
+				},
+			}}}}, nil
+		}
+		if len(request.Input) != 3 ||
+			request.Input[0].Type != "reasoning" ||
+			request.Input[1].Type != "function_call" ||
+			request.Input[2].Type != "function_call_output" {
+			t.Fatalf("replayed upstream input = %#v", request.Input)
+		}
+		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+			"response": map[string]any{
+				"id": "resp_done", "model": "gpt-5.4", "status": "completed", "output_text": "done",
+				"usage": map[string]any{"input_tokens": 8, "output_tokens": 1},
+			},
+		}}}}, nil
+	}
+
+	first := httptest.NewRecorder()
+	firstContext, _ := gin.CreateTestContext(first)
+	firstContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4","max_tokens":256,
+		"messages":[{"role":"user","content":"call lookup"}],
+		"tools":[{"name":"lookup","input_schema":{"type":"object"}}],
+		"thinking":{"type":"enabled","budget_tokens":1024}
+	}`))
+	firstContext.Request.Header.Set("anthropic-version", "2023-06-01")
+	firstContext.Request.Header.Set("X-Claude-Code-Session-Id", "session-replay")
+	app.handleAnthropicMessages(firstContext)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status = %d, body = %s", first.Code, first.Body.String())
+	}
+
+	second := httptest.NewRecorder()
+	secondContext, _ := gin.CreateTestContext(second)
+	secondContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4","max_tokens":256,
+		"messages":[{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"call_1","content":"result"}
+		]}],
+		"tools":[{"name":"lookup","input_schema":{"type":"object"}}],
+		"thinking":{"type":"enabled","budget_tokens":1024}
+	}`))
+	secondContext.Request.Header.Set("anthropic-version", "2023-06-01")
+	secondContext.Request.Header.Set("X-Claude-Code-Session-Id", "session-replay")
+	app.handleAnthropicMessages(secondContext)
+
+	if second.Code != http.StatusOK {
+		t.Fatalf("second status = %d, body = %s", second.Code, second.Body.String())
+	}
+	if requestNumber != 2 {
+		t.Fatalf("upstream requests = %d, want 2", requestNumber)
+	}
+}
+
+func TestAnthropicMessagesRetriesOnceWithoutInvalidReasoningState(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.claudeReplays = anthropic.NewReplayManager(time.Minute)
+	requestNumber := 0
+	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
+		requestNumber++
+		switch requestNumber {
+		case 1:
+			return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+				"response": map[string]any{
+					"id": "resp_tool", "model": "gpt-5.4", "status": "completed",
+					"output": []any{
+						map[string]any{"type": "reasoning", "encrypted_content": serverTestCodexReasoningSignature()},
+						map[string]any{"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": `{}`},
+					},
+				},
+			}}}}, nil
+		case 2:
+			if len(request.Input) == 0 || request.Input[0].Type != "reasoning" {
+				t.Fatalf("first continuation attempt lacks replayed reasoning: %#v", request.Input)
+			}
+			return nil, &codex.UpstreamError{
+				Op: "codex response", StatusCode: http.StatusBadRequest,
+				Code: "invalid_request_error", Body: `{"error":{"message":"Invalid signature in thinking block","code":"invalid_request_error"}}`,
+			}
+		case 3:
+			for _, item := range request.Input {
+				if item.Type == "reasoning" {
+					t.Fatalf("sanitized retry retained reasoning: %#v", request.Input)
+				}
+			}
+			return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+				"response": map[string]any{
+					"id": "resp_retried", "model": "gpt-5.4", "status": "completed", "output_text": "recovered",
+				},
+			}}}}, nil
+		default:
+			t.Fatalf("unexpected upstream request %d", requestNumber)
+			return nil, errors.New("unexpected request")
+		}
+	}
+
+	first := httptest.NewRecorder()
+	firstContext, _ := gin.CreateTestContext(first)
+	firstContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4","max_tokens":256,
+		"messages":[{"role":"user","content":"call lookup"}],
+		"tools":[{"name":"lookup","input_schema":{"type":"object"}}],
+		"thinking":{"type":"enabled","budget_tokens":1024}
+	}`))
+	firstContext.Request.Header.Set("anthropic-version", "2023-06-01")
+	firstContext.Request.Header.Set("X-Claude-Code-Session-Id", "session-retry")
+	app.handleAnthropicMessages(firstContext)
+
+	second := httptest.NewRecorder()
+	secondContext, _ := gin.CreateTestContext(second)
+	secondContext.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4","max_tokens":256,
+		"messages":[{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"call_1","content":"result"}
+		]}],
+		"tools":[{"name":"lookup","input_schema":{"type":"object"}}],
+		"thinking":{"type":"enabled","budget_tokens":1024}
+	}`))
+	secondContext.Request.Header.Set("anthropic-version", "2023-06-01")
+	secondContext.Request.Header.Set("X-Claude-Code-Session-Id", "session-retry")
+	app.handleAnthropicMessages(secondContext)
+
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), "recovered") {
+		t.Fatalf("status = %d, body = %s", second.Code, second.Body.String())
+	}
+	if requestNumber != 3 {
+		t.Fatalf("upstream requests = %d, want 3", requestNumber)
 	}
 }
 

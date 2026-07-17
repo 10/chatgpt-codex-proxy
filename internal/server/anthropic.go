@@ -11,6 +11,7 @@ import (
 
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/anthropic"
+	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/openai"
@@ -24,6 +25,8 @@ func (a *App) handleAnthropicCountTokens(c *gin.Context) {
 	if !ok {
 		return
 	}
+	sessionID := anthropic.SessionID(c.GetHeader("X-Claude-Code-Session-Id"), request.Metadata)
+	request, _ = a.claudeReplays.Apply(sessionID, request)
 	if request.MaxTokens == nil {
 		zero := 0
 		request.MaxTokens = &zero
@@ -46,14 +49,37 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 	if !ok {
 		return
 	}
+	sessionID := anthropic.SessionID(c.GetHeader("X-Claude-Code-Session-Id"), request.Metadata)
+	request, replay := a.claudeReplays.Apply(sessionID, request)
 	normalized, err := anthropic.Normalize(request, a.modelCatalog())
 	if err != nil {
 		a.respondAnthropicNormalizeError(c, err)
 		return
 	}
 
-	resolution := sessionResolution{Request: normalized, Original: normalized}
+	resolution := sessionResolution{
+		Request:            normalized,
+		Original:           normalized,
+		PreferredAccountID: replay.AccountID,
+	}
 	account, stream, quota, err := a.openStream(c, c.Request.Context(), "anthropic_messages", &resolution)
+	if err != nil && isInvalidAnthropicReasoningSignatureError(err) {
+		sanitized, changed := anthropic.WithoutThinking(request)
+		if changed {
+			a.claudeReplays.Delete(sessionID, request.Model)
+			normalized, normalizeErr := anthropic.Normalize(sanitized, a.modelCatalog())
+			if normalizeErr != nil {
+				a.respondAnthropicNormalizeError(c, normalizeErr)
+				return
+			}
+			resolution = sessionResolution{
+				Request:            normalized,
+				Original:           normalized,
+				PreferredAccountID: account.ID,
+			}
+			account, stream, quota, err = a.openStream(c, c.Request.Context(), "anthropic_messages", &resolution)
+		}
+	}
 	if err != nil {
 		a.setRequestAccount(c, account)
 		a.respondAnthropicOpenError(c, account.ID, resolution.PreferredAccountID, err)
@@ -63,15 +89,16 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 	a.observeQuotaSnapshot(account.ID, quota)
 	defer stream.Close()
 
-	if normalized.Stream {
-		a.streamAnthropicMessage(c, account, normalized, stream)
+	if resolution.Request.Stream {
+		a.streamAnthropicMessage(c, account, resolution.Request, stream, sessionID, request.Model)
 		return
 	}
-	accumulator, err := a.collectEvents(c.Request.Context(), account, normalized, stream)
+	accumulator, err := a.collectEvents(c.Request.Context(), account, resolution.Request, stream)
 	if err != nil {
 		a.respondAnthropicStreamFailure(c, account.ID, "", err)
 		return
 	}
+	a.claudeReplays.Remember(sessionID, request.Model, account.ID, accumulator)
 	c.JSON(http.StatusOK, anthropic.BuildMessage(accumulator))
 }
 
@@ -105,7 +132,7 @@ func (a *App) decodeAnthropicRequest(c *gin.Context, logLabel string) (anthropic
 	return request, true
 }
 
-func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, normalized turn.NormalizedRequest, stream eventStream) {
+func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, normalized turn.NormalizedRequest, stream eventStream, sessionID, replayModel string) {
 	prepareStreamResponse(c)
 	accumulator := turn.NewAccumulator(normalized)
 	inputTokens, _ := anthropic.CountInputTokens(normalized)
@@ -134,8 +161,25 @@ func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, no
 			break
 		}
 	}
+	// Every error path returns from the loop; reaching here requires a completed
+	// or incomplete terminal response whose executable tool calls are finalized.
+	a.claudeReplays.Remember(sessionID, replayModel, account.ID, accumulator)
 	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
 	c.Writer.Flush()
+}
+
+func isInvalidAnthropicReasoningSignatureError(err error) bool {
+	var upstreamErr *codex.UpstreamError
+	if !errors.As(err, &upstreamErr) {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(upstreamErr.Code))
+	message := strings.ToLower(strings.TrimSpace(upstreamErr.Message()))
+	return code == "thinking_signature_invalid" ||
+		strings.Contains(code, "invalid_encrypted_content") ||
+		strings.Contains(message, "invalid signature in thinking block") ||
+		strings.Contains(message, "thinking_signature_invalid") ||
+		strings.Contains(message, "invalid_encrypted_content")
 }
 
 func (a *App) validateAnthropicVersion(c *gin.Context) bool {

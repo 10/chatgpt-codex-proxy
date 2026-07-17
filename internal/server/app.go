@@ -13,6 +13,7 @@ import (
 	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/accounts/jsonstore"
+	"chatgpt-codex-proxy/internal/anthropic"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/codexauth"
 	"chatgpt-codex-proxy/internal/config"
@@ -37,6 +38,7 @@ type App struct {
 	directImageOpen func(context.Context, accounts.Record, string, []byte, bool) (*http.Response, error)
 	wsConnector     responsesWebSocketConnector
 	continuations   *conversation.ContinuationManager
+	claudeReplays   *anthropic.ReplayManager
 	models          *models.Catalog
 	cancel          context.CancelFunc
 }
@@ -76,6 +78,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		accountMgr:    accountMgr,
 		httpClient:    httpClient,
 		continuations: conversation.NewContinuationManager(cfg.ContinuationTTL),
+		claudeReplays: anthropic.NewReplayManager(cfg.ContinuationTTL),
 		models:        modelCatalog,
 	}
 	app.routes()
@@ -113,6 +116,7 @@ func (a *App) housekeeping(ctx context.Context) {
 			return
 		case <-sweeps:
 			a.continuations.Sweep()
+			a.claudeReplays.Sweep()
 			a.deviceLogins.DeleteExpired(time.Now().UTC())
 		}
 	}

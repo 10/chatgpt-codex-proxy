@@ -16,6 +16,7 @@ import (
 
 	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
+	"chatgpt-codex-proxy/internal/anthropic"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
 	"chatgpt-codex-proxy/internal/conversation"
@@ -39,6 +40,7 @@ func newFailoverTestApp(t *testing.T) *App {
 		accounts:      accountsSvc,
 		accountMgr:    accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil, catalog),
 		continuations: conversation.NewContinuationManager(time.Minute),
+		claudeReplays: anthropic.NewReplayManager(time.Minute),
 		models:        catalog,
 	}
 }

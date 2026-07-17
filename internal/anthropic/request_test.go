@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -8,6 +9,20 @@ import (
 
 	"chatgpt-codex-proxy/internal/models"
 )
+
+func testCodexReasoningSignature() string {
+	return testCodexReasoningSignatureWithMarker(0)
+}
+
+func testCodexReasoningSignatureWithMarker(marker byte) string {
+	payload := make([]byte, 1+8+16+16+32)
+	payload[0] = 0x80
+	for index := 9; index < len(payload); index++ {
+		payload[index] = byte(index)
+	}
+	payload[9] = marker
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
 
 func TestNormalizeMessagesTextToolsAndThinking(t *testing.T) {
 	t.Parallel()
@@ -122,6 +137,38 @@ func TestNormalizeMessagesShortensLongToolUseIDs(t *testing.T) {
 	}
 	if normalized.Input[1].CallID != callID {
 		t.Fatalf("tool result call ID = %q, want %q", normalized.Input[1].CallID, callID)
+	}
+}
+
+func TestNormalizeMessagesKeepsOnlyValidCodexThinkingSignatures(t *testing.T) {
+	t.Parallel()
+
+	maxTokens := 10
+	normalized, err := Normalize(MessagesRequest{
+		Model:     "gpt-5.4",
+		MaxTokens: &maxTokens,
+		Messages: []Message{
+			{Role: "assistant", Content: Content{
+				{Type: "thinking", Thinking: "discard me", Signature: "Eo8Canthropic-state"},
+				{Type: "thinking", Thinking: "keep me", Signature: testCodexReasoningSignature()},
+				{Type: "text", Text: "answer"},
+			}},
+			{Role: "user", Content: Content{{Type: "text", Text: "continue"}}},
+		},
+	}, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if len(normalized.Input) != 3 {
+		t.Fatalf("input len = %d, want 3: %#v", len(normalized.Input), normalized.Input)
+	}
+	if normalized.Input[0].Type != "reasoning" || normalized.Input[0].EncryptedContent != testCodexReasoningSignature() {
+		t.Fatalf("reasoning input = %#v", normalized.Input[0])
+	}
+	for _, item := range normalized.Input {
+		if item.EncryptedContent == "Eo8Canthropic-state" {
+			t.Fatalf("foreign thinking signature was forwarded: %#v", normalized.Input)
+		}
 	}
 }
 

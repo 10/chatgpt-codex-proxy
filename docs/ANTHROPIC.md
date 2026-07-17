@@ -46,6 +46,8 @@ Tool names and tool-call IDs longer than the backend limit are shortened determi
 
 Anthropic requests contain their full transcript. They deliberately bypass the proxy's implicit OpenAI continuation mechanism so transcript history is never combined with hidden server-side history.
 
+Claude Code may omit the preceding thinking and `tool_use` blocks when it sends a matching `tool_result`. The proxy keeps the latest valid Codex reasoning/tool state per Claude Code session and model for the configured continuation TTL, then restores only the blocks required by that result. `X-Claude-Code-Session-Id` is preferred, with Claude Code metadata used as a fallback. Foreign or malformed thinking signatures are discarded, and an upstream invalid-signature response before stream commitment clears the cached state and is retried once without historical thinking.
+
 ## Streaming
 
 Streaming responses use named Anthropic SSE events:
@@ -76,3 +78,4 @@ The result is a Codex-oriented estimate. It is not an Anthropic billing-token gu
 - `thinking.budget_tokens` enables thinking but does not map to an exact Codex token budget. The model catalog's default reasoning effort is used unless `output_config.effort` selects a supported effort.
 - Prompt caching controls are accepted as content metadata. Reported cache-read usage comes from Codex cached-token counters when available.
 - Anthropic client-side tools and hosted web search are supported. Other Anthropic server-tool families are rejected until their state can be round-tripped faithfully through Codex.
+- Claude Code replay sessions share the proxy's single configured API-key trust boundary. Do not share one proxy key between mutually untrusted users.

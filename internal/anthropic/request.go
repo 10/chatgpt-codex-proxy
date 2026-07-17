@@ -225,8 +225,11 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.I
 				if role != "assistant" {
 					return nil, errors.New(block.Type + " blocks require the assistant role")
 				}
-				flushContent()
 				encrypted := strings.TrimSpace(cmp.Or(block.Signature, block.Data))
+				if !IsValidCodexReasoningSignature(encrypted) {
+					continue
+				}
+				flushContent()
 				item := codex.InputItem{Type: "reasoning", EncryptedContent: encrypted}
 				if text := strings.TrimSpace(block.Thinking); text != "" {
 					item.Summary = []conversation.ReasoningPart{{Type: "summary_text", Text: text}}
