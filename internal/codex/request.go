@@ -160,3 +160,7 @@ type StreamEvent struct {
 	Type string
 	Raw  map[string]any
 }
+
+func (e *StreamEvent) IsTerminalResponse() bool {
+	return e != nil && (e.Type == "response.completed" || e.Type == "response.incomplete")
+}

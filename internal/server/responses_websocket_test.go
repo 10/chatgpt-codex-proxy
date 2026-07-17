@@ -150,6 +150,82 @@ func TestResponsesWebSocketReusesUpstreamConnectionForContinuation(t *testing.T)
 	}
 }
 
+func TestResponsesWebSocketContinuesAfterIncompleteResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const model = "gpt-5.4"
+	fakeStream := &fakeResponsesWebSocketStream{
+		turns: [][]*codex.StreamEvent{
+			{
+				{
+					Type: "response.created",
+					Raw:  map[string]any{"response": map[string]any{"id": "resp_ws_incomplete", "model": model, "status": "in_progress"}},
+				},
+				{
+					Type: "response.output_text.delta",
+					Raw:  map[string]any{"response_id": "resp_ws_incomplete", "delta": "partial"},
+				},
+				{
+					Type: "response.incomplete",
+					Raw: map[string]any{"response": map[string]any{
+						"id":                 "resp_ws_incomplete",
+						"model":              model,
+						"status":             "incomplete",
+						"incomplete_details": map[string]any{"reason": "max_output_tokens"},
+						"output_text":        "partial",
+					}},
+				},
+			},
+			responsesWebSocketTextEvents("resp_ws_after_incomplete", model, "continued"),
+		},
+	}
+	app := newResponsesWebSocketTestApp(t, fakeStream)
+	server := httptest.NewServer(app.Handler())
+	defer server.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(websocketTestURL(server.URL)+"/v1/responses", http.Header{
+		"Authorization": []string{"Bearer test-key"},
+	})
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{
+		"type":  "response.create",
+		"model": model,
+		"input": "first prompt",
+	}); err != nil {
+		t.Fatalf("first WriteJSON() error = %v", err)
+	}
+	first := readResponsesWebSocketTurn(t, conn)
+	assertResponsesWebSocketEventTypes(t, first, "response.created", "response.output_text.delta", "response.incomplete")
+	incompleteResponse := nestedMapFromAny(first[len(first)-1]["response"])
+	if incompleteResponse["status"] != "incomplete" || nestedMapFromAny(incompleteResponse["incomplete_details"])["reason"] != "max_output_tokens" {
+		t.Fatalf("incomplete response = %#v", incompleteResponse)
+	}
+
+	if err := conn.WriteJSON(map[string]any{
+		"type": "response.append",
+		"input": []map[string]any{{
+			"type":    "message",
+			"role":    "user",
+			"content": []map[string]any{{"type": "input_text", "text": "continue"}},
+		}},
+	}); err != nil {
+		t.Fatalf("second WriteJSON() error = %v", err)
+	}
+	second := readResponsesWebSocketTurn(t, conn)
+	assertResponsesWebSocketEventTypes(t, second, "response.created", "response.output_text.delta", "response.completed")
+
+	fakeStream.mu.Lock()
+	requests := append([]map[string]any(nil), fakeStream.requests...)
+	fakeStream.mu.Unlock()
+	if len(requests) != 2 || requests[1]["previous_response_id"] != "resp_ws_incomplete" {
+		t.Fatalf("requests = %#v", requests)
+	}
+}
+
 func TestResponsesWebSocketReturnsProtocolErrorsWithoutClosing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -352,7 +428,7 @@ func readResponsesWebSocketTurn(t *testing.T, conn *websocket.Conn) []map[string
 			t.Fatalf("ReadJSON() error = %v", err)
 		}
 		events = append(events, event)
-		if event["type"] == "response.completed" || event["type"] == "error" {
+		if event["type"] == "response.completed" || event["type"] == "response.incomplete" || event["type"] == "error" {
 			return events
 		}
 	}

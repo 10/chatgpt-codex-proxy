@@ -137,6 +137,91 @@ func TestResponsesFailsOverWhenNonStreamingResponseFailsAfterFirstEvent(t *testi
 	}
 }
 
+func TestChatCompletionsNonStreamingAcceptsIncompleteResponse(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*codex.StreamEvent{{
+			Type: "response.incomplete",
+			Raw: map[string]any{"response": map[string]any{
+				"id":                 "resp_chat_incomplete",
+				"model":              "gpt-5.4",
+				"status":             "incomplete",
+				"incomplete_details": map[string]any{"reason": "max_output_tokens"},
+				"output_text":        "partial answer",
+				"usage":              map[string]any{"input_tokens": 4, "output_tokens": 2},
+			}},
+		}}}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{
+		"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}]
+	}`))
+	app.handleChatCompletions(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	choice := sliceOfMapsFromAny(response["choices"])[0]
+	if choice["finish_reason"] != "length" || choice["native_finish_reason"] != "max_output_tokens" {
+		t.Fatalf("choice = %#v", choice)
+	}
+	message := nestedMapFromAny(choice["message"])
+	if message["content"] != "partial answer" {
+		t.Fatalf("message = %#v", message)
+	}
+	if _, ok := app.continuations.Get("resp_chat_incomplete"); !ok {
+		t.Fatal("incomplete response continuation was not saved")
+	}
+}
+
+func TestResponsesNonStreamingPreservesIncompleteResponse(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*codex.StreamEvent{{
+			Type: "response.incomplete",
+			Raw: map[string]any{"response": map[string]any{
+				"id":                 "resp_responses_incomplete",
+				"model":              "gpt-5.4",
+				"status":             "incomplete",
+				"incomplete_details": map[string]any{"reason": "content_filter"},
+				"output_text":        "safe partial",
+			}},
+		}}}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{
+		"model":"gpt-5.4","input":"hello"
+	}`))
+	app.handleResponses(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if response["status"] != "incomplete" || response["output_text"] != "safe partial" {
+		t.Fatalf("response = %#v", response)
+	}
+	incompleteDetails := nestedMapFromAny(response["incomplete_details"])
+	if incompleteDetails["reason"] != "content_filter" {
+		t.Fatalf("incomplete_details = %#v", incompleteDetails)
+	}
+}
+
 func TestOpenStreamAttemptsEachAccountOnlyOnce(t *testing.T) {
 	t.Parallel()
 

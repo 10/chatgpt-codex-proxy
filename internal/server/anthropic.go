@@ -129,7 +129,7 @@ func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, no
 			writeSSE(c.Writer, jsonutil.StringValue(outgoing["type"]), payload)
 		}
 		c.Writer.Flush()
-		if event.Type == "response.completed" {
+		if event.IsTerminalResponse() {
 			break
 		}
 	}

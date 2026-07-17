@@ -147,6 +147,84 @@ func TestAnthropicMessagesStreamingUsesNamedEventsWithoutDoneSentinel(t *testing
 	}
 }
 
+func TestAnthropicMessagesNonStreamingAcceptsIncompleteResponse(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*codex.StreamEvent{{
+			Type: "response.incomplete",
+			Raw: map[string]any{"response": map[string]any{
+				"id":                 "resp_anthropic_limit",
+				"model":              "gpt-5.4",
+				"status":             "incomplete",
+				"incomplete_details": map[string]any{"reason": "max_output_tokens"},
+				"output_text":        "partial",
+				"usage":              map[string]any{"input_tokens": 4, "output_tokens": 2},
+			}},
+		}}}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4","max_tokens":256,"messages":[{"role":"user","content":"Hi"}]
+	}`))
+	ctx.Request.Header.Set("anthropic-version", "2023-06-01")
+	app.handleAnthropicMessages(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if response["stop_reason"] != "max_tokens" {
+		t.Fatalf("stop_reason = %#v", response["stop_reason"])
+	}
+	content := sliceOfMapsFromAny(response["content"])
+	if len(content) != 1 || content[0]["text"] != "partial" {
+		t.Fatalf("content = %#v", content)
+	}
+}
+
+func TestAnthropicMessagesStreamingEndsNormallyOnIncompleteResponse(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*codex.StreamEvent{
+			{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_anthropic_filter", "model": "gpt-5.4"}}},
+			{Type: "response.output_text.delta", Raw: map[string]any{"delta": "partial"}},
+			{Type: "response.output_text.done", Raw: map[string]any{"text": "partial"}},
+			{Type: "response.incomplete", Raw: map[string]any{"response": map[string]any{
+				"id":                 "resp_anthropic_filter",
+				"model":              "gpt-5.4",
+				"status":             "incomplete",
+				"incomplete_details": map[string]any{"reason": "content_filter"},
+				"output_text":        "partial",
+				"usage":              map[string]any{"input_tokens": 4, "output_tokens": 2},
+			}}},
+		}}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4","max_tokens":256,"stream":true,"messages":[{"role":"user","content":"Hi"}]
+	}`))
+	ctx.Request.Header.Set("anthropic-version", "2023-06-01")
+	app.handleAnthropicMessages(ctx)
+
+	events := parseSSEEvents(t, recorder.Body.String())
+	assertEventTypes(t, events, "message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop")
+	delta := nestedMapFromAny(events[len(events)-2].Data["delta"])
+	if delta["stop_reason"] != "refusal" {
+		t.Fatalf("message_delta = %#v", events[len(events)-2].Data)
+	}
+}
+
 func TestAnthropicMessagesWritesMidstreamErrorEvent(t *testing.T) {
 	t.Parallel()
 

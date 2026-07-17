@@ -41,7 +41,7 @@ type sessionResolution struct {
 	ReplayAvailable    bool
 }
 
-var errIncompleteResponse = errors.New("upstream stream ended before response.completed")
+var errIncompleteResponse = errors.New("upstream stream ended before a terminal response event")
 var errEmptyChatCompletionsBody = errors.New("request body must include chat messages or responses input")
 
 type openedRequest struct {
@@ -252,7 +252,7 @@ func (a *App) prepareStreamForDelivery(ctx context.Context, account accounts.Rec
 			return nil, err
 		}
 		events = append(events, event)
-		if streaming || event.Type == "response.completed" {
+		if streaming || event.IsTerminalResponse() {
 			return &bufferedEventStream{events: events, stream: stream}, nil
 		}
 	}
@@ -339,12 +339,12 @@ func (a *App) collectEvents(ctx context.Context, account accounts.Record, normal
 			}
 			return nil, err
 		}
-		if event.Type == "response.completed" {
+		if event.IsTerminalResponse() {
 			break
 		}
 	}
 
-	if accumulator.ResponseID == "" || !accumulator.IsCompleted() {
+	if accumulator.ResponseID == "" || !accumulator.IsTerminal() {
 		return nil, errIncompleteResponse
 	}
 
@@ -372,7 +372,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), account, accumulator, stream)
 		if err != nil {
 			if err == io.EOF {
-				if !accumulator.IsCompleted() {
+				if !accumulator.IsTerminal() {
 					a.respondStreamError(c, "chat_completions", account.ID, accumulator.ResponseID, "", errIncompleteResponse, false)
 					return
 				}
@@ -428,7 +428,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 					tupleTextBuffer.WriteString(text)
 				}
 			}
-		case "response.completed":
+		case "response.completed", "response.incomplete":
 			if normalized.TupleSchema != nil && strings.TrimSpace(tupleTextBuffer.String()) != "" {
 				reconverted := tupleTextBuffer.String()
 				if patched, err := translate.ReconvertJSONText(reconverted, normalized.TupleSchema); err != nil {
@@ -440,19 +440,19 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 				c.Writer.Flush()
 			}
 		}
-		if event.Type == "response.completed" {
+		if event.IsTerminalResponse() {
 			break
 		}
 	}
 
 	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
 
-	finishReason := "stop"
-	if len(accumulator.ToolCalls) > 0 {
-		finishReason = "tool_calls"
-	}
 	finalUsage := accumulator.ChatUsageObject()
-	finalChunk := translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{}, finishReason, createdAt)
+	finalChunk := translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{}, accumulator.ChatFinishReason(), createdAt)
+	if nativeFinishReason := accumulator.NativeFinishReason(); nativeFinishReason != "" {
+		choices := finalChunk["choices"].([]map[string]any)
+		choices[0]["native_finish_reason"] = nativeFinishReason
+	}
 	if finalUsage != nil {
 		finalChunk["usage"] = finalUsage
 	}
@@ -543,7 +543,7 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), account, accumulator, stream)
 		if err != nil {
 			if err == io.EOF {
-				if !accumulator.IsCompleted() {
+				if !accumulator.IsTerminal() {
 					a.respondStreamError(c, "responses", account.ID, accumulator.ResponseID, "error", errIncompleteResponse, false)
 					return
 				}
@@ -556,7 +556,7 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 			writeSSE(c.Writer, outgoing.Type, translate.ResponseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload))
 		}
 		c.Writer.Flush()
-		if event.Type == "response.completed" {
+		if event.IsTerminalResponse() {
 			break
 		}
 	}
@@ -662,7 +662,7 @@ func responseStreamPayload(event *codex.StreamEvent, accumulator *translate.Accu
 	if event == nil || event.Raw == nil {
 		return nil
 	}
-	if event.Type != "response.completed" {
+	if !event.IsTerminalResponse() {
 		return event.Raw
 	}
 
@@ -678,7 +678,7 @@ func responseStreamPayload(event *codex.StreamEvent, accumulator *translate.Accu
 		response["output_text"] = text
 	}
 	if strings.TrimSpace(jsonutil.StringValue(response["status"])) == "" {
-		response["status"] = "completed"
+		response["status"] = strings.TrimPrefix(event.Type, "response.")
 	}
 	if accumulator.ResponseID != "" && strings.TrimSpace(jsonutil.StringValue(response["id"])) == "" {
 		response["id"] = accumulator.ResponseID

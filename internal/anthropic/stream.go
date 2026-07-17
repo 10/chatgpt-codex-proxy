@@ -110,7 +110,7 @@ func (e *StreamEncoder) Events(event *codex.StreamEvent, accumulator *translate.
 		if state := accumulator.ToolCallStateForEvent(event); state != nil {
 			result = append(result, e.completeTool(state)...)
 		}
-	case "response.completed":
+	case "response.completed", "response.incomplete":
 		result = append(result, e.hydrateTerminal(accumulator)...)
 		result = append(result, e.closeBlock()...)
 		stopReason, stopSequence := stopFromAccumulator(accumulator)

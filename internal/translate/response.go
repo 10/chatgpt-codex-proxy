@@ -49,6 +49,7 @@ type Accumulator struct {
 	OutputItems             []*outputItemState
 	outputItemByKey         map[string]*outputItemState
 	Status                  string
+	terminalEventType       string
 	RawFinal                map[string]any
 	nextOutputIndex         int
 }
@@ -77,7 +78,7 @@ func (a *Accumulator) Apply(event *codex.StreamEvent) {
 	if usage := usageFromRaw(event.Raw["usage"]); usage != nil {
 		a.Usage = usage
 	}
-	a.applyCompletedEvent(event, response)
+	a.applyTerminalEvent(event, response)
 }
 
 func (a *Accumulator) applyResponseMetadata(response map[string]any) {
@@ -134,7 +135,7 @@ func (a *Accumulator) applyTextEvent(event *codex.StreamEvent, response map[stri
 				a.TextBuilder.WriteString(text)
 			}
 		}
-	case "response.completed":
+	case "response.completed", "response.incomplete":
 		if a.TextBuilder.Len() == 0 && response != nil {
 			if text := jsonutil.StringValue(response["output_text"]); text != "" {
 				a.TextBuilder.WriteString(text)
@@ -164,10 +165,11 @@ func (a *Accumulator) applyOutputEvent(event *codex.StreamEvent) {
 	}
 }
 
-func (a *Accumulator) applyCompletedEvent(event *codex.StreamEvent, response map[string]any) {
-	if event.Type != "response.completed" {
+func (a *Accumulator) applyTerminalEvent(event *codex.StreamEvent, response map[string]any) {
+	if !event.IsTerminalResponse() {
 		return
 	}
+	a.terminalEventType = event.Type
 	a.RawFinal = event.Raw
 	if response == nil {
 		return
@@ -197,7 +199,28 @@ func (a *Accumulator) Text() string {
 }
 
 func (a *Accumulator) IsCompleted() bool {
-	return a != nil && a.RawFinal != nil
+	return a != nil && a.terminalEventType == "response.completed"
+}
+
+func (a *Accumulator) IsTerminal() bool {
+	return a != nil && a.terminalEventType != ""
+}
+
+func (a *Accumulator) IsIncomplete() bool {
+	return a != nil && (a.terminalEventType == "response.incomplete" || strings.EqualFold(strings.TrimSpace(a.Status), "incomplete"))
+}
+
+func (a *Accumulator) NativeFinishReason() string {
+	if !a.IsIncomplete() {
+		return ""
+	}
+	response := jsonutil.MapValue(a.RawFinal, "response")
+	incomplete := jsonutil.MapValue(response, "incomplete_details")
+	return jsonutil.FirstNonEmpty(jsonutil.StringValue(incomplete["reason"]), jsonutil.StringValue(response["stop_reason"]))
+}
+
+func (a *Accumulator) ChatFinishReason() string {
+	return finishReason(a)
 }
 
 func (a *Accumulator) ReasoningSummary() string {
@@ -252,6 +275,9 @@ func (a *Accumulator) PendingResponseToolCallCompletionEvents() []ResponseStream
 	events := make([]ResponseStreamEvent, 0)
 	for _, state := range a.ToolCalls {
 		if state.DoneEmitted {
+			continue
+		}
+		if a.IsIncomplete() && !strings.EqualFold(strings.TrimSpace(state.Status), "completed") {
 			continue
 		}
 		events = append(events, a.ensureResponseToolCallCompleted(state)...)
@@ -336,23 +362,31 @@ func (a *Accumulator) ChatCompletionObject() map[string]any {
 	if images := a.ChatImages(); len(images) > 0 {
 		message["images"] = images
 	}
+	choice := map[string]any{"index": 0, "message": message, "finish_reason": finishReason(a)}
+	if nativeFinishReason := a.NativeFinishReason(); nativeFinishReason != "" {
+		choice["native_finish_reason"] = nativeFinishReason
+	}
 	return map[string]any{
 		"id":      jsonutil.FirstNonEmpty(a.ResponseID, "chatcmpl_proxy"),
 		"object":  "chat.completion",
 		"created": a.createdAt(),
 		"model":   jsonutil.FirstNonEmpty(a.Model, a.Normalized.Model),
-		"choices": []map[string]any{{"index": 0, "message": message, "finish_reason": finishReason(a)}},
+		"choices": []map[string]any{choice},
 		"usage":   a.ChatUsageObject(),
 	}
 }
 
 func (a *Accumulator) CompletionObject() map[string]any {
+	choice := map[string]any{"index": 0, "text": a.Text(), "finish_reason": finishReason(a)}
+	if nativeFinishReason := a.NativeFinishReason(); nativeFinishReason != "" {
+		choice["native_finish_reason"] = nativeFinishReason
+	}
 	return map[string]any{
 		"id":      jsonutil.FirstNonEmpty(a.ResponseID, "cmpl_proxy"),
 		"object":  "text_completion",
 		"created": a.createdAt(),
 		"model":   jsonutil.FirstNonEmpty(a.Model, a.Normalized.Model),
-		"choices": []map[string]any{{"index": 0, "text": a.Text(), "finish_reason": finishReason(a)}},
+		"choices": []map[string]any{choice},
 		"usage":   a.ChatUsageObject(),
 	}
 }
@@ -444,14 +478,25 @@ func (a *Accumulator) responsesOutput(text string) []map[string]any {
 
 	entries := make([]outputEntry, 0, len(a.ToolCalls)+len(a.OutputItems))
 	for order, state := range a.ToolCalls {
+		status := "completed"
+		if a.IsIncomplete() {
+			status = state.Status
+			if strings.TrimSpace(status) == "" {
+				status = "incomplete"
+			}
+		}
 		entries = append(entries, outputEntry{
 			OutputIndex: state.OutputIndex,
 			Order:       order,
-			Item:        state.responseOutputItem("completed"),
+			Item:        state.responseOutputItem(status),
 		})
 	}
 
 	baseOrder := len(entries)
+	terminalItemStatus := "completed"
+	if a.IsIncomplete() {
+		terminalItemStatus = "incomplete"
+	}
 	for order, state := range a.OutputItems {
 		cloned := jsonutil.CloneMap(state.Item)
 		if jsonutil.StringValue(cloned["type"]) == "message" {
@@ -460,7 +505,7 @@ func (a *Accumulator) responsesOutput(text string) []map[string]any {
 				cloned["content"] = responseTextContent(text)
 			}
 			if jsonutil.StringValue(cloned["status"]) == "" {
-				cloned["status"] = "completed"
+				cloned["status"] = terminalItemStatus
 			}
 		}
 		entries = append(entries, outputEntry{
@@ -480,10 +525,13 @@ func (a *Accumulator) responsesOutput(text string) []map[string]any {
 	}
 
 	if len(output) == 0 {
+		if a.IsIncomplete() && strings.TrimSpace(text) == "" {
+			return output
+		}
 		output = append(output, map[string]any{
 			"type":    "message",
 			"role":    "assistant",
-			"status":  "completed",
+			"status":  terminalItemStatus,
 			"content": responseTextContent(text),
 		})
 	}
@@ -543,6 +591,16 @@ func ResponseEventJSON(eventType string, responseID string, payload map[string]a
 }
 
 func finishReason(a *Accumulator) string {
+	if a.IsIncomplete() {
+		switch a.NativeFinishReason() {
+		case "max_tokens", "max_output_tokens", "context_length_exceeded":
+			return "length"
+		case "content_filter", "refusal":
+			return "content_filter"
+		default:
+			return "stop"
+		}
+	}
 	if len(a.ToolCalls) > 0 {
 		return "tool_calls"
 	}

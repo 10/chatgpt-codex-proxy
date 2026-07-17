@@ -148,6 +148,86 @@ func TestResponsesStreamErrorUsesTopLevelResponsesShape(t *testing.T) {
 	}
 }
 
+func TestStreamChatCompletionEndsNormallyOnIncompleteResponse(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
+
+	app := newFailoverTestApp(t)
+	record := mustGetAccount(t, app.accounts, "acct-a")
+	stream := &fakeEventStream{events: []*codex.StreamEvent{
+		{
+			Type: "response.output_text.delta",
+			Raw:  map[string]any{"response_id": "resp_chat_filter", "delta": "partial"},
+		},
+		{
+			Type: "response.incomplete",
+			Raw: map[string]any{"response": map[string]any{
+				"id":                 "resp_chat_filter",
+				"model":              "gpt-5.4",
+				"status":             "incomplete",
+				"incomplete_details": map[string]any{"reason": "content_filter"},
+				"output_text":        "partial",
+			}},
+		},
+	}}
+
+	app.streamChatCompletion(ctx, record, translate.NormalizedRequest{
+		Request: codex.Request{Model: "gpt-5.4", Stream: true},
+	}, stream)
+
+	events := parseSSEEvents(t, recorder.Body.String())
+	if len(events) != 4 || events[len(events)-1].Raw != "[DONE]" {
+		t.Fatalf("events = %#v", events)
+	}
+	finalChoice := sliceOfMapsFromAny(events[len(events)-2].Data["choices"])[0]
+	if finalChoice["finish_reason"] != "content_filter" || finalChoice["native_finish_reason"] != "content_filter" {
+		t.Fatalf("final choice = %#v", finalChoice)
+	}
+}
+
+func TestStreamResponsesPassesThroughIncompleteTerminalEvent(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+
+	app := newFailoverTestApp(t)
+	record := mustGetAccount(t, app.accounts, "acct-a")
+	stream := &fakeEventStream{events: []*codex.StreamEvent{
+		{
+			Type: "response.output_text.delta",
+			Raw:  map[string]any{"response_id": "resp_responses_limit", "delta": "partial"},
+		},
+		{
+			Type: "response.incomplete",
+			Raw: map[string]any{"response": map[string]any{
+				"id":                 "resp_responses_limit",
+				"model":              "gpt-5.4",
+				"status":             "incomplete",
+				"incomplete_details": map[string]any{"reason": "max_output_tokens"},
+				"output_text":        "partial",
+			}},
+		},
+	}}
+
+	app.streamResponses(ctx, record, translate.NormalizedRequest{
+		Request: codex.Request{Model: "gpt-5.4", Stream: true},
+	}, stream)
+
+	events := parseSSEEvents(t, recorder.Body.String())
+	assertEventTypes(t, events, "response.output_text.delta", "response.incomplete")
+	response := nestedMapFromAny(events[1].Data["response"])
+	if response["status"] != "incomplete" || nestedMapFromAny(response["incomplete_details"])["reason"] != "max_output_tokens" {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
 func TestStreamChatCompletionEmitsReasoningContentAndStrictUsage(t *testing.T) {
 	t.Parallel()
 

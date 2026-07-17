@@ -292,6 +292,109 @@ func TestResponsesObjectPreservesNativeResponseFields(t *testing.T) {
 	}
 }
 
+func TestIncompleteResponseIsTerminalAndPreservesReason(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		reason       string
+		finishReason string
+	}{
+		{name: "output limit", reason: "max_output_tokens", finishReason: "length"},
+		{name: "content filter", reason: "content_filter", finishReason: "content_filter"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			accumulator := NewAccumulator(NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+			accumulator.Apply(&codex.StreamEvent{
+				Type: "response.incomplete",
+				Raw: map[string]any{
+					"response": map[string]any{
+						"id":                 "resp_incomplete",
+						"model":              "gpt-5.4",
+						"status":             "incomplete",
+						"incomplete_details": map[string]any{"reason": test.reason},
+						"output_text":        "partial",
+						"usage":              map[string]any{"input_tokens": 3, "output_tokens": 2},
+					},
+				},
+			})
+
+			if !accumulator.IsTerminal() {
+				t.Fatal("IsTerminal() = false, want true")
+			}
+			if accumulator.IsCompleted() {
+				t.Fatal("IsCompleted() = true, want false")
+			}
+
+			responsesObject := accumulator.ResponsesObject()
+			if responsesObject["status"] != "incomplete" {
+				t.Fatalf("status = %#v, want incomplete", responsesObject["status"])
+			}
+			incompleteDetails, _ := responsesObject["incomplete_details"].(map[string]any)
+			if incompleteDetails["reason"] != test.reason {
+				t.Fatalf("incomplete_details = %#v", incompleteDetails)
+			}
+			if responsesObject["output_text"] != "partial" {
+				t.Fatalf("output_text = %#v, want partial", responsesObject["output_text"])
+			}
+
+			chatObject := accumulator.ChatCompletionObject()
+			choices := chatObject["choices"].([]map[string]any)
+			if choices[0]["finish_reason"] != test.finishReason {
+				t.Fatalf("finish_reason = %#v, want %q", choices[0]["finish_reason"], test.finishReason)
+			}
+			if choices[0]["native_finish_reason"] != test.reason {
+				t.Fatalf("native_finish_reason = %#v, want %q", choices[0]["native_finish_reason"], test.reason)
+			}
+		})
+	}
+}
+
+func TestIncompleteResponseDoesNotCompletePartialToolCall(t *testing.T) {
+	t.Parallel()
+
+	accumulator := NewAccumulator(NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&codex.StreamEvent{
+		Type: "response.function_call_arguments.delta",
+		Raw: map[string]any{
+			"response_id":  "resp_partial_tool",
+			"item_id":      "fc_partial",
+			"call_id":      "call_partial",
+			"output_index": 0,
+			"name":         "lookup",
+			"delta":        `{"query":`,
+		},
+	})
+	accumulator.Apply(&codex.StreamEvent{
+		Type: "response.incomplete",
+		Raw: map[string]any{"response": map[string]any{
+			"id":                 "resp_partial_tool",
+			"model":              "gpt-5.4",
+			"status":             "incomplete",
+			"incomplete_details": map[string]any{"reason": "max_output_tokens"},
+			"output": []any{map[string]any{
+				"id":        "fc_partial",
+				"type":      "function_call",
+				"call_id":   "call_partial",
+				"name":      "lookup",
+				"arguments": `{"query":`,
+				"status":    "incomplete",
+			}},
+		}},
+	})
+
+	if events := accumulator.PendingResponseToolCallCompletionEvents(); len(events) != 0 {
+		t.Fatalf("completion events = %#v, want none", events)
+	}
+	output := accumulator.ResponsesObject()["output"].([]map[string]any)
+	if len(output) != 1 || output[0]["status"] != "incomplete" {
+		t.Fatalf("output = %#v", output)
+	}
+}
+
 func TestChatCompletionObjectIncludesReasoningContentAndStrictUsage(t *testing.T) {
 	t.Parallel()
 

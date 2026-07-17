@@ -220,7 +220,7 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 				return false
 			}
 		}
-		if event.Type == "response.completed" {
+		if event.IsTerminalResponse() {
 			break
 		}
 	}
@@ -250,7 +250,7 @@ func (a *App) responsesStreamEvents(c *gin.Context, accumulator *translate.Accum
 	}
 
 	events := make([]translate.ResponseStreamEvent, 0, 3)
-	if event.Type == "response.completed" {
+	if event.IsTerminalResponse() {
 		if normalized.TupleSchema != nil && strings.TrimSpace(tupleTextBuffer.String()) != "" {
 			reconverted := tupleTextBuffer.String()
 			if patched, err := translate.ReconvertJSONText(reconverted, normalized.TupleSchema); err != nil {
@@ -267,7 +267,7 @@ func (a *App) responsesStreamEvents(c *gin.Context, accumulator *translate.Accum
 	}
 
 	payload := responseStreamPayload(event, accumulator)
-	if normalized.TupleSchema != nil && event.Type == "response.completed" {
+	if normalized.TupleSchema != nil && event.IsTerminalResponse() {
 		if err := translate.PatchResponseCompletedPayloadForTuple(payload, normalized.TupleSchema); err != nil {
 			a.logTupleReconversionWarning(c, "responses", accumulator.ResponseID, err)
 		}
