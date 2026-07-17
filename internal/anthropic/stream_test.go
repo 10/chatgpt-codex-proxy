@@ -35,6 +35,35 @@ func TestStreamEncoderEmitsAnthropicEventOrder(t *testing.T) {
 	}
 }
 
+func TestStreamEncoderBuffersAndCleansStructuredOutput(t *testing.T) {
+	t.Parallel()
+
+	accumulator := structuredOutputAccumulator(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"result":     map[string]any{"type": "string"},
+			"impossible": map[string]any{"type": "boolean"},
+		},
+		"required": []any{"result"},
+	})
+	encoder := NewStreamEncoder(0)
+	events := applyAndEncode(accumulator, encoder,
+		&codex.StreamEvent{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_structured", "model": "gpt-5.4"}}},
+		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": `{"result":"ok",`}},
+		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": `"impossible":null}`}},
+		&codex.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": `{"result":"ok","impossible":null}`}},
+		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
+			"id": "resp_structured", "model": "gpt-5.4", "status": "completed",
+		}}},
+	)
+
+	want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
+	assertStreamTypes(t, events, want)
+	if text := events[2]["delta"].(map[string]any)["text"]; text != `{"result":"ok"}` {
+		t.Fatalf("text delta = %q", text)
+	}
+}
+
 func TestStreamEncoderStreamsFragmentedToolJSON(t *testing.T) {
 	t.Parallel()
 

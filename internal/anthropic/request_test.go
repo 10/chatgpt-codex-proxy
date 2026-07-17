@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -227,6 +228,398 @@ func TestNormalizeMessagesKeepsThinkingDisabledWhenEffortIsSet(t *testing.T) {
 	}
 	if len(normalized.Include) != 0 {
 		t.Fatalf("include = %#v, want no exposed thinking", normalized.Include)
+	}
+}
+
+func TestNormalizeMessagesMakesOptionalOutputFieldsStrictAndNullable(t *testing.T) {
+	t.Parallel()
+
+	maxTokens := 10
+	normalized, err := Normalize(MessagesRequest{
+		Model:     "gpt-5.4",
+		MaxTokens: &maxTokens,
+		Messages:  []Message{{Role: "user", Content: Content{{Type: "text", Text: "answer"}}}},
+		OutputConfig: &OutputConfig{Format: &OutputFormat{
+			Type: "json_schema",
+			Schema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"result":     map[string]any{"type": "string"},
+					"impossible": map[string]any{"type": "boolean"},
+					"state":      map[string]any{"type": "string", "enum": []any{"ready", "blocked"}},
+					"details": map[string]any{
+						"type": []any{"object", "null"},
+						"properties": map[string]any{
+							"note": map[string]any{"type": "string"},
+						},
+					},
+				},
+				"required": []any{"result"},
+			},
+		}},
+	}, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+
+	if !normalized.Text.Format.Strict {
+		t.Fatal("strict = false, want true")
+	}
+	required, _ := normalized.Text.Format.Schema["required"].([]string)
+	if !slices.Equal(required, []string{"details", "impossible", "result", "state"}) {
+		t.Fatalf("upstream required = %#v, want every property", normalized.Text.Format.Schema["required"])
+	}
+	properties, _ := normalized.Text.Format.Schema["properties"].(map[string]any)
+	impossible, _ := properties["impossible"].(map[string]any)
+	if !schemaMatchesValue(impossible, nil) || !schemaMatchesValue(impossible, false) {
+		t.Fatalf("impossible schema = %#v, want boolean or null", impossible)
+	}
+	state, _ := properties["state"].(map[string]any)
+	if !schemaMatchesValue(state, nil) || !schemaMatchesValue(state, "ready") || schemaMatchesValue(state, "other") {
+		t.Fatalf("state schema = %#v, want enum or null", state)
+	}
+	details, _ := properties["details"].(map[string]any)
+	detailsRequired, _ := details["required"].([]string)
+	if !slices.Equal(detailsRequired, []string{"note"}) {
+		t.Fatalf("details required = %#v, want nested properties", details["required"])
+	}
+	responseRequired, _ := normalized.ResponseSchema["required"].([]any)
+	if !slices.Equal(responseRequired, []any{"result"}) {
+		t.Fatalf("response required = %#v, want original required properties", normalized.ResponseSchema["required"])
+	}
+}
+
+func TestNormalizeMessagesResolvesOptionalOutputSchemaRefs(t *testing.T) {
+	t.Parallel()
+
+	text, responseSchema, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"result":  map[string]any{"type": "string"},
+				"details": map[string]any{"$ref": "#/$defs/details"},
+			},
+			"required": []any{"result"},
+			"$defs": map[string]any{
+				"details": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"note": map[string]any{"type": "string"},
+					},
+				},
+			},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+
+	properties, _ := text.Format.Schema["properties"].(map[string]any)
+	details, _ := properties["details"].(map[string]any)
+	if !schemaMatchesValue(details, nil) {
+		t.Fatalf("strict details schema = %#v, want nullable", details)
+	}
+	responseProperties, _ := responseSchema["properties"].(map[string]any)
+	responseDetails, _ := responseProperties["details"].(map[string]any)
+	if responseDetails["$ref"] != nil || responseDetails["type"] != "object" {
+		t.Fatalf("response details schema = %#v, want inlined object", responseDetails)
+	}
+}
+
+func TestNormalizeMessagesRejectsImplicitObjectOutputSchemas(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"properties": map[string]any{
+				"result": map[string]any{"type": "string"},
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "root must have type object") {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsUndeclaredRequiredOutputProperties(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"result": map[string]any{"type": "string"},
+			},
+			"required": []any{"result", "undeclared"},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `required property "undeclared" must be declared`) {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsMalformedRequiredOutputProperties(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"result": map[string]any{"type": "string"},
+			},
+			"required": "result",
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "output schema is invalid") {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsBooleanOutputPropertySchemas(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"never": false,
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `property "never" must use an object schema`) {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsUnsupportedOutputSchemaComposition(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"allOf": []any{
+				map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"value": map[string]any{"type": "string"},
+					},
+				},
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `keyword "allOf" is not supported`) {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsUnsupportedOutputSchemaKeywords(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"values": map[string]any{
+					"type":     "array",
+					"items":    map[string]any{"type": "string"},
+					"contains": map[string]any{"const": "required"},
+				},
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `keyword "contains" is not supported`) {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsUnsupportedOutputSchemaFormats(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"link": map[string]any{"type": "string", "format": "uri"},
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `format "uri" is not supported`) {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsNonObjectOutputSchemaRoots(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"anyOf": []any{
+				map[string]any{"type": "string"},
+				map[string]any{"type": "null"},
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "root must have type object") {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsAdditionalOutputProperties(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type":                 "object",
+			"properties":           map[string]any{"result": map[string]any{"type": "string"}},
+			"additionalProperties": true,
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "must set additionalProperties to false") {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesStrictifiesEmptyNullableObjects(t *testing.T) {
+	t.Parallel()
+
+	text, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"details": map[string]any{"type": []any{"object", "null"}},
+			},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+	properties, _ := text.Format.Schema["properties"].(map[string]any)
+	details, _ := properties["details"].(map[string]any)
+	if details["additionalProperties"] != false {
+		t.Fatalf("details = %#v", details)
+	}
+	if _, ok := details["properties"].(map[string]any); !ok {
+		t.Fatalf("details.properties = %#v, want object", details["properties"])
+	}
+}
+
+func TestNormalizeMessagesRejectsNestedBooleanOutputSchemas(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"choice": map[string]any{
+					"anyOf": []any{false, map[string]any{"type": "string"}},
+				},
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `"anyOf" entries must use object schemas`) {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsEmptyAnyOf(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"choice": map[string]any{"anyOf": []any{}},
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `"anyOf" must contain at least one schema`) {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsArraysWithoutItems(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"values": map[string]any{"type": "array"},
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "array nodes must define items") {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsTypedObjectAnyOf(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"choice": map[string]any{
+					"type": "object",
+					"anyOf": []any{
+						map[string]any{
+							"type":       "object",
+							"properties": map[string]any{"a": map[string]any{"type": "string"}},
+							"required":   []any{"a"},
+						},
+						map[string]any{
+							"type":       "object",
+							"properties": map[string]any{"b": map[string]any{"type": "string"}},
+							"required":   []any{"b"},
+						},
+					},
+				},
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `"anyOf" cannot be combined with type object`) {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesRejectsUnresolvedOutputSchemaRefs(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
+		Type: "json_schema",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"head": map[string]any{"$ref": "#/$defs/node"},
+			},
+			"$defs": map[string]any{
+				"node": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"next": map[string]any{"$ref": "#/$defs/node"},
+					},
+				},
+			},
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `keyword "$ref" is not supported`) {
+		t.Fatalf("normalizeOutputFormat() error = %v", err)
 	}
 }
 

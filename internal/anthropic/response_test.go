@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"chatgpt-codex-proxy/internal/codex"
+	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/translate"
 )
 
@@ -183,4 +184,181 @@ func TestBuildMessageOmitsUnsignedThinkingSummary(t *testing.T) {
 	if len(message.Content) != 1 || message.Content[0].Type != "text" || message.Content[0].Text != "answer" {
 		t.Fatalf("content = %#v", message.Content)
 	}
+}
+
+func TestBuildMessageRemovesSyntheticNullOptionalFields(t *testing.T) {
+	t.Parallel()
+
+	accumulator := structuredOutputAccumulator(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"result":        map[string]any{"type": "string"},
+			"impossible":    map[string]any{"type": "boolean"},
+			"explicit_null": map[string]any{"type": []any{"string", "null"}},
+			"maybe":         map[string]any{"type": []any{"string", "null"}},
+			"details": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"note": map[string]any{"type": "string"},
+				},
+			},
+		},
+		"required": []any{"result", "explicit_null", "details"},
+	})
+	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+		"response": map[string]any{
+			"id": "resp_structured", "status": "completed",
+			"output": []any{map[string]any{
+				"type": "message",
+				"content": []any{map[string]any{
+					"type": "output_text",
+					"text": `{"result":"ok","impossible":null,"explicit_null":null,"maybe":null,"details":{"note":null}}`,
+				}},
+			}},
+		},
+	}})
+
+	message := BuildMessage(accumulator)
+	if len(message.Content) != 1 || message.Content[0].Text != `{"details":{},"explicit_null":null,"maybe":null,"result":"ok"}` {
+		t.Fatalf("content = %#v", message.Content)
+	}
+}
+
+func TestNormalizedOutputTextRestoresNestedFieldsInOptionalObjects(t *testing.T) {
+	t.Parallel()
+
+	accumulator := structuredOutputAccumulator(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"details": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"note": map[string]any{"type": "string"},
+				},
+			},
+			"entries": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"note": map[string]any{"type": "string"},
+					},
+				},
+			},
+		},
+	})
+
+	if got := normalizedOutputText(accumulator, `{"details":{"note":null},"entries":[{"note":null}]}`); got != `{"details":{},"entries":[{}]}` {
+		t.Fatalf("normalized output = %s", got)
+	}
+}
+
+func TestNormalizedOutputTextUsesMatchingUnionBranch(t *testing.T) {
+	t.Parallel()
+
+	accumulator := structuredOutputAccumulator(map[string]any{
+		"anyOf": []any{
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"kind":  map[string]any{"type": "string", "const": "a"},
+					"value": map[string]any{"type": "string"},
+				},
+				"required": []any{"kind"},
+			},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"kind":  map[string]any{"type": "string", "const": "b"},
+					"value": map[string]any{"type": []any{"string", "null"}},
+				},
+				"required": []any{"kind", "value"},
+			},
+		},
+	})
+
+	if got := normalizedOutputText(accumulator, `{"kind":"a","value":null}`); got != `{"kind":"a"}` {
+		t.Fatalf("optional branch = %s", got)
+	}
+	if got := normalizedOutputText(accumulator, `{"kind":"b","value":null}`); got != `{"kind":"b","value":null}` {
+		t.Fatalf("nullable branch = %s", got)
+	}
+}
+
+func TestNormalizedOutputTextUsesSchemaConstraintsToMatchUnionBranch(t *testing.T) {
+	t.Parallel()
+
+	accumulator := structuredOutputAccumulator(map[string]any{
+		"anyOf": []any{
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"kind":  map[string]any{"type": "string", "pattern": "^a$"},
+					"value": map[string]any{"type": "string"},
+				},
+				"required": []any{"kind"},
+			},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"kind":  map[string]any{"type": "string", "pattern": "^b$"},
+					"value": map[string]any{"type": []any{"string", "null"}},
+				},
+				"required": []any{"kind", "value"},
+			},
+		},
+	})
+
+	if got := normalizedOutputText(accumulator, `{"kind":"a","value":null}`); got != `{"kind":"a"}` {
+		t.Fatalf("optional branch = %s", got)
+	}
+	if got := normalizedOutputText(accumulator, `{"kind":"b","value":null}`); got != `{"kind":"b","value":null}` {
+		t.Fatalf("nullable branch = %s", got)
+	}
+}
+
+func TestSchemaMatchesValueUsesJSONNumericSemantics(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []json.Number{"1", "1.0", "1e0"} {
+		if !schemaMatchesValue(map[string]any{"const": float64(1)}, value) {
+			t.Fatalf("const 1 did not match %q", value)
+		}
+		if !schemaMatchesValue(map[string]any{"type": "integer"}, value) {
+			t.Fatalf("integer did not match %q", value)
+		}
+	}
+	if schemaMatchesValue(map[string]any{"type": "integer"}, json.Number("1.5")) {
+		t.Fatal("integer matched 1.5")
+	}
+}
+
+func TestSchemaMatcherCompilesEachSchemaOnce(t *testing.T) {
+	t.Parallel()
+
+	schema := map[string]any{"type": "integer", "minimum": 1}
+	matcher := newSchemaMatcher()
+	if !matcher.matches(schema, json.Number("1")) || !matcher.matches(schema, json.Number("2")) {
+		t.Fatal("schema did not match valid integers")
+	}
+	if matcher.compiles != 1 {
+		t.Fatalf("compiles = %d, want 1", matcher.compiles)
+	}
+}
+
+func structuredOutputAccumulator(schema map[string]any) *translate.Accumulator {
+	responseSchema := translate.NormalizeSchema(schema)
+	strictSchema := jsonutil.CloneMap(responseSchema)
+	if err := makeOpenAIStrictSchemaNode(strictSchema, newSchemaMatcher()); err != nil {
+		panic(err)
+	}
+	return translate.NewAccumulator(translate.NormalizedRequest{
+		Request: codex.Request{
+			Model: "gpt-5.4",
+			Text: &codex.TextConfig{Format: codex.TextFormat{
+				Type: "json_schema", Schema: strictSchema, Strict: true,
+			}},
+		},
+		ResponseSchema: responseSchema,
+	})
 }

@@ -7,6 +7,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.18.6
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/sardanioss/httpcloak v1.6.7
 	github.com/tiktoken-go/tokenizer v0.7.0
 )

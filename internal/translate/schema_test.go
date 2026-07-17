@@ -70,6 +70,33 @@ func TestNormalizeSchemaInlinesRefsAndInjectsAdditionalProperties(t *testing.T) 
 	}
 }
 
+func TestNormalizeSchemaStopsAtRecursiveRefs(t *testing.T) {
+	t.Parallel()
+
+	normalized := NormalizeSchema(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"head": map[string]any{"$ref": "#/$defs/node"},
+		},
+		"$defs": map[string]any{
+			"node": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"next": map[string]any{"$ref": "#/$defs/node"},
+				},
+			},
+		},
+	})
+
+	rootProperties, _ := normalized["properties"].(map[string]any)
+	head, _ := rootProperties["head"].(map[string]any)
+	headProperties, _ := head["properties"].(map[string]any)
+	next, _ := headProperties["next"].(map[string]any)
+	if next["$ref"] != "#/$defs/node" {
+		t.Fatalf("next.$ref = %#v, want recursive ref", next["$ref"])
+	}
+}
+
 func TestHasTupleSchemasDetectsNestedLocations(t *testing.T) {
 	t.Parallel()
 

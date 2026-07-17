@@ -89,6 +89,7 @@ func resolveLocalRefs(node map[string]any, defs map[string]map[string]any, resol
 			return node
 		}
 		resolved = resolveLocalRefs(resolved, defs, nextResolving)
+		resolving = nextResolving
 		for key, value := range node {
 			if key != "$ref" {
 				resolved[key] = value

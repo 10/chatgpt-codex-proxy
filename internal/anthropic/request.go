@@ -9,12 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"unicode"
 
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/conversation"
+	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/translate"
 )
@@ -78,7 +80,7 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (translate.Norm
 	if err != nil {
 		return translate.NormalizedRequest{}, err
 	}
-	text, err := normalizeOutputFormat(request.OutputConfig)
+	text, responseSchema, err := normalizeOutputFormat(request.OutputConfig)
 	if err != nil {
 		return translate.NormalizedRequest{}, err
 	}
@@ -89,6 +91,7 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (translate.Norm
 
 	normalized := translate.NormalizedRequest{
 		ModelExplicit:   true,
+		ResponseSchema:  responseSchema,
 		ToolNameAliases: toolNames.Aliases(),
 		Request: codex.Request{
 			Model:             model,
@@ -416,23 +419,274 @@ func normalizeThinking(request MessagesRequest, catalog *models.Catalog) (*codex
 	return reasoning, []string{"reasoning.encrypted_content"}, nil
 }
 
-func normalizeOutputFormat(config *OutputConfig) (*codex.TextConfig, error) {
+func normalizeOutputFormat(config *OutputConfig) (*codex.TextConfig, map[string]any, error) {
 	if config == nil || config.Format == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	format := config.Format
 	if strings.TrimSpace(format.Type) != "json_schema" {
-		return nil, fmt.Errorf("unsupported output format %q", format.Type)
+		return nil, nil, fmt.Errorf("unsupported output format %q", format.Type)
 	}
 	if len(format.Schema) == 0 {
-		return nil, errors.New("schema is required")
+		return nil, nil, errors.New("schema is required")
+	}
+	responseSchema := translate.NormalizeSchema(format.Schema)
+	strictSchema := jsonutil.CloneMap(responseSchema)
+	if err := makeOpenAIStrictSchema(strictSchema); err != nil {
+		return nil, nil, err
+	}
+	if compileSchema(responseSchema) == nil {
+		return nil, nil, errors.New("output schema is invalid")
 	}
 	return &codex.TextConfig{Format: codex.TextFormat{
 		Type:   "json_schema",
 		Name:   cmp.Or(strings.TrimSpace(format.Name), "anthropic_output"),
-		Schema: translate.NormalizeSchema(format.Schema),
+		Schema: strictSchema,
 		Strict: true,
-	}}, nil
+	}}, responseSchema, nil
+}
+
+func makeOpenAIStrictSchema(node map[string]any) error {
+	if node["type"] != "object" {
+		return errors.New("output schema root must have type object")
+	}
+	if _, ok := node["anyOf"]; ok {
+		return errors.New(`output schema keyword "anyOf" is not supported at the root`)
+	}
+	return makeOpenAIStrictSchemaNode(node, newSchemaMatcher())
+}
+
+func makeOpenAIStrictSchemaNode(node map[string]any, matcher *schemaMatcher) error {
+	for _, keyword := range slices.Sorted(maps.Keys(node)) {
+		if !supportedOutputSchemaKeyword(keyword) {
+			return fmt.Errorf("output schema keyword %q is not supported", keyword)
+		}
+	}
+	if err := validateOutputSchemaKeywordValues(node); err != nil {
+		return err
+	}
+	if err := visitSchemaChildren(node, func(child map[string]any) error {
+		return makeOpenAIStrictSchemaNode(child, matcher)
+	}); err != nil {
+		return err
+	}
+	properties, hasProperties := node["properties"].(map[string]any)
+	hasObjectType := schemaHasType(node["type"], "object")
+	if !hasProperties && !hasObjectType {
+		return nil
+	}
+	if !hasObjectType {
+		return errors.New("output schema nodes with properties must include type object")
+	}
+	if !hasProperties {
+		properties = map[string]any{}
+		node["properties"] = properties
+	}
+	if additionalProperties, ok := node["additionalProperties"]; ok && additionalProperties != false {
+		return errors.New("output schema object nodes must set additionalProperties to false")
+	}
+	node["additionalProperties"] = false
+	required := schemaRequiredNames(node["required"])
+	for name := range required {
+		if _, ok := properties[name]; !ok {
+			return fmt.Errorf("output schema required property %q must be declared in properties", name)
+		}
+	}
+	for name, raw := range properties {
+		child, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("output schema property %q must use an object schema", name)
+		}
+		if !required[name] {
+			properties[name] = makeSchemaNullable(child, matcher)
+		}
+		required[name] = true
+	}
+	requiredNames := slices.Sorted(maps.Keys(required))
+	if requiredNames == nil {
+		requiredNames = []string{}
+	}
+	node["required"] = requiredNames
+	return nil
+}
+
+func supportedOutputSchemaKeyword(keyword string) bool {
+	switch keyword {
+	case
+		"type",
+		"properties",
+		"required",
+		"additionalProperties",
+		"items",
+		"enum",
+		"const",
+		"anyOf",
+		"pattern",
+		"format",
+		"multipleOf",
+		"maximum",
+		"exclusiveMaximum",
+		"minimum",
+		"exclusiveMinimum",
+		"minItems",
+		"maxItems",
+		"title",
+		"description":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateOutputSchemaKeywordValues(node map[string]any) error {
+	if schemaHasType(node["type"], "array") {
+		if _, ok := node["items"]; !ok {
+			return errors.New("output schema array nodes must define items")
+		}
+	}
+	if schemaHasType(node["type"], "object") {
+		if _, ok := node["anyOf"]; ok {
+			return errors.New(`output schema keyword "anyOf" cannot be combined with type object`)
+		}
+	}
+	if rawFormat, ok := node["format"]; ok {
+		format, ok := rawFormat.(string)
+		if !ok || !supportedOutputSchemaFormat(format) {
+			return fmt.Errorf("output schema format %q is not supported", format)
+		}
+	}
+	for _, keyword := range []string{"pattern", "format"} {
+		if _, ok := node[keyword]; ok && !schemaHasType(node["type"], "string") {
+			return fmt.Errorf("output schema keyword %q requires type string", keyword)
+		}
+	}
+	for _, keyword := range []string{"multipleOf", "maximum", "exclusiveMaximum", "minimum", "exclusiveMinimum"} {
+		if _, ok := node[keyword]; ok && !schemaHasType(node["type"], "number") && !schemaHasType(node["type"], "integer") {
+			return fmt.Errorf("output schema keyword %q requires a numeric type", keyword)
+		}
+	}
+	for _, keyword := range []string{"items", "minItems", "maxItems"} {
+		if _, ok := node[keyword]; ok && !schemaHasType(node["type"], "array") {
+			return fmt.Errorf("output schema keyword %q requires type array", keyword)
+		}
+	}
+	for _, keyword := range []string{"properties", "required", "additionalProperties"} {
+		if _, ok := node[keyword]; ok && !schemaHasType(node["type"], "object") {
+			return fmt.Errorf("output schema keyword %q requires type object", keyword)
+		}
+	}
+	return nil
+}
+
+func supportedOutputSchemaFormat(format string) bool {
+	switch format {
+	case "date-time", "time", "date", "duration", "email", "hostname", "ipv4", "ipv6", "uuid":
+		return true
+	default:
+		return false
+	}
+}
+
+func visitSchemaChildren(node map[string]any, visit func(map[string]any) error) error {
+	for _, key := range []string{"properties", "patternProperties", "$defs", "definitions"} {
+		children, _ := node[key].(map[string]any)
+		for name, raw := range children {
+			child, ok := raw.(map[string]any)
+			if !ok {
+				if key == "properties" {
+					continue
+				}
+				return fmt.Errorf("output schema %q entry %q must use an object schema", key, name)
+			}
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+	}
+	if raw, exists := node["items"]; exists {
+		child, ok := raw.(map[string]any)
+		if !ok {
+			return errors.New(`output schema "items" must use an object schema`)
+		}
+		if err := visit(child); err != nil {
+			return err
+		}
+	}
+	if children, ok := node["prefixItems"].([]any); ok {
+		for _, raw := range children {
+			if child, ok := raw.(map[string]any); ok {
+				if err := visit(child); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	for _, key := range []string{"oneOf", "anyOf", "allOf"} {
+		rawChildren, exists := node[key]
+		if !exists {
+			continue
+		}
+		children, ok := rawChildren.([]any)
+		if !ok {
+			return fmt.Errorf("output schema %q must be an array", key)
+		}
+		if len(children) == 0 {
+			return fmt.Errorf("output schema %q must contain at least one schema", key)
+		}
+		for _, raw := range children {
+			child, ok := raw.(map[string]any)
+			if !ok {
+				return fmt.Errorf("output schema %q entries must use object schemas", key)
+			}
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+	}
+	for _, key := range []string{"if", "then", "else", "not"} {
+		if child, ok := node[key].(map[string]any); ok {
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func schemaRequiredNames(raw any) map[string]bool {
+	required := make(map[string]bool)
+	switch values := raw.(type) {
+	case []any:
+		for _, value := range values {
+			if name, ok := value.(string); ok {
+				required[name] = true
+			}
+		}
+	case []string:
+		for _, name := range values {
+			required[name] = true
+		}
+	}
+	return required
+}
+
+func makeSchemaNullable(schema map[string]any, matcher *schemaMatcher) map[string]any {
+	if matcher.matches(schema, nil) {
+		return schema
+	}
+	return map[string]any{"anyOf": []any{schema, map[string]any{"type": "null"}}}
+}
+
+func schemaHasType(raw any, want string) bool {
+	switch schemaType := raw.(type) {
+	case string:
+		return schemaType == want
+	case []any:
+		return slices.Contains(schemaType, any(want))
+	case []string:
+		return slices.Contains(schemaType, want)
+	}
+	return false
 }
 
 func normalizeServiceTier(raw string) (string, error) {

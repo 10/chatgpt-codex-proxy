@@ -67,12 +67,20 @@ func (e *StreamEncoder) Events(event *codex.StreamEvent, accumulator *translate.
 		}
 	case "response.output_text.delta":
 		delta := jsonutil.StringValue(event.Raw["delta"])
-		if delta != "" {
+		if delta != "" && len(accumulator.Normalized.ResponseSchema) == 0 {
 			result = append(result, e.openText()...)
 			result = append(result, e.delta("text_delta", "text", delta))
 			e.textEmitted = true
 		}
 	case "response.output_text.done":
+		if len(accumulator.Normalized.ResponseSchema) > 0 && !e.textEmitted {
+			text := cmp.Or(jsonutil.StringValue(event.Raw["text"]), accumulator.Text())
+			if text != "" {
+				result = append(result, e.openText()...)
+				result = append(result, e.delta("text_delta", "text", normalizedOutputText(accumulator, text)))
+				e.textEmitted = true
+			}
+		}
 		if !e.textEmitted {
 			if text := jsonutil.StringValue(event.Raw["text"]); text != "" {
 				result = append(result, e.openText()...)
