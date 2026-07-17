@@ -64,6 +64,12 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 		out.Text = text
 		out.TupleSchema = tupleSchema
 	}
+	if req.Text != nil && req.Text.Verbosity != "" {
+		if out.Text == nil {
+			out.Text = &codex.TextConfig{}
+		}
+		out.Text.Verbosity = req.Text.Verbosity
+	}
 
 	var instructions []string
 	customToolNames := chatCustomToolNames(req.Tools)

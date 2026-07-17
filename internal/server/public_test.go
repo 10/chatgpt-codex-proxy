@@ -403,6 +403,7 @@ func TestNormalizeChatCompletionsBodyAcceptsResponsesShape(t *testing.T) {
 			"role": "user",
 			"content": [{"type": "text", "text": "hello"}]
 		},
+		"text": {"verbosity": "high"},
 		"stream": true,
 		"tools": [{
 			"type": "function",
@@ -436,6 +437,17 @@ func TestNormalizeChatCompletionsBodyAcceptsResponsesShape(t *testing.T) {
 	}
 	if len(normalized.Tools) != 1 || normalized.Tools[0].Name != "Shell" {
 		t.Fatalf("tools = %#v, want Shell passthrough", normalized.Tools)
+	}
+	textPayload, err := json.Marshal(normalized.Text)
+	if err != nil {
+		t.Fatalf("json.Marshal(text) error = %v", err)
+	}
+	var text map[string]any
+	if err := json.Unmarshal(textPayload, &text); err != nil {
+		t.Fatalf("json.Unmarshal(text) error = %v", err)
+	}
+	if got := text["verbosity"]; got != "high" {
+		t.Fatalf("text.verbosity = %#v, want high", got)
 	}
 }
 

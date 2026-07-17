@@ -7,8 +7,16 @@ import (
 )
 
 func normalizeResponsesText(text *ResponsesText) (*codex.TextConfig, map[string]any) {
-	if text == nil || text.Format == nil {
+	if text == nil {
 		return nil, nil
+	}
+
+	config := &codex.TextConfig{Verbosity: text.Verbosity}
+	if text.Format == nil {
+		if text.Verbosity == "" {
+			return nil, nil
+		}
+		return config, nil
 	}
 
 	var tupleSchema map[string]any
@@ -25,7 +33,8 @@ func normalizeResponsesText(text *ResponsesText) (*codex.TextConfig, map[string]
 		format.Schema = text.Format.Schema
 		format.Strict = text.Format.Strict
 	}
-	return &codex.TextConfig{Format: format}, tupleSchema
+	config.Format = format
+	return config, tupleSchema
 }
 
 func normalizeChatResponseFormat(format *ResponseFormat) (*codex.TextConfig, map[string]any, error) {

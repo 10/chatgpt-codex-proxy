@@ -300,6 +300,7 @@ func TestNormalizeResponsesWebSocketMessagePreservesGenerateAndIgnoresStream(t *
 		"model":"gpt-5.4",
 		"stream":false,
 		"generate":false,
+		"text":{"verbosity":"high"},
 		"input":"warm up"
 	}`), models.NewCatalog(models.BootstrapEntries()))
 	if err != nil {
@@ -317,6 +318,17 @@ func TestNormalizeResponsesWebSocketMessagePreservesGenerateAndIgnoresStream(t *
 	}
 	if got, ok := payload["generate"]; !ok || got != false {
 		t.Fatalf("upstream payload generate = %#v, want false", got)
+	}
+	textPayload, err := json.Marshal(payload["text"])
+	if err != nil {
+		t.Fatalf("json.Marshal(text) error = %v", err)
+	}
+	var text map[string]any
+	if err := json.Unmarshal(textPayload, &text); err != nil {
+		t.Fatalf("json.Unmarshal(text) error = %v", err)
+	}
+	if got := text["verbosity"]; got != "high" {
+		t.Fatalf("upstream text.verbosity = %#v, want high", got)
 	}
 }
 

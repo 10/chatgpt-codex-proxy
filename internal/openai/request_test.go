@@ -108,6 +108,34 @@ func TestChatCompletionsTranslation(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsTranslationPreservesTextVerbosity(t *testing.T) {
+	t.Parallel()
+
+	var request ChatCompletionsRequest
+	if err := json.Unmarshal([]byte(`{
+		"model": "gpt-5.4",
+		"messages": [{"role": "user", "content": "Hello"}],
+		"response_format": {"type": "json_object"},
+		"text": {"verbosity": "high"}
+	}`), &request); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	normalized, err := ChatCompletions(request, nil)
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+
+	text := marshalTextConfig(t, normalized.Text)
+	if got := text["verbosity"]; got != "high" {
+		t.Fatalf("text.verbosity = %#v, want high", got)
+	}
+	format, _ := text["format"].(map[string]any)
+	if got := format["type"]; got != "json_object" {
+		t.Fatalf("text.format.type = %#v, want json_object", got)
+	}
+}
+
 func TestInstructionFreeOpenAIRequestsStayInstructionFree(t *testing.T) {
 	t.Parallel()
 
@@ -215,6 +243,32 @@ func TestResponsesTranslation(t *testing.T) {
 	}
 	if len(normalized.Include) != 0 {
 		t.Fatalf("include = %#v, want empty when reasoning disabled", normalized.Include)
+	}
+}
+
+func TestResponsesTranslationPreservesVerbosityWithoutFormat(t *testing.T) {
+	t.Parallel()
+
+	var request ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model": "gpt-5.4",
+		"input": "Hello",
+		"text": {"verbosity": "low"}
+	}`), &request); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	normalized, err := Responses(request, nil)
+	if err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
+
+	text := marshalTextConfig(t, normalized.Text)
+	if got := text["verbosity"]; got != "low" {
+		t.Fatalf("text.verbosity = %#v, want low", got)
+	}
+	if _, ok := text["format"]; ok {
+		t.Fatalf("text.format = %#v, want omitted", text["format"])
 	}
 }
 
@@ -406,6 +460,32 @@ func TestCompactTranslation(t *testing.T) {
 	}
 	if normalized.Input[1].Type != "compaction" || normalized.Input[1].EncryptedContent != "enc_existing" {
 		t.Fatalf("input[1] = %#v, want compaction passthrough", normalized.Input[1])
+	}
+}
+
+func TestCompactTranslationPreservesTextVerbosity(t *testing.T) {
+	t.Parallel()
+
+	var request ResponsesCompactRequest
+	if err := json.Unmarshal([]byte(`{
+		"model": "gpt-5.4",
+		"input": "Compact this",
+		"text": {"verbosity": "medium"}
+	}`), &request); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	normalized, err := Compact(request, nil)
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+
+	text := marshalTextConfig(t, normalized.Text)
+	if got := text["verbosity"]; got != "medium" {
+		t.Fatalf("text.verbosity = %#v, want medium", got)
+	}
+	if _, ok := text["format"]; ok {
+		t.Fatalf("text.format = %#v, want omitted", text["format"])
 	}
 }
 
@@ -1249,4 +1329,20 @@ func TestToCodexWSCreatePayloadIncludesTurnControls(t *testing.T) {
 	if payload["generate"] != false || payload["parallel_tool_calls"] != false {
 		t.Fatalf("payload = %#v", payload)
 	}
+}
+
+func marshalTextConfig(t *testing.T, text *codex.TextConfig) map[string]any {
+	t.Helper()
+	if text == nil {
+		t.Fatal("text config is nil")
+	}
+	payload, err := json.Marshal(text)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	return decoded
 }

@@ -19,6 +19,7 @@ type ChatCompletionsRequest struct {
 	ToolChoice         json.RawMessage            `json:"tool_choice,omitempty"`
 	ParallelToolCalls  *bool                      `json:"parallel_tool_calls,omitempty"`
 	ResponseFormat     *ResponseFormat            `json:"response_format,omitempty"`
+	Text               *ResponsesText             `json:"text,omitempty"`
 	Functions          []LegacyFunctionDefinition `json:"functions,omitempty"`
 	FunctionCall       *LegacyFunctionCallChoice  `json:"function_call,omitempty"`
 }
@@ -182,7 +183,8 @@ type ResponsesCompactRequest struct {
 type Reasoning = turn.Reasoning
 
 type ResponsesText struct {
-	Format *ResponsesTextFormat `json:"format,omitempty"`
+	Format    *ResponsesTextFormat `json:"format,omitempty"`
+	Verbosity string               `json:"verbosity,omitempty"`
 }
 
 type ResponsesTextFormat = turn.TextFormat
