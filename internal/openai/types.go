@@ -17,6 +17,7 @@ type ChatCompletionsRequest struct {
 	PromptCacheKey     string                     `json:"prompt_cache_key,omitempty"`
 	Tools              []ToolDefinition           `json:"tools,omitempty"`
 	ToolChoice         json.RawMessage            `json:"tool_choice,omitempty"`
+	ParallelToolCalls  *bool                      `json:"parallel_tool_calls,omitempty"`
 	ResponseFormat     *ResponseFormat            `json:"response_format,omitempty"`
 	Functions          []LegacyFunctionDefinition `json:"functions,omitempty"`
 	FunctionCall       *LegacyFunctionCallChoice  `json:"function_call,omitempty"`
@@ -161,6 +162,7 @@ type ResponsesRequest struct {
 	Stream             bool             `json:"stream"`
 	Tools              []ToolDefinition `json:"tools,omitempty"`
 	ToolChoice         json.RawMessage  `json:"tool_choice,omitempty"`
+	ParallelToolCalls  *bool            `json:"parallel_tool_calls,omitempty"`
 	PreviousResponseID string           `json:"previous_response_id,omitempty"`
 	PromptCacheKey     string           `json:"prompt_cache_key,omitempty"`
 	ServiceTier        string           `json:"service_tier,omitempty"`

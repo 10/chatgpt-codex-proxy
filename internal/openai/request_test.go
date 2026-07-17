@@ -3,6 +3,7 @@ package openai
 import (
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -214,6 +215,73 @@ func TestResponsesTranslation(t *testing.T) {
 	}
 	if len(normalized.Include) != 0 {
 		t.Fatalf("include = %#v, want empty when reasoning disabled", normalized.Include)
+	}
+}
+
+func TestOpenAIParallelToolCallsPreserved(t *testing.T) {
+	t.Parallel()
+
+	for _, enabled := range []bool{false, true} {
+		enabled := enabled
+		t.Run(strconv.FormatBool(enabled), func(t *testing.T) {
+			t.Parallel()
+
+			chat, err := ChatCompletions(ChatCompletionsRequest{
+				Model:             "gpt-5.4",
+				ParallelToolCalls: &enabled,
+				Messages: []ChatMessage{{
+					Role:    "user",
+					Content: MessageContent{{Type: "text", Text: "Hello"}},
+				}},
+			}, nil)
+			if err != nil {
+				t.Fatalf("ChatCompletions() error = %v", err)
+			}
+			if chat.ParallelToolCalls == nil || *chat.ParallelToolCalls != enabled {
+				t.Fatalf("ChatCompletions() ParallelToolCalls = %#v, want %t", chat.ParallelToolCalls, enabled)
+			}
+
+			responses, err := Responses(ResponsesRequest{
+				Model:             "gpt-5.4",
+				ParallelToolCalls: &enabled,
+				Input:             ResponsesInput{String: "Hello"},
+			}, nil)
+			if err != nil {
+				t.Fatalf("Responses() error = %v", err)
+			}
+			if responses.ParallelToolCalls == nil || *responses.ParallelToolCalls != enabled {
+				t.Fatalf("Responses() ParallelToolCalls = %#v, want %t", responses.ParallelToolCalls, enabled)
+			}
+		})
+	}
+}
+
+func TestOpenAIParallelToolCallsOmitted(t *testing.T) {
+	t.Parallel()
+
+	chat, err := ChatCompletions(ChatCompletionsRequest{
+		Model: "gpt-5.4",
+		Messages: []ChatMessage{{
+			Role:    "user",
+			Content: MessageContent{{Type: "text", Text: "Hello"}},
+		}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	if chat.ParallelToolCalls != nil {
+		t.Fatalf("ChatCompletions() ParallelToolCalls = %#v, want nil", chat.ParallelToolCalls)
+	}
+
+	responses, err := Responses(ResponsesRequest{
+		Model: "gpt-5.4",
+		Input: ResponsesInput{String: "Hello"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
+	if responses.ParallelToolCalls != nil {
+		t.Fatalf("Responses() ParallelToolCalls = %#v, want nil", responses.ParallelToolCalls)
 	}
 }
 

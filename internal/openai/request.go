@@ -54,6 +54,7 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 		req.PreviousResponseID,
 	)
 	out.PromptCacheKey = strings.TrimSpace(req.PromptCacheKey)
+	out.ParallelToolCalls = req.ParallelToolCalls
 	out.ToolNameAliases = toolNames.Aliases()
 	if req.ResponseFormat != nil {
 		text, tupleSchema, err := normalizeChatResponseFormat(req.ResponseFormat)
@@ -142,6 +143,7 @@ func Responses(req ResponsesRequest, catalog *models.Catalog) (turn.NormalizedRe
 	out.Input = payload.Input
 	out.Text = payload.Text
 	out.PromptCacheKey = strings.TrimSpace(req.PromptCacheKey)
+	out.ParallelToolCalls = req.ParallelToolCalls
 	out.TupleSchema = payload.TupleSchema
 	out.ToolNameAliases = toolNames.Aliases()
 	return out, nil
