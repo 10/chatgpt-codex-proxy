@@ -66,7 +66,7 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 		a.streamAnthropicMessage(c, account, normalized, stream)
 		return
 	}
-	accumulator, err := a.collectEvents(account, normalized, stream)
+	accumulator, err := a.collectEvents(c.Request.Context(), account, normalized, stream)
 	if err != nil {
 		a.respondAnthropicStreamFailure(c, account.ID, "", err)
 		return
@@ -111,7 +111,7 @@ func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, no
 	encoder := anthropic.NewStreamEncoder(inputTokens)
 
 	for {
-		event, upstreamErr, err := a.nextStreamEvent(account, accumulator, stream)
+		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), account, accumulator, stream)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				err = errIncompleteResponse
@@ -160,6 +160,9 @@ func (a *App) respondAnthropicNormalizeError(c *gin.Context, err error) {
 }
 
 func (a *App) respondAnthropicOpenError(c *gin.Context, actualAccountID, reportedAccountID string, err error) {
+	if a.recordRequestCancellation(c, actualAccountID, "", err) {
+		return
+	}
 	if strings.Contains(strings.ToLower(err.Error()), "no active accounts") {
 		a.writeAnthropicError(c, http.StatusServiceUnavailable, "no available accounts")
 		return
@@ -167,18 +170,27 @@ func (a *App) respondAnthropicOpenError(c *gin.Context, actualAccountID, reporte
 	status, _, message := a.classifyUpstreamError(strings.TrimSpace(actualAccountID), err)
 	logAccountID := jsonutil.FirstNonEmpty(actualAccountID, reportedAccountID)
 	a.logUpstreamRequestFailure(c, "anthropic_messages", logAccountID, status, anthropic.ErrorTypeForStatus(status), err)
+	middleware.SetRequestOutcome(c, "upstream_error")
 	a.writeAnthropicError(c, status, message)
 }
 
 func (a *App) respondAnthropicStreamFailure(c *gin.Context, accountID, responseID string, err error) {
+	if a.recordRequestCancellation(c, accountID, responseID, err) {
+		return
+	}
 	status, _, message := a.classifyUpstreamError(accountID, err)
 	a.logUpstreamStreamFailure(c, "anthropic_messages", accountID, responseID, err)
+	middleware.SetRequestOutcome(c, "upstream_error")
+	middleware.SetRequestResponseID(c, responseID)
 	a.writeAnthropicError(c, status, message)
 }
 
 func (a *App) writeAnthropicError(c *gin.Context, status int, message string) {
 	a.prepareAnthropicHeaders(c)
-	c.AbortWithStatusJSON(status, anthropic.ErrorPayload(anthropic.ErrorTypeForStatus(status), strings.TrimSpace(message), middleware.GetRequestID(c)))
+	errorType := anthropic.ErrorTypeForStatus(status)
+	message = strings.TrimSpace(message)
+	middleware.SetRequestError(c, errorType, message)
+	c.AbortWithStatusJSON(status, anthropic.ErrorPayload(errorType, message, middleware.GetRequestID(c)))
 }
 
 func (a *App) prepareAnthropicHeaders(c *gin.Context) {
@@ -188,12 +200,20 @@ func (a *App) prepareAnthropicHeaders(c *gin.Context) {
 }
 
 func (a *App) writeAnthropicStreamError(c *gin.Context, accountID, responseID string, err error, classify bool) {
+	if a.recordRequestCancellation(c, accountID, responseID, err) {
+		return
+	}
 	status, message := http.StatusInternalServerError, err.Error()
 	if classify {
 		status, _, message = a.classifyUpstreamError(accountID, err)
 	}
 	a.logUpstreamStreamFailure(c, "anthropic_messages", accountID, responseID, err)
-	payload, _ := json.Marshal(anthropic.ErrorPayload(anthropic.ErrorTypeForStatus(status), strings.TrimSpace(message), middleware.GetRequestID(c)))
+	errorType := anthropic.ErrorTypeForStatus(status)
+	message = strings.TrimSpace(message)
+	middleware.SetRequestOutcome(c, "upstream_error")
+	middleware.SetRequestError(c, errorType, message)
+	middleware.SetRequestResponseID(c, responseID)
+	payload, _ := json.Marshal(anthropic.ErrorPayload(errorType, message, middleware.GetRequestID(c)))
 	writeSSE(c.Writer, "error", payload)
 	c.Writer.Flush()
 }

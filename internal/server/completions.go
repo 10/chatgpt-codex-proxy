@@ -71,7 +71,7 @@ func (a *App) streamCompletion(c *gin.Context, account accounts.Record, normaliz
 	createdAt := time.Now().UTC().Unix()
 
 	for {
-		event, upstreamErr, err := a.nextStreamEvent(account, accumulator, stream)
+		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), account, accumulator, stream)
 		if err != nil {
 			if err == io.EOF && accumulator.IsCompleted() {
 				break

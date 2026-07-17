@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -171,6 +172,29 @@ func TestOpenStreamDoesNotFailOverNonRetryableRequestError(t *testing.T) {
 	_, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}, ModelExplicit: true}})
 	if err == nil {
 		t.Fatal("openStream() error = nil, want upstream error")
+	}
+	if len(attempts) != 1 || attempts[0] != "acct-a" {
+		t.Fatalf("attempts = %#v, want only acct-a", attempts)
+	}
+}
+
+func TestOpenStreamDoesNotFailOverAfterRequestCancellation(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var attempts []string
+	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		attempts = append(attempts, account.ID)
+		return &fakeEventStream{
+			beforeTailErr: cancel,
+			tailErr:       errors.New("H3_REQUEST_CANCELLED (local)"),
+		}, nil
+	}
+
+	_, _, _, err := app.openStream(nil, ctx, "responses", &sessionResolution{Request: translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Stream: true}, ModelExplicit: true}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("openStream() error = %v, want context.Canceled", err)
 	}
 	if len(attempts) != 1 || attempts[0] != "acct-a" {
 		t.Fatalf("attempts = %#v, want only acct-a", attempts)

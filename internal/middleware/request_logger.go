@@ -2,10 +2,40 @@ package middleware
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
+
+const (
+	RequestOutcomeKey      = "request_outcome"
+	RequestErrorCodeKey    = "request_error_code"
+	RequestErrorMessageKey = "request_error_message"
+	RequestResponseIDKey   = "request_response_id"
+)
+
+const maxLoggedErrorLength = 2048
+
+func SetRequestOutcome(c *gin.Context, outcome string) {
+	if c != nil {
+		c.Set(RequestOutcomeKey, strings.TrimSpace(outcome))
+	}
+}
+
+func SetRequestError(c *gin.Context, code, message string) {
+	if c == nil {
+		return
+	}
+	c.Set(RequestErrorCodeKey, strings.TrimSpace(code))
+	c.Set(RequestErrorMessageKey, truncateLogValue(message))
+}
+
+func SetRequestResponseID(c *gin.Context, responseID string) {
+	if c != nil {
+		c.Set(RequestResponseIDKey, strings.TrimSpace(responseID))
+	}
+}
 
 func RequestLogger(logger *slog.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -18,12 +48,18 @@ func RequestLogger(logger *slog.Logger) gin.HandlerFunc {
 		start := time.Now()
 		c.Next()
 
+		status := c.Writer.Status()
+		outcome := c.GetString(RequestOutcomeKey)
+		if outcome == "" {
+			outcome = defaultRequestOutcome(status)
+		}
 		attrs := []any{
 			"request_id", GetRequestID(c),
 			"method", c.Request.Method,
 			"path", path,
 			"route", c.FullPath(),
-			"status", c.Writer.Status(),
+			"status", status,
+			"outcome", outcome,
 			"latency_ms", time.Since(start).Milliseconds(),
 			"client_ip", c.ClientIP(),
 		}
@@ -43,12 +79,40 @@ func RequestLogger(logger *slog.Logger) gin.HandlerFunc {
 		if upstreamAccountID := c.GetString(RequestUpstreamAccountIDKey); upstreamAccountID != "" {
 			attrs = append(attrs, "upstream_account_id", upstreamAccountID)
 		}
+		if responseID := c.GetString(RequestResponseIDKey); responseID != "" {
+			attrs = append(attrs, "response_id", responseID)
+		}
+		if errorCode := c.GetString(RequestErrorCodeKey); errorCode != "" {
+			attrs = append(attrs, "error_code", errorCode)
+		}
+		if errorMessage := c.GetString(RequestErrorMessageKey); errorMessage != "" {
+			attrs = append(attrs, "error", errorMessage)
+		}
 
-		logger.Log(c.Request.Context(), requestLogLevel(c.Writer.Status()), "http request completed", attrs...)
+		logger.Log(c.Request.Context(), requestLogLevel(status, outcome), "http request completed", attrs...)
 	}
 }
 
-func requestLogLevel(status int) slog.Level {
+func defaultRequestOutcome(status int) string {
+	switch {
+	case status >= 500:
+		return "server_error"
+	case status >= 400:
+		return "request_error"
+	default:
+		return "success"
+	}
+}
+
+func requestLogLevel(status int, outcome string) slog.Level {
+	switch outcome {
+	case "client_canceled":
+		return slog.LevelInfo
+	case "request_timeout":
+		return slog.LevelWarn
+	case "upstream_error", "stream_error":
+		return slog.LevelError
+	}
 	switch {
 	case status >= 500:
 		return slog.LevelError
@@ -57,4 +121,12 @@ func requestLogLevel(status int) slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+func truncateLogValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= maxLoggedErrorLength {
+		return value
+	}
+	return value[:maxLoggedErrorLength] + "…"
 }

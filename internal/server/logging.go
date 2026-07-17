@@ -2,7 +2,9 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -120,6 +122,40 @@ func appendStringAttr(attrs []any, key, value string) []any {
 		return attrs
 	}
 	return append(attrs, key, value)
+}
+
+func normalizeRequestContextError(ctx context.Context, err error) error {
+	if ctx == nil || err == nil || ctx.Err() == nil || errors.Is(err, ctx.Err()) {
+		return err
+	}
+	return fmt.Errorf("%w: transport error: %v", ctx.Err(), err)
+}
+
+func (a *App) recordRequestCancellation(c *gin.Context, accountID, responseID string, err error) bool {
+	if err == nil {
+		return false
+	}
+	if c != nil && c.Request != nil {
+		err = normalizeRequestContextError(c.Request.Context(), err)
+	}
+
+	outcome, code := "", ""
+	switch {
+	case errors.Is(err, context.Canceled):
+		outcome, code = "client_canceled", "client_canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		outcome, code = "request_timeout", "request_timeout"
+	default:
+		return false
+	}
+
+	middleware.SetRequestOutcome(c, outcome)
+	middleware.SetRequestError(c, code, err.Error())
+	middleware.SetRequestResponseID(c, responseID)
+	if c != nil && strings.TrimSpace(accountID) != "" {
+		c.Set(middleware.RequestAccountIDKey, strings.TrimSpace(accountID))
+	}
+	return true
 }
 
 func formatPayloadForLog(value any) string {

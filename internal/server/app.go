@@ -124,9 +124,11 @@ func (a *App) routes() {
 	protected.Use(middleware.APIKeyWithUnauthorized(a.cfg.ProxyAPIKey, func(c *gin.Context) {
 		if strings.TrimSpace(c.GetHeader("anthropic-version")) != "" || strings.HasPrefix(c.Request.URL.Path, "/v1/messages") {
 			a.prepareAnthropicHeaders(c)
+			middleware.SetRequestError(c, "authentication_error", "invalid x-api-key")
 			c.AbortWithStatusJSON(http.StatusUnauthorized, anthropic.ErrorPayload("authentication_error", "invalid x-api-key", middleware.GetRequestID(c)))
 			return
 		}
+		middleware.SetRequestError(c, "invalid_api_key", "invalid_api_key")
 		c.AbortWithStatusJSON(http.StatusUnauthorized, middleware.OpenAIErrorPayload("invalid_api_key", "authentication_error", "invalid_api_key", ""))
 	}))
 	protected.GET("/health", a.handleHealth)
@@ -155,10 +157,12 @@ func (a *App) routes() {
 }
 
 func (a *App) writeOpenAIError(c *gin.Context, status int, code, message, errType string) {
+	middleware.SetRequestError(c, code, message)
 	c.AbortWithStatusJSON(status, middleware.OpenAIErrorPayload(message, errType, code, ""))
 }
 
 func (a *App) writeAdminError(c *gin.Context, status int, code, message string) {
+	middleware.SetRequestError(c, code, message)
 	c.AbortWithStatusJSON(status, gin.H{"error": code, "message": message})
 }
 

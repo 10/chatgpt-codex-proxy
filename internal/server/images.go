@@ -311,6 +311,7 @@ func (a *App) openDirectImageWithFailover(ctx context.Context, c *gin.Context, e
 				return account, response, nil
 			}
 		}
+		err = normalizeRequestContextError(ctx, err)
 		if directImageEndpointUnavailable(err) || !shouldFailoverRequest(err) {
 			return account, nil, err
 		}
@@ -485,7 +486,7 @@ func (a *App) collectImageResponse(c *gin.Context, endpoint, responseFormat stri
 
 	accumulator := translate.NewAccumulator(opened.Resolution.Request)
 	for {
-		event, _, err := a.nextStreamEvent(opened.Account, accumulator, opened.Stream)
+		event, _, err := a.nextStreamEvent(c.Request.Context(), opened.Account, accumulator, opened.Stream)
 		if err != nil {
 			if err == io.EOF {
 				err = errIncompleteResponse
@@ -536,7 +537,7 @@ func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, respon
 
 	accumulator := translate.NewAccumulator(opened.Resolution.Request)
 	for {
-		event, upstreamErr, err := a.nextStreamEvent(opened.Account, accumulator, opened.Stream)
+		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), opened.Account, accumulator, opened.Stream)
 		if err != nil {
 			if err == io.EOF {
 				err = errIncompleteResponse

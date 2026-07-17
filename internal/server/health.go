@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"chatgpt-codex-proxy/internal/accounts"
+	"chatgpt-codex-proxy/internal/middleware"
 )
 
 type healthResponse struct {
@@ -27,6 +28,7 @@ func (a *App) handleHealthLive(c *gin.Context) {
 func (a *App) handleHealth(c *gin.Context) {
 	records, err := a.accounts.List()
 	if err != nil {
+		middleware.SetRequestError(c, "health_check_failed", err.Error())
 		c.JSON(http.StatusInternalServerError, healthResponse{
 			Status: "error",
 			Error:  err.Error(),

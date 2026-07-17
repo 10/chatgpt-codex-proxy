@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -166,6 +168,64 @@ func TestAnthropicMessagesWritesMidstreamErrorEvent(t *testing.T) {
 	assertEventTypes(t, events, "message_start", "error")
 	if events[1].Data["type"] != "error" || nestedMapFromAny(events[1].Data["error"])["type"] != "api_error" {
 		t.Fatalf("error event = %#v", events[1])
+	}
+}
+
+func TestAnthropicMessagesDoesNotWriteErrorAfterClientCancellation(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	var logs bytes.Buffer
+	app.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	requestContext, cancel := context.WithCancel(context.Background())
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{
+			events: []*codex.StreamEvent{{
+				Type: "response.created",
+				Raw:  map[string]any{"response": map[string]any{"id": "resp_canceled", "model": "gpt-5.4"}},
+			}},
+			beforeTailErr: cancel,
+			tailErr:       errors.New("H3_REQUEST_CANCELLED (local)"),
+		}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"gpt-5.4","max_tokens":256,"stream":true,"messages":[{"role":"user","content":"Hi"}]}`)).WithContext(requestContext)
+	ctx.Request.Header.Set("anthropic-version", "2023-06-01")
+	app.handleAnthropicMessages(ctx)
+
+	events := parseSSEEvents(t, recorder.Body.String())
+	assertEventTypes(t, events, "message_start")
+	if strings.Contains(logs.String(), "upstream stream failed") {
+		t.Fatalf("client cancellation logged as upstream failure: %s", logs.String())
+	}
+	if got := ctx.GetString(middleware.RequestOutcomeKey); got != "client_canceled" {
+		t.Fatalf("outcome = %q, want client_canceled", got)
+	}
+	if got := ctx.GetString(middleware.RequestErrorCodeKey); got != "client_canceled" {
+		t.Fatalf("error code = %q, want client_canceled", got)
+	}
+	if got := ctx.GetString(middleware.RequestResponseIDKey); got != "resp_canceled" {
+		t.Fatalf("response id = %q, want resp_canceled", got)
+	}
+}
+
+func TestAnthropicErrorAddsRequestLogMetadata(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	app.writeAnthropicError(ctx, http.StatusBadRequest, "messages must contain at least one message")
+
+	if got := ctx.GetString(middleware.RequestErrorCodeKey); got != "invalid_request_error" {
+		t.Fatalf("error code = %q, want invalid_request_error", got)
+	}
+	if got := ctx.GetString(middleware.RequestErrorMessageKey); got != "messages must contain at least one message" {
+		t.Fatalf("error message = %q", got)
 	}
 }
 

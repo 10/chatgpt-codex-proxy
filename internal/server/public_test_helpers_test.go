@@ -13,10 +13,11 @@ import (
 )
 
 type fakeEventStream struct {
-	headers http.Header
-	events  []*codex.StreamEvent
-	index   int
-	tailErr error
+	headers       http.Header
+	events        []*codex.StreamEvent
+	index         int
+	beforeTailErr func()
+	tailErr       error
 }
 
 type memoryAccountsStore struct {
@@ -35,6 +36,10 @@ func (m *memoryAccountsStore) Save(state accounts.State) error {
 func (f *fakeEventStream) NextEvent() (*codex.StreamEvent, error) {
 	if f.index >= len(f.events) {
 		if f.tailErr != nil {
+			if f.beforeTailErr != nil {
+				f.beforeTailErr()
+				f.beforeTailErr = nil
+			}
 			err := f.tailErr
 			f.tailErr = nil
 			return nil, err

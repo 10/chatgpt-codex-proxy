@@ -125,7 +125,7 @@ func (a *App) handlePublicRequest(
 		return
 	}
 
-	accumulator, err := a.collectEvents(opened.Account, opened.Resolution.Request, opened.Stream)
+	accumulator, err := a.collectEvents(c.Request.Context(), opened.Account, opened.Resolution.Request, opened.Stream)
 	if err != nil {
 		a.respondOpenAIUpstreamStreamError(c, endpoint, opened.Account.ID, "", err)
 		return
@@ -205,8 +205,9 @@ func (a *App) openStreamWithFailover(c *gin.Context, ctx context.Context, endpoi
 	var lastErr error
 	for {
 		account, stream, quota, err := open(c, ctx, endpoint, resolution, attempted)
+		err = normalizeRequestContextError(ctx, err)
 		if err == nil {
-			prepared, prepareErr := a.prepareStreamForDelivery(account, stream, resolution.Request.Stream)
+			prepared, prepareErr := a.prepareStreamForDelivery(ctx, account, stream, resolution.Request.Stream)
 			if prepareErr == nil {
 				return account, prepared, quota, nil
 			}
@@ -230,11 +231,12 @@ func (a *App) openStreamWithFailover(c *gin.Context, ctx context.Context, endpoi
 	}
 }
 
-func (a *App) prepareStreamForDelivery(account accounts.Record, stream eventStream, streaming bool) (eventStream, error) {
+func (a *App) prepareStreamForDelivery(ctx context.Context, account accounts.Record, stream eventStream, streaming bool) (eventStream, error) {
 	events := make([]*codex.StreamEvent, 0, 1)
 	for {
 		event, err := stream.NextEvent()
 		if err != nil {
+			err = normalizeRequestContextError(ctx, err)
 			if err == io.EOF {
 				return nil, errIncompleteResponse
 			}
@@ -327,10 +329,10 @@ func (a *App) openWSStream(c *gin.Context, ctx context.Context, endpoint string,
 	return account, stream, codex.ParseQuotaFromHeaders(stream.Headers()), nil
 }
 
-func (a *App) collectEvents(account accounts.Record, normalized translate.NormalizedRequest, stream eventStream) (*translate.Accumulator, error) {
+func (a *App) collectEvents(ctx context.Context, account accounts.Record, normalized translate.NormalizedRequest, stream eventStream) (*translate.Accumulator, error) {
 	accumulator := translate.NewAccumulator(normalized)
 	for {
-		event, _, err := a.nextStreamEvent(account, accumulator, stream)
+		event, _, err := a.nextStreamEvent(ctx, account, accumulator, stream)
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -367,7 +369,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 	c.Writer.Flush()
 
 	for {
-		event, upstreamErr, err := a.nextStreamEvent(account, accumulator, stream)
+		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), account, accumulator, stream)
 		if err != nil {
 			if err == io.EOF {
 				if !accumulator.IsCompleted() {
@@ -538,7 +540,7 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 	accumulator := translate.NewAccumulator(normalized)
 	var tupleTextBuffer strings.Builder
 	for {
-		event, upstreamErr, err := a.nextStreamEvent(account, accumulator, stream)
+		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), account, accumulator, stream)
 		if err != nil {
 			if err == io.EOF {
 				if !accumulator.IsCompleted() {
@@ -563,11 +565,11 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 	c.Writer.Flush()
 }
 
-func (a *App) nextStreamEvent(account accounts.Record, accumulator *translate.Accumulator, stream eventStream) (*codex.StreamEvent, bool, error) {
+func (a *App) nextStreamEvent(ctx context.Context, account accounts.Record, accumulator *translate.Accumulator, stream eventStream) (*codex.StreamEvent, bool, error) {
 	for {
 		event, err := stream.NextEvent()
 		if err != nil {
-			return nil, false, err
+			return nil, false, normalizeRequestContextError(ctx, err)
 		}
 		if a.observeQuotaEvent(account, event) {
 			continue
@@ -817,6 +819,9 @@ func (a *App) respondOpenAINormalizeError(c *gin.Context, err error) {
 }
 
 func (a *App) handleOpenStreamError(c *gin.Context, endpoint, actualAccountID, reportedAccountID string, err error) {
+	if a.recordRequestCancellation(c, actualAccountID, "", err) {
+		return
+	}
 	if errors.Is(err, errContinuationAccountUnavailable) {
 		a.writeOpenAIError(c, http.StatusServiceUnavailable, "continuation_account_unavailable", "continuation account unavailable", "api_error")
 		return
@@ -828,21 +833,33 @@ func (a *App) handleOpenStreamError(c *gin.Context, endpoint, actualAccountID, r
 	status, code, message := a.classifyUpstreamError(strings.TrimSpace(actualAccountID), err)
 	logAccountID := jsonutil.FirstNonEmpty(actualAccountID, reportedAccountID)
 	a.logUpstreamRequestFailure(c, endpoint, logAccountID, status, code, err)
+	middleware.SetRequestOutcome(c, "upstream_error")
 	a.writeOpenAIError(c, status, code, message, "api_error")
 }
 
 func (a *App) respondOpenAIUpstreamStreamError(c *gin.Context, endpoint, accountID, responseID string, err error) {
+	if a.recordRequestCancellation(c, accountID, responseID, err) {
+		return
+	}
 	status, code, message := a.classifyUpstreamError(accountID, err)
 	a.logUpstreamStreamFailure(c, endpoint, accountID, responseID, err)
+	middleware.SetRequestOutcome(c, "upstream_error")
+	middleware.SetRequestResponseID(c, responseID)
 	a.writeOpenAIError(c, status, code, message, "api_error")
 }
 
 func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID, eventName string, err error, classify bool) {
+	if a.recordRequestCancellation(c, accountID, responseID, err) {
+		return
+	}
 	status, code, message := http.StatusInternalServerError, "api_error", err.Error()
 	if classify {
 		status, code, message = a.classifyUpstreamError(accountID, err)
 	}
 	a.logUpstreamStreamFailure(c, endpoint, accountID, responseID, err)
+	middleware.SetRequestOutcome(c, "upstream_error")
+	middleware.SetRequestError(c, code, message)
+	middleware.SetRequestResponseID(c, responseID)
 	if endpoint == "responses" {
 		writeResponsesStreamError(c.Writer, status, message)
 		c.Writer.Flush()

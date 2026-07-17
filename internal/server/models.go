@@ -125,6 +125,7 @@ func (a *App) handleModelByID(c *gin.Context) {
 		return
 	}
 	if !ok {
+		middleware.SetRequestError(c, "model_not_found", "Model '"+modelID+"' not found")
 		c.AbortWithStatusJSON(http.StatusNotFound, middleware.OpenAIErrorPayload("Model '"+c.Param("model_id")+"' not found", "invalid_request_error", "model_not_found", "model"))
 		return
 	}

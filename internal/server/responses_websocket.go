@@ -193,10 +193,13 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 	accumulator := translate.NewAccumulator(resolution.Request)
 	var tupleTextBuffer strings.Builder
 	for {
-		event, upstreamErr, err := a.nextStreamEvent(account, accumulator, session.stream)
+		event, upstreamErr, err := a.nextStreamEvent(c.Request.Context(), account, accumulator, session.stream)
 		if err != nil {
 			if err == io.EOF {
 				err = errIncompleteResponse
+			}
+			if a.recordRequestCancellation(c, account.ID, accumulator.ResponseID, err) {
+				return false
 			}
 			if !upstreamErr {
 				_ = session.stream.Close()
@@ -205,6 +208,9 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 			}
 			status, code, message := a.classifyUpstreamError(account.ID, err)
 			a.logUpstreamStreamFailure(c, "responses_websocket", account.ID, accumulator.ResponseID, err)
+			middleware.SetRequestOutcome(c, "upstream_error")
+			middleware.SetRequestError(c, code, message)
+			middleware.SetRequestResponseID(c, accumulator.ResponseID)
 			return writeResponsesWebSocketError(conn, status, code, message, "api_error", "")
 		}
 

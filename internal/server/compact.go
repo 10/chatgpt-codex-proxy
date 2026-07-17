@@ -14,6 +14,7 @@ import (
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
+	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/openai"
 	"chatgpt-codex-proxy/internal/translate"
@@ -57,8 +58,12 @@ func (a *App) handleResponsesCompact(c *gin.Context) {
 	}
 	upstream, quota, err := caller(c.Request.Context(), account, payload)
 	if err != nil {
+		if a.recordRequestCancellation(c, account.ID, "", err) {
+			return
+		}
 		status, code, message := a.classifyUpstreamError(account.ID, err)
 		a.logUpstreamRequestFailure(c, "responses_compact", account.ID, status, code, err)
+		middleware.SetRequestOutcome(c, "upstream_error")
 		a.writeOpenAIError(c, status, code, message, "api_error")
 		return
 	}

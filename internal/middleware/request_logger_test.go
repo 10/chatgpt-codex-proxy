@@ -151,6 +151,55 @@ func TestRequestLoggerWarnsOnUnauthorized(t *testing.T) {
 	}
 }
 
+func TestRequestLoggerIncludesStructuredErrorDetails(t *testing.T) {
+	t.Parallel()
+
+	engine, logs := newLoggedEngine(t)
+	engine.GET("/stream", func(c *gin.Context) {
+		SetRequestOutcome(c, "upstream_error")
+		SetRequestError(c, "upstream_error", "connection reset")
+		c.Status(http.StatusOK)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	engine.ServeHTTP(recorder, request)
+
+	entry := decodeLogEntries(t, logs)[0]
+	if entry["level"] != "ERROR" {
+		t.Fatalf("level = %v, want ERROR", entry["level"])
+	}
+	if entry["outcome"] != "upstream_error" {
+		t.Fatalf("outcome = %v, want upstream_error", entry["outcome"])
+	}
+	if entry["error_code"] != "upstream_error" || entry["error"] != "connection reset" {
+		t.Fatalf("error metadata = %#v", entry)
+	}
+}
+
+func TestRequestLoggerTreatsClientCancellationAsInfo(t *testing.T) {
+	t.Parallel()
+
+	engine, logs := newLoggedEngine(t)
+	engine.GET("/stream", func(c *gin.Context) {
+		SetRequestOutcome(c, "client_canceled")
+		SetRequestError(c, "client_canceled", "context canceled: H3_REQUEST_CANCELLED (local)")
+		c.Status(http.StatusOK)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/stream", nil)
+	engine.ServeHTTP(recorder, request)
+
+	entry := decodeLogEntries(t, logs)[0]
+	if entry["level"] != "INFO" {
+		t.Fatalf("level = %v, want INFO", entry["level"])
+	}
+	if entry["outcome"] != "client_canceled" || entry["error_code"] != "client_canceled" {
+		t.Fatalf("cancellation metadata = %#v", entry)
+	}
+}
+
 func TestRequestLoggerLogsRecoveredPanic(t *testing.T) {
 	t.Parallel()
 
