@@ -687,17 +687,125 @@ func TestNormalizeMessagesFiltersClaudeCodeAttributionSystemText(t *testing.T) {
 	}
 }
 
-func TestNormalizeMessagesRejectsHostedWebSearch(t *testing.T) {
+func TestNormalizeMessagesMapsHostedWebSearch(t *testing.T) {
+	t.Parallel()
+
+	for _, toolType := range []string{"web_search_20250305", "web_search_20260209"} {
+		toolType := toolType
+		t.Run(toolType, func(t *testing.T) {
+			t.Parallel()
+
+			request, err := DecodeMessages([]byte(`{
+				"model":"gpt-5.4",
+				"max_tokens":10,
+				"messages":[{"role":"user","content":"search"}],
+				"tools":[{
+					"type":"` + toolType + `",
+					"name":"browser_search",
+					"allowed_domains":["openai.com","anthropic.com"],
+					"user_location":{"type":"approximate","country":"US"}
+				}],
+				"tool_choice":{"type":"tool","name":"browser_search","disable_parallel_tool_use":true}
+			}`))
+			if err != nil {
+				t.Fatalf("DecodeMessages() error = %v", err)
+			}
+
+			normalized, err := Normalize(request, models.NewCatalog(models.BootstrapEntries()))
+			if err != nil {
+				t.Fatalf("Normalize() error = %v", err)
+			}
+			if len(normalized.Tools) != 1 || normalized.Tools[0].Type != "web_search" {
+				t.Fatalf("tools = %#v, want one web_search tool", normalized.Tools)
+			}
+			encoded, err := json.Marshal(normalized.Tools[0])
+			if err != nil {
+				t.Fatalf("json.Marshal(tool) error = %v", err)
+			}
+			var tool map[string]any
+			if err := json.Unmarshal(encoded, &tool); err != nil {
+				t.Fatalf("json.Unmarshal(tool) error = %v", err)
+			}
+			filters, _ := tool["filters"].(map[string]any)
+			allowedDomains, _ := filters["allowed_domains"].([]any)
+			if len(allowedDomains) != 2 || allowedDomains[0] != "openai.com" || allowedDomains[1] != "anthropic.com" {
+				t.Fatalf("filters = %#v", filters)
+			}
+			if country := normalized.Tools[0].UserLocation["country"]; country != "US" {
+				t.Fatalf("user_location.country = %#v, want US", country)
+			}
+			var toolChoice map[string]any
+			if err := json.Unmarshal(normalized.ToolChoice, &toolChoice); err != nil || toolChoice["type"] != "web_search" {
+				t.Fatalf("tool choice = %s, err = %v", normalized.ToolChoice, err)
+			}
+			if normalized.ParallelToolCalls == nil || *normalized.ParallelToolCalls {
+				t.Fatalf("parallel_tool_calls = %#v, want false", normalized.ParallelToolCalls)
+			}
+		})
+	}
+}
+
+func TestNormalizeMessagesReplaysHostedWebSearchBlocks(t *testing.T) {
+	t.Parallel()
+
+	request, err := DecodeMessages([]byte(`{
+		"model":"gpt-5.4",
+		"max_tokens":10,
+		"messages":[
+			{"role":"user","content":"search"},
+			{"role":"assistant","content":[
+				{"type":"server_tool_use","id":"ws_1","name":"web_search","input":{"query":"Codex API"}},
+				{"type":"web_search_tool_result","tool_use_id":"ws_1","content":[
+					{"type":"web_search_result","title":"OpenAI Codex","url":"https://openai.com/codex","encrypted_content":"opaque","page_age":null}
+				]},
+				{"type":"text","text":"Here is what I found."}
+			]},
+			{"role":"user","content":"Tell me more."}
+		],
+		"tools":[{"type":"web_search_20250305","name":"web_search"}]
+	}`))
+	if err != nil {
+		t.Fatalf("DecodeMessages() error = %v", err)
+	}
+
+	normalized, err := Normalize(request, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if len(normalized.Input) != 4 {
+		t.Fatalf("input len = %d, want 4: %#v", len(normalized.Input), normalized.Input)
+	}
+	search := normalized.Input[1]
+	if search.Type != "web_search_call" || search.ID != "ws_1" || search.Status != "completed" {
+		t.Fatalf("search replay = %#v", search)
+	}
+	if normalized.Input[2].Role != "assistant" || normalized.Input[2].Content[0].Text != "Here is what I found." {
+		t.Fatalf("assistant replay = %#v", normalized.Input[2])
+	}
+}
+
+func TestNormalizeMessagesRejectsUnsupportedHostedWebSearchLimits(t *testing.T) {
 	t.Parallel()
 
 	maxTokens := 10
-	_, err := Normalize(MessagesRequest{
-		Model:     "gpt-5.4",
-		MaxTokens: &maxTokens,
-		Messages:  []Message{{Role: "user", Content: Content{{Type: "text", Text: "search"}}}},
-		Tools:     []Tool{{Type: "web_search_20250305", Name: "web_search"}},
-	}, models.NewCatalog(models.BootstrapEntries()))
-	if err == nil || !strings.Contains(err.Error(), "hosted web search") {
-		t.Fatalf("Normalize() error = %v", err)
+	maxUses := 1
+	for name, tool := range map[string]Tool{
+		"max_uses":        {Type: "web_search_20250305", Name: "web_search", MaxUses: &maxUses},
+		"blocked_domains": {Type: "web_search_20250305", Name: "web_search", BlockedDomains: []string{"example.com"}},
+	} {
+		name, tool := name, tool
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := Normalize(MessagesRequest{
+				Model:     "gpt-5.4",
+				MaxTokens: &maxTokens,
+				Messages:  []Message{{Role: "user", Content: Content{{Type: "text", Text: "search"}}}},
+				Tools:     []Tool{tool},
+			}, models.NewCatalog(models.BootstrapEntries()))
+			if err == nil || !strings.Contains(err.Error(), name+" is not supported") {
+				t.Fatalf("Normalize() error = %v", err)
+			}
+		})
 	}
 }

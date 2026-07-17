@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"cmp"
+	"fmt"
 	"strings"
 
 	"chatgpt-codex-proxy/internal/codex"
@@ -18,27 +19,29 @@ type streamBlock struct {
 }
 
 type StreamEncoder struct {
-	started      bool
-	nextIndex    int
-	open         *streamBlock
-	textEmitted  bool
-	thinkEmitted bool
-	thinkDeltas  []string
-	toolSent     map[string]int
-	toolDone     map[string]bool
-	toolStates   map[string]*translate.ToolCallState
-	toolDeltas   map[string][]string
-	toolOrder    []string
-	inputTokens  int64
+	started       bool
+	nextIndex     int
+	open          *streamBlock
+	textEmitted   bool
+	thinkEmitted  bool
+	thinkDeltas   []string
+	toolSent      map[string]int
+	toolDone      map[string]bool
+	toolStates    map[string]*translate.ToolCallState
+	toolDeltas    map[string][]string
+	toolOrder     []string
+	webSearchDone map[string]bool
+	inputTokens   int64
 }
 
 func NewStreamEncoder(inputTokens int64) *StreamEncoder {
 	return &StreamEncoder{
-		toolSent:    make(map[string]int),
-		toolDone:    make(map[string]bool),
-		toolStates:  make(map[string]*translate.ToolCallState),
-		toolDeltas:  make(map[string][]string),
-		inputTokens: max(0, inputTokens),
+		toolSent:      make(map[string]int),
+		toolDone:      make(map[string]bool),
+		toolStates:    make(map[string]*translate.ToolCallState),
+		toolDeltas:    make(map[string][]string),
+		webSearchDone: make(map[string]bool),
+		inputTokens:   max(0, inputTokens),
 	}
 }
 
@@ -104,6 +107,11 @@ func (e *StreamEncoder) Events(event *codex.StreamEvent, accumulator *translate.
 		}
 	case "response.output_item.done":
 		item := jsonutil.FirstMap(jsonutil.MapValue(event.Raw, "item"), jsonutil.MapValue(event.Raw, "output_item"))
+		if jsonutil.StringValue(item["type"]) == "web_search_call" {
+			fallbackID := webSearchStreamFallbackID(event.Raw)
+			result = append(result, e.completeWebSearch(item, fallbackID)...)
+			break
+		}
 		if jsonutil.StringValue(item["type"]) == "reasoning" {
 			if !shouldExposeThinking(accumulator) {
 				break
@@ -282,6 +290,12 @@ func (e *StreamEncoder) hydrateTerminal(accumulator *translate.Accumulator) []St
 			break
 		}
 	}
+	responsesObject := accumulator.ResponsesObject()
+	for index, item := range jsonutil.SliceOfMaps(responsesObject["output"]) {
+		if jsonutil.StringValue(item["type"]) == "web_search_call" {
+			events = append(events, e.completeWebSearch(item, fmt.Sprintf("web_search_%d", index))...)
+		}
+	}
 	if !e.textEmitted {
 		for _, block := range blocks {
 			if block.Type != "text" || block.Text == "" {
@@ -297,6 +311,74 @@ func (e *StreamEncoder) hydrateTerminal(accumulator *translate.Accumulator) []St
 	if !toolStreamStarted {
 		flushTerminalTools()
 	}
+	return events
+}
+
+func webSearchStreamFallbackID(raw map[string]any) string {
+	switch index := raw["output_index"].(type) {
+	case int:
+		return fmt.Sprintf("web_search_%d", index)
+	case int64:
+		return fmt.Sprintf("web_search_%d", index)
+	case float64:
+		if index >= 0 && index == float64(int(index)) {
+			return fmt.Sprintf("web_search_%d", int(index))
+		}
+	}
+	return jsonutil.FirstNonEmpty(jsonutil.StringValue(raw["item_id"]), jsonutil.StringValue(raw["output_item_id"]))
+}
+
+func (e *StreamEncoder) completeWebSearch(item map[string]any, fallbackID string) []StreamEvent {
+	blocks := webSearchResponseBlocks(item, fallbackID)
+	if len(blocks) != 2 {
+		return nil
+	}
+	toolUse := blocks[0]
+	if e.webSearchDone[toolUse.ID] {
+		return nil
+	}
+	e.webSearchDone[toolUse.ID] = true
+
+	events := e.closeBlock()
+	useIndex := e.nextIndex
+	e.nextIndex++
+	events = append(events, StreamEvent{
+		"type":  "content_block_start",
+		"index": useIndex,
+		"content_block": map[string]any{
+			"type":  "server_tool_use",
+			"id":    toolUse.ID,
+			"name":  toolUse.Name,
+			"input": map[string]any{},
+		},
+	})
+	if string(toolUse.Input) != "{}" {
+		events = append(events, StreamEvent{
+			"type":  "content_block_delta",
+			"index": useIndex,
+			"delta": map[string]any{
+				"type":         "input_json_delta",
+				"partial_json": string(toolUse.Input),
+			},
+		})
+	}
+	events = append(events, StreamEvent{"type": "content_block_stop", "index": useIndex})
+
+	searchResult := blocks[1]
+	resultIndex := e.nextIndex
+	e.nextIndex++
+	events = append(events,
+		StreamEvent{
+			"type":  "content_block_start",
+			"index": resultIndex,
+			"content_block": map[string]any{
+				"type":        "web_search_tool_result",
+				"tool_use_id": searchResult.ToolUseID,
+				"content":     searchResult.Content,
+			},
+		},
+		StreamEvent{"type": "content_block_stop", "index": resultIndex},
+	)
 	return events
 }
 

@@ -64,7 +64,7 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (translate.Norm
 	if err != nil {
 		return translate.NormalizedRequest{}, err
 	}
-	toolChoice, parallelToolCalls, err := normalizeToolChoice(request.ToolChoice, toolNames)
+	toolChoice, parallelToolCalls, err := normalizeToolChoice(request.ToolChoice, toolNames, request.Tools)
 	if err != nil {
 		return translate.NormalizedRequest{}, err
 	}
@@ -129,6 +129,7 @@ func normalizeSystem(content Content) (string, error) {
 
 func normalizeMessages(messages []Message, toolNames *translate.ToolNames) ([]codex.InputItem, error) {
 	knownCalls := make(map[string]struct{})
+	knownSearches := make(map[string]struct{})
 	result := make([]codex.InputItem, 0, len(messages))
 	for _, message := range messages {
 		role := strings.TrimSpace(message.Role)
@@ -212,6 +213,31 @@ func normalizeMessages(messages []Message, toolNames *translate.ToolNames) ([]co
 					}
 				}
 				result = append(result, codex.InputItem{Type: "function_call_output", CallID: shortenCallID(callID), OutputText: text, OutputContent: output})
+			case "server_tool_use":
+				if role != "assistant" {
+					return nil, errors.New("server_tool_use blocks require the assistant role")
+				}
+				flushContent()
+				callID := strings.TrimSpace(block.ID)
+				if callID == "" || strings.TrimSpace(block.Name) != "web_search" {
+					return nil, errors.New("server_tool_use requires an id and the web_search name")
+				}
+				if _, err := normalizeToolInput(block.Input); err != nil {
+					return nil, err
+				}
+				knownSearches[callID] = struct{}{}
+				result = append(result, codex.InputItem{Type: "web_search_call", ID: shortenCallID(callID), Status: "completed"})
+			case "web_search_tool_result":
+				if role != "assistant" {
+					return nil, errors.New("web_search_tool_result blocks require the assistant role")
+				}
+				callID := strings.TrimSpace(block.ToolUseID)
+				if callID == "" {
+					return nil, errors.New("tool_use_id is required")
+				}
+				if _, ok := knownSearches[callID]; !ok {
+					return nil, errors.New("web_search_tool_result references an unknown server_tool_use id")
+				}
 			case "thinking", "redacted_thinking":
 				if role != "assistant" {
 					return nil, errors.New(block.Type + " blocks require the assistant role")
@@ -328,8 +354,15 @@ func normalizeTools(tools []Tool, names *translate.ToolNames) ([]codex.Tool, err
 	result := make([]codex.Tool, 0, len(tools))
 	for _, tool := range tools {
 		toolType := strings.TrimSpace(tool.Type)
-		if strings.HasPrefix(toolType, "web_search") {
-			return nil, errors.New("hosted web search is not supported by the Anthropic adapter")
+		if isHostedWebSearchToolType(toolType) {
+			if tool.MaxUses != nil {
+				return nil, errors.New("max_uses is not supported for hosted web search")
+			}
+			if len(tool.BlockedDomains) > 0 {
+				return nil, errors.New("blocked_domains is not supported for hosted web search")
+			}
+			result = append(result, normalizeHostedWebSearchTool(tool))
+			continue
 		}
 		if toolType != "" && toolType != "custom" {
 			return nil, fmt.Errorf("unsupported tool type %q", toolType)
@@ -350,7 +383,23 @@ func normalizeTools(tools []Tool, names *translate.ToolNames) ([]codex.Tool, err
 	return result, nil
 }
 
-func normalizeToolChoice(choice *ToolChoice, names *translate.ToolNames) (json.RawMessage, *bool, error) {
+func normalizeHostedWebSearchTool(tool Tool) codex.Tool {
+	normalized := codex.Tool{
+		Type:         "web_search",
+		UserLocation: maps.Clone(tool.UserLocation),
+	}
+	if len(tool.AllowedDomains) > 0 {
+		filters, _ := json.Marshal(map[string]any{"allowed_domains": tool.AllowedDomains})
+		normalized.ExtraFields = map[string]json.RawMessage{"filters": filters}
+	}
+	return normalized
+}
+
+func isHostedWebSearchToolType(toolType string) bool {
+	return toolType == "web_search_20250305" || toolType == "web_search_20260209"
+}
+
+func normalizeToolChoice(choice *ToolChoice, names *translate.ToolNames, tools []Tool) (json.RawMessage, *bool, error) {
 	if choice == nil {
 		return nil, nil, nil
 	}
@@ -367,6 +416,9 @@ func normalizeToolChoice(choice *ToolChoice, names *translate.ToolNames) (json.R
 			return nil, nil, errors.New("name is required for tool choice type tool")
 		}
 		selection := map[string]any{"type": "function", "name": names.Shorten(choice.Name)}
+		if isHostedWebSearchToolName(choice.Name, tools) {
+			selection = map[string]any{"type": "web_search"}
+		}
 		value, _ := json.Marshal(selection)
 		encoded = value
 	default:
@@ -378,6 +430,23 @@ func normalizeToolChoice(choice *ToolChoice, names *translate.ToolNames) (json.R
 		parallel = &value
 	}
 	return encoded, parallel, nil
+}
+
+func isHostedWebSearchToolName(name string, tools []Tool) bool {
+	name = strings.TrimSpace(name)
+	for _, tool := range tools {
+		if !isHostedWebSearchToolType(strings.TrimSpace(tool.Type)) {
+			continue
+		}
+		toolName := strings.TrimSpace(tool.Name)
+		if toolName == "" {
+			toolName = "web_search"
+		}
+		if toolName == name {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeThinking(request MessagesRequest, catalog *models.Catalog) (*codex.Reasoning, []string, error) {

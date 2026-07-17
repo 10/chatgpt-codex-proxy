@@ -56,19 +56,23 @@ func (c *Content) UnmarshalJSON(data []byte) error {
 }
 
 type Block struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	Thinking  string          `json:"thinking,omitempty"`
-	Signature string          `json:"signature,omitempty"`
-	Data      string          `json:"data,omitempty"`
-	Source    *ImageSource    `json:"source,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   Content         `json:"content,omitempty"`
-	IsError   bool            `json:"is_error,omitempty"`
-	Cache     json.RawMessage `json:"cache_control,omitempty"`
+	Type             string          `json:"type"`
+	Text             string          `json:"text,omitempty"`
+	Thinking         string          `json:"thinking,omitempty"`
+	Signature        string          `json:"signature,omitempty"`
+	Data             string          `json:"data,omitempty"`
+	Source           *ImageSource    `json:"source,omitempty"`
+	ID               string          `json:"id,omitempty"`
+	Name             string          `json:"name,omitempty"`
+	Input            json.RawMessage `json:"input,omitempty"`
+	ToolUseID        string          `json:"tool_use_id,omitempty"`
+	Content          Content         `json:"content,omitempty"`
+	IsError          bool            `json:"is_error,omitempty"`
+	Title            string          `json:"title,omitempty"`
+	URL              string          `json:"url,omitempty"`
+	EncryptedContent string          `json:"encrypted_content,omitempty"`
+	PageAge          json.RawMessage `json:"page_age,omitempty"`
+	Cache            json.RawMessage `json:"cache_control,omitempty"`
 }
 
 type ImageSource struct {
@@ -79,13 +83,15 @@ type ImageSource struct {
 }
 
 type Tool struct {
-	Type         string          `json:"type,omitempty"`
-	Name         string          `json:"name,omitempty"`
-	Description  string          `json:"description,omitempty"`
-	InputSchema  map[string]any  `json:"input_schema,omitempty"`
-	MaxUses      *int            `json:"max_uses,omitempty"`
-	UserLocation map[string]any  `json:"user_location,omitempty"`
-	Cache        json.RawMessage `json:"cache_control,omitempty"`
+	Type           string          `json:"type,omitempty"`
+	Name           string          `json:"name,omitempty"`
+	Description    string          `json:"description,omitempty"`
+	InputSchema    map[string]any  `json:"input_schema,omitempty"`
+	MaxUses        *int            `json:"max_uses,omitempty"`
+	AllowedDomains []string        `json:"allowed_domains,omitempty"`
+	BlockedDomains []string        `json:"blocked_domains,omitempty"`
+	UserLocation   map[string]any  `json:"user_location,omitempty"`
+	Cache          json.RawMessage `json:"cache_control,omitempty"`
 }
 
 type ToolChoice struct {

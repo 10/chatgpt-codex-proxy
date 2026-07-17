@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"reflect"
@@ -28,22 +29,38 @@ type MessageResponse struct {
 }
 
 type ResponseBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	Thinking  string          `json:"thinking,omitempty"`
-	Signature string          `json:"signature,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
+	Type      string           `json:"type"`
+	Text      string           `json:"text,omitempty"`
+	Thinking  string           `json:"thinking,omitempty"`
+	Signature string           `json:"signature,omitempty"`
+	ID        string           `json:"id,omitempty"`
+	Name      string           `json:"name,omitempty"`
+	Input     json.RawMessage  `json:"input,omitempty"`
+	ToolUseID string           `json:"tool_use_id,omitempty"`
+	Content   []map[string]any `json:"content,omitempty"`
 }
 
 func (b ResponseBlock) MarshalJSON() ([]byte, error) {
-	if b.Type == "thinking" {
+	switch b.Type {
+	case "thinking":
 		return json.Marshal(struct {
 			Type      string `json:"type"`
 			Thinking  string `json:"thinking"`
 			Signature string `json:"signature"`
 		}{Type: b.Type, Thinking: b.Thinking, Signature: b.Signature})
+	case "server_tool_use":
+		return json.Marshal(struct {
+			Type  string          `json:"type"`
+			ID    string          `json:"id"`
+			Name  string          `json:"name"`
+			Input json.RawMessage `json:"input"`
+		}{Type: b.Type, ID: b.ID, Name: b.Name, Input: b.Input})
+	case "web_search_tool_result":
+		return json.Marshal(struct {
+			Type      string           `json:"type"`
+			ToolUseID string           `json:"tool_use_id"`
+			Content   []map[string]any `json:"content"`
+		}{Type: b.Type, ToolUseID: b.ToolUseID, Content: b.Content})
 	}
 	type alias ResponseBlock
 	return json.Marshal(alias(b))
@@ -88,7 +105,8 @@ func responseBlocks(accumulator *translate.Accumulator) []ResponseBlock {
 	output := jsonutil.SliceOfMaps(response["output"])
 	blocks := make([]ResponseBlock, 0, len(output))
 	exposeThinking := shouldExposeThinking(accumulator)
-	for _, item := range output {
+	webSearchSeen := make(map[string]bool)
+	for index, item := range output {
 		switch jsonutil.StringValue(item["type"]) {
 		case "reasoning":
 			if !exposeThinking {
@@ -108,6 +126,13 @@ func responseBlocks(accumulator *translate.Accumulator) []ResponseBlock {
 					blocks = append(blocks, ResponseBlock{Type: "text", Text: cmp.Or(jsonutil.StringValue(content["refusal"]), jsonutil.StringValue(content["text"]))})
 				}
 			}
+		case "web_search_call":
+			searchBlocks := webSearchResponseBlocks(item, fmt.Sprintf("web_search_%d", index))
+			if len(searchBlocks) == 0 || webSearchSeen[searchBlocks[0].ID] {
+				continue
+			}
+			webSearchSeen[searchBlocks[0].ID] = true
+			blocks = append(blocks, searchBlocks...)
 		case "function_call", "custom_tool_call":
 			if !isExecutableToolCall(item, response, accumulator) {
 				continue
@@ -128,6 +153,69 @@ func responseBlocks(accumulator *translate.Accumulator) []ResponseBlock {
 		}
 	}
 	return blocks
+}
+
+func webSearchResponseBlocks(item map[string]any, fallbackID string) []ResponseBlock {
+	if status := strings.TrimSpace(jsonutil.StringValue(item["status"])); status != "" && status != "completed" {
+		return nil
+	}
+	toolUseID := shortenCallID(jsonutil.FirstNonEmpty(
+		jsonutil.StringValue(item["id"]),
+		jsonutil.StringValue(item["output_item_id"]),
+		jsonutil.StringValue(item["call_id"]),
+		fallbackID,
+	))
+	if toolUseID == "" {
+		return nil
+	}
+
+	input := map[string]any{}
+	if query := webSearchQuery(item); query != "" {
+		input["query"] = query
+	}
+	encodedInput, _ := json.Marshal(input)
+	return []ResponseBlock{
+		{Type: "server_tool_use", ID: toolUseID, Name: "web_search", Input: encodedInput},
+		{Type: "web_search_tool_result", ToolUseID: toolUseID, Content: webSearchResultContent(item)},
+	}
+}
+
+func webSearchQuery(item map[string]any) string {
+	action := jsonutil.MapValue(item, "action")
+	input := jsonutil.MapValue(item, "input")
+	return jsonutil.FirstNonEmpty(
+		jsonutil.StringValue(action["query"]),
+		jsonutil.StringValue(item["query"]),
+		jsonutil.StringValue(input["query"]),
+	)
+}
+
+func webSearchResultContent(item map[string]any) []map[string]any {
+	results := jsonutil.SliceOfMaps(item["results"])
+	if len(results) == 0 {
+		results = jsonutil.SliceOfMaps(jsonutil.MapValue(item, "action")["results"])
+	}
+	content := make([]map[string]any, 0, len(results))
+	for _, result := range results {
+		url := strings.TrimSpace(jsonutil.StringValue(result["url"]))
+		if url == "" {
+			continue
+		}
+		content = append(content, map[string]any{
+			"type":     "web_search_result",
+			"title":    jsonutil.FirstNonEmpty(jsonutil.StringValue(result["title"]), url),
+			"url":      url,
+			"page_age": nullableWebSearchPageAge(result["page_age"]),
+		})
+	}
+	return content
+}
+
+func nullableWebSearchPageAge(value any) any {
+	if pageAge := strings.TrimSpace(jsonutil.StringValue(value)); pageAge != "" {
+		return pageAge
+	}
+	return nil
 }
 
 func normalizedOutputText(accumulator *translate.Accumulator, text string) string {

@@ -28,10 +28,13 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | Base64 or URL image | `input_image` |
 | Assistant `tool_use` | `function_call` |
 | User `tool_result` | `function_call_output` |
+| Replayed hosted-search blocks | `web_search_call` |
 | Tool `input_schema` | Normalized function parameters |
+| Hosted web search | Codex `web_search` |
+| Web-search domains and location | Codex search filters and user location |
 | `tool_choice: auto` | `auto` |
 | `tool_choice: any` | `required` |
-| Named tool choice | Named function choice |
+| Named tool choice | Named function or hosted-search choice |
 | `disable_parallel_tool_use` | `parallel_tool_calls` |
 | Enabled/adaptive thinking | Codex reasoning summaries and encrypted reasoning state |
 | JSON-schema output format | Codex structured output |
@@ -54,7 +57,7 @@ Streaming responses use named Anthropic SSE events:
 5. `message_delta`
 6. `message_stop`
 
-Text uses `text_delta`, thinking uses `thinking_delta` and `signature_delta`, and tool input uses `input_json_delta`. The proxy does not emit an OpenAI `[DONE]` sentinel.
+Text uses `text_delta`, thinking uses `thinking_delta` and `signature_delta`, and tool input uses `input_json_delta`. Hosted search emits paired `server_tool_use` and `web_search_tool_result` blocks. The proxy does not emit an OpenAI `[DONE]` sentinel.
 
 If a request fails before streaming begins, the endpoint returns a normal JSON error and HTTP status. A failure after SSE headers have been committed is emitted as an `event: error` frame and is not followed by `message_stop`.
 
@@ -69,7 +72,7 @@ The result is a Codex-oriented estimate. It is not an Anthropic billing-token gu
 - Use actual Codex model IDs returned by `/v1/models`. The proxy does not create synthetic Claude model aliases.
 - `max_tokens` is required by Messages and accepted, but positive values do not currently enforce exact output truncation. `max_tokens: 0` maps to the Codex WebSocket `generate: false` control.
 - `temperature`, `top_p`, `top_k`, and `stop_sequences` are accepted but are not forwarded because the Codex backend does not expose equivalent request fields.
+- Hosted-search `max_uses` and `blocked_domains` are rejected because the Codex backend cannot enforce them. Use `allowed_domains` for domain filtering.
 - `thinking.budget_tokens` enables thinking but does not map to an exact Codex token budget. The model catalog's default reasoning effort is used unless `output_config.effort` selects a supported effort.
-- Hosted web-search tools are rejected because their server-tool state and citations cannot be round-tripped faithfully through the Anthropic Messages protocol.
 - Prompt caching controls are accepted as content metadata. Reported cache-read usage comes from Codex cached-token counters when available.
-- Anthropic client-side tools are supported. Anthropic server-tool families are rejected until their state can be round-tripped faithfully through Codex.
+- Anthropic client-side tools and hosted web search are supported. Other Anthropic server-tool families are rejected until their state can be round-tripped faithfully through Codex.

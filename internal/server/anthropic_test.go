@@ -439,6 +439,89 @@ func TestAnthropicZeroMaxTokensUsesWebSocketGenerateFalse(t *testing.T) {
 	}
 }
 
+func TestAnthropicHostedWebSearchUsesWebSocketAndMapsResponse(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.httpStream = func(context.Context, accounts.Record, codex.Request, string) (eventStream, error) {
+		t.Fatal("hosted web search used HTTP instead of WebSocket")
+		return nil, io.EOF
+	}
+	fakeStream := &fakeResponsesWebSocketStream{turns: [][]*codex.StreamEvent{{{
+		Type: "response.completed",
+		Raw: map[string]any{"response": map[string]any{
+			"id": "resp_search", "model": "gpt-5.4", "status": "completed",
+			"output": []any{
+				map[string]any{
+					"type": "web_search_call", "id": "ws_1", "status": "completed",
+					"action":  map[string]any{"type": "search", "query": "Codex API"},
+					"results": []any{map[string]any{"title": "OpenAI Codex", "url": "https://openai.com/codex"}},
+				},
+				map[string]any{
+					"type": "message", "role": "assistant", "status": "completed",
+					"content": []any{map[string]any{"type": "output_text", "text": "Found it."}},
+				},
+			},
+		}},
+	}}}}
+	app.wsConnector = func(_ context.Context, _ string, _ http.Header, body any) (responsesWebSocketStream, error) {
+		fakeStream.connects++
+		if err := fakeStream.begin(body); err != nil {
+			return nil, err
+		}
+		return fakeStream, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.4",
+		"max_tokens":1024,
+		"messages":[{"role":"user","content":"Search for Codex API"}],
+		"tools":[{
+			"type":"web_search_20250305",
+			"name":"web_search",
+			"allowed_domains":["openai.com"],
+			"user_location":{"type":"approximate","country":"US"}
+		}],
+		"tool_choice":{"type":"tool","name":"web_search"}
+	}`))
+	ctx.Request.Header.Set("anthropic-version", "2023-06-01")
+	app.handleAnthropicMessages(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if fakeStream.connects != 1 || len(fakeStream.requests) != 1 {
+		t.Fatalf("connects=%d requests=%#v", fakeStream.connects, fakeStream.requests)
+	}
+	request := fakeStream.requests[0]
+	tools := sliceOfMapsFromAny(request["tools"])
+	if len(tools) != 1 || tools[0]["type"] != "web_search" {
+		t.Fatalf("upstream tools = %#v", tools)
+	}
+	filters := nestedMapFromAny(tools[0]["filters"])
+	allowedDomains, _ := filters["allowed_domains"].([]any)
+	if len(allowedDomains) != 1 || allowedDomains[0] != "openai.com" {
+		t.Fatalf("upstream filters = %#v", filters)
+	}
+	if choice := nestedMapFromAny(request["tool_choice"]); choice["type"] != "web_search" {
+		t.Fatalf("upstream tool_choice = %#v", request["tool_choice"])
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	content := sliceOfMapsFromAny(response["content"])
+	if len(content) != 3 || content[0]["type"] != "server_tool_use" || content[1]["type"] != "web_search_tool_result" || content[2]["type"] != "text" {
+		t.Fatalf("response content = %#v", content)
+	}
+	if content[1]["tool_use_id"] != content[0]["id"] {
+		t.Fatalf("tool use/result IDs do not match: %#v", content)
+	}
+}
+
 func TestAnthropicRouteAuthenticationUsesAnthropicErrorAndRequestID(t *testing.T) {
 	t.Parallel()
 

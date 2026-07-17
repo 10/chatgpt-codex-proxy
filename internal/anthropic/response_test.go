@@ -186,6 +186,82 @@ func TestBuildMessageOmitsUnsignedThinkingSummary(t *testing.T) {
 	}
 }
 
+func TestBuildMessageMapsHostedWebSearch(t *testing.T) {
+	t.Parallel()
+
+	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+		"response": map[string]any{
+			"id": "resp_search", "model": "gpt-5.4", "status": "completed",
+			"output": []any{
+				map[string]any{
+					"type": "web_search_call", "id": "ws_1", "status": "completed",
+					"action": map[string]any{"type": "search", "query": "Codex API"},
+					"results": []any{
+						map[string]any{"title": "OpenAI Codex", "url": "https://openai.com/codex", "page_age": "2 days"},
+						map[string]any{"url": "https://platform.openai.com/docs"},
+					},
+				},
+				map[string]any{
+					"type": "message", "role": "assistant", "status": "completed",
+					"content": []any{map[string]any{"type": "output_text", "text": "Here is what I found."}},
+				},
+			},
+		},
+	}})
+
+	message := BuildMessage(accumulator)
+	if len(message.Content) != 3 {
+		t.Fatalf("content = %#v, want server tool use, result, and text", message.Content)
+	}
+	use := message.Content[0]
+	if use.Type != "server_tool_use" || use.ID != "ws_1" || use.Name != "web_search" || string(use.Input) != `{"query":"Codex API"}` {
+		t.Fatalf("server tool use = %#v", use)
+	}
+	result := message.Content[1]
+	if result.Type != "web_search_tool_result" || result.ToolUseID != "ws_1" || len(result.Content) != 2 {
+		t.Fatalf("web search result = %#v", result)
+	}
+	if result.Content[0]["type"] != "web_search_result" || result.Content[0]["title"] != "OpenAI Codex" || result.Content[0]["page_age"] != "2 days" {
+		t.Fatalf("first search result = %#v", result.Content[0])
+	}
+	if result.Content[1]["title"] != "https://platform.openai.com/docs" || result.Content[1]["page_age"] != nil {
+		t.Fatalf("second search result = %#v", result.Content[1])
+	}
+	if message.Content[2].Type != "text" || message.Content[2].Text != "Here is what I found." {
+		t.Fatalf("text = %#v", message.Content[2])
+	}
+	if message.StopReason == nil || *message.StopReason != "end_turn" {
+		t.Fatalf("stop reason = %#v, want end_turn", message.StopReason)
+	}
+}
+
+func TestBuildMessageDoesNotReportFailedHostedWebSearchAsEmptySuccess(t *testing.T) {
+	t.Parallel()
+
+	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+		"response": map[string]any{
+			"id": "resp_search_failed", "model": "gpt-5.4", "status": "completed",
+			"output": []any{
+				map[string]any{
+					"type": "web_search_call", "id": "ws_failed", "status": "failed",
+					"action": map[string]any{"type": "search", "query": "Codex API"},
+				},
+				map[string]any{
+					"type": "message", "role": "assistant", "status": "completed",
+					"content": []any{map[string]any{"type": "output_text", "text": "Search was unavailable."}},
+				},
+			},
+		},
+	}})
+
+	message := BuildMessage(accumulator)
+	if len(message.Content) != 1 || message.Content[0].Type != "text" || message.Content[0].Text != "Search was unavailable." {
+		t.Fatalf("content = %#v, want only the explanatory text", message.Content)
+	}
+}
+
 func TestBuildMessageRemovesSyntheticNullOptionalFields(t *testing.T) {
 	t.Parallel()
 

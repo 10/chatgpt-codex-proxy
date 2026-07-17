@@ -328,6 +328,99 @@ func TestStreamEncoderSuppressesUnsignedThinking(t *testing.T) {
 	}
 }
 
+func TestStreamEncoderMapsHostedWebSearchWithoutTerminalDuplicates(t *testing.T) {
+	t.Parallel()
+
+	searchItem := map[string]any{
+		"type": "web_search_call", "id": "ws_1", "status": "completed",
+		"action": map[string]any{"type": "search", "query": "Codex API"},
+		"results": []any{
+			map[string]any{"title": "OpenAI Codex", "url": "https://openai.com/codex"},
+		},
+	}
+	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	encoder := NewStreamEncoder(0)
+	events := applyAndEncode(accumulator, encoder,
+		&codex.StreamEvent{Type: "response.output_item.added", Raw: map[string]any{
+			"output_index": 0,
+			"item":         map[string]any{"type": "web_search_call", "id": "ws_1", "status": "in_progress"},
+		}},
+		&codex.StreamEvent{Type: "response.web_search_call.searching", Raw: map[string]any{
+			"output_index": 0, "item_id": "ws_1",
+		}},
+		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{
+			"output_index": 0, "item": searchItem,
+		}},
+		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "Here is what I found."}},
+		&codex.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "Here is what I found."}},
+		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
+			"id": "resp_search", "model": "gpt-5.4", "status": "completed",
+			"output": []any{
+				searchItem,
+				map[string]any{
+					"type": "message", "role": "assistant", "status": "completed",
+					"content": []any{map[string]any{"type": "output_text", "text": "Here is what I found."}},
+				},
+			},
+		}}},
+	)
+
+	want := []string{
+		"message_start",
+		"content_block_start", "content_block_delta", "content_block_stop",
+		"content_block_start", "content_block_stop",
+		"content_block_start", "content_block_delta", "content_block_stop",
+		"message_delta", "message_stop",
+	}
+	assertStreamTypes(t, events, want)
+	use := events[1]["content_block"].(map[string]any)
+	if use["type"] != "server_tool_use" || use["id"] != "ws_1" || use["name"] != "web_search" {
+		t.Fatalf("server tool use = %#v", use)
+	}
+	if partialJSON := events[2]["delta"].(map[string]any)["partial_json"]; partialJSON != `{"query":"Codex API"}` {
+		t.Fatalf("search input delta = %#v", partialJSON)
+	}
+	result := events[4]["content_block"].(map[string]any)
+	content := result["content"].([]map[string]any)
+	if result["type"] != "web_search_tool_result" || result["tool_use_id"] != "ws_1" || len(content) != 1 {
+		t.Fatalf("web search result = %#v", result)
+	}
+	if text := events[6]["content_block"].(map[string]any); text["type"] != "text" {
+		t.Fatalf("text block = %#v", text)
+	}
+}
+
+func TestStreamEncoderDeduplicatesIDlessHostedWebSearchAtTerminal(t *testing.T) {
+	t.Parallel()
+
+	searchItem := map[string]any{
+		"type": "web_search_call", "status": "completed",
+		"action": map[string]any{"type": "search", "query": "Codex API"},
+	}
+	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	encoder := NewStreamEncoder(0)
+	events := applyAndEncode(accumulator, encoder,
+		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{
+			"output_index": 0, "item_id": "transient_ws_1", "item": searchItem,
+		}},
+		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
+			"id": "resp_search", "model": "gpt-5.4", "status": "completed",
+			"output": []any{searchItem},
+		}}},
+	)
+
+	assertStreamTypes(t, events, []string{
+		"message_start",
+		"content_block_start", "content_block_delta", "content_block_stop",
+		"content_block_start", "content_block_stop",
+		"message_delta", "message_stop",
+	})
+	use := events[1]["content_block"].(map[string]any)
+	if use["id"] != "web_search_0" {
+		t.Fatalf("server tool use id = %#v, want web_search_0", use["id"])
+	}
+}
+
 func applyAndEncode(accumulator *translate.Accumulator, encoder *StreamEncoder, input ...*codex.StreamEvent) []StreamEvent {
 	var result []StreamEvent
 	for _, event := range input {
