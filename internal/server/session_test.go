@@ -377,12 +377,12 @@ func TestAcquireAccountForResolutionOmittedModelUsesRouteScopedDefault(t *testin
 	})
 	catalog := models.NewCatalog(models.BootstrapEntries())
 	catalog.ApplyRouteModels("plan:plus", []models.Entry{
-		{ID: "gpt-premium-default", Source: models.SourceUpstream, IsDefault: true},
-		{ID: "gpt-free-basic", Source: models.SourceUpstream},
-	}, time.Now().UTC())
+		{ID: "gpt-premium-default", IsDefault: true},
+		{ID: "gpt-free-basic"},
+	})
 	catalog.ApplyRouteModels("plan:free", []models.Entry{
-		{ID: "gpt-free-basic", Source: models.SourceUpstream},
-	}, time.Now().UTC())
+		{ID: "gpt-free-basic"},
+	})
 
 	app := &App{
 		cfg:        config.Config{DefaultModel: "gpt-premium-default"},

@@ -14,17 +14,16 @@ import (
 )
 
 type ToolCallState struct {
-	ItemID           string
-	CallID           string
-	ToolType         string
-	Name             string
-	Input            string
-	Arguments        string
-	OutputIndex      int
-	Status           string
-	AddedEmitted     bool
-	DoneEmitted      bool
-	SawArgumentDelta bool
+	ItemID       string
+	CallID       string
+	ToolType     string
+	Name         string
+	Input        string
+	Arguments    string
+	OutputIndex  int
+	Status       string
+	AddedEmitted bool
+	DoneEmitted  bool
 }
 
 type ResponseStreamEvent struct {
@@ -33,7 +32,6 @@ type ResponseStreamEvent struct {
 }
 
 type outputItemState struct {
-	Key         string
 	OutputIndex int
 	Item        map[string]any
 }
@@ -72,9 +70,13 @@ func (a *Accumulator) Apply(event *codex.StreamEvent) {
 	a.applyRootMetadata(event.Raw)
 	a.applyTextEvent(event, response)
 	a.applyFallbackText(event)
-	a.applyToolEvent(event)
+	if strings.HasPrefix(event.Type, "response.function_call_arguments.") || strings.HasPrefix(event.Type, "response.custom_tool_call_input.") {
+		a.applyToolArgumentEvent(event)
+	}
 	a.applyOutputEvent(event)
-	a.applyUsageMetadata(event.Raw)
+	if usage := usageFromRaw(event.Raw["usage"]); usage != nil {
+		a.Usage = usage
+	}
 	a.applyCompletedEvent(event, response)
 }
 
@@ -153,24 +155,12 @@ func (a *Accumulator) applyFallbackText(event *codex.StreamEvent) {
 	}
 }
 
-func (a *Accumulator) applyToolEvent(event *codex.StreamEvent) {
-	if strings.HasPrefix(event.Type, "response.function_call_arguments.") || strings.HasPrefix(event.Type, "response.custom_tool_call_input.") {
-		a.applyToolArgumentEvent(event)
-	}
-}
-
 func (a *Accumulator) applyOutputEvent(event *codex.StreamEvent) {
 	if item := jsonutil.FirstMap(jsonutil.MapValue(event.Raw, "item"), jsonutil.MapValue(event.Raw, "output_item")); item != nil {
 		a.captureOutputItem(item, outputIndexFromMap(event.Raw))
 	}
 	if output := jsonutil.SliceOfMaps(event.Raw["output"]); len(output) > 0 {
 		a.replaceOutputItems(output)
-	}
-}
-
-func (a *Accumulator) applyUsageMetadata(raw map[string]any) {
-	if usage := usageFromRaw(raw["usage"]); usage != nil {
-		a.Usage = usage
 	}
 }
 
@@ -315,7 +305,6 @@ func (a *Accumulator) captureOutputItem(item map[string]any, explicitIndex int) 
 		return
 	}
 	state := &outputItemState{
-		Key:         key,
 		OutputIndex: index,
 		Item:        cloned,
 	}

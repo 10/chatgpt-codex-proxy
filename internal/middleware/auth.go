@@ -8,12 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func APIKey(required string) gin.HandlerFunc {
-	return APIKeyWithUnauthorized(required, func(c *gin.Context) {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, OpenAIErrorPayload("invalid_api_key", "authentication_error", "invalid_api_key", ""))
-	})
-}
-
 func APIKeyWithUnauthorized(required string, unauthorized func(*gin.Context)) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if required == "" {

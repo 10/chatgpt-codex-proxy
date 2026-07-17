@@ -30,6 +30,5 @@ type UsageResponse struct {
 type UsageWindow struct {
 	UsedPercent        float64 `json:"used_percent"`
 	LimitWindowSeconds int     `json:"limit_window_seconds"`
-	ResetAfterSeconds  int     `json:"reset_after_seconds"`
 	ResetAt            int64   `json:"reset_at"`
 }

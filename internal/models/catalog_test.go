@@ -3,7 +3,6 @@ package models
 import (
 	"slices"
 	"testing"
-	"time"
 
 	"chatgpt-codex-proxy/internal/accounts"
 )
@@ -71,8 +70,8 @@ func TestSupportsRecordRequiresKnownRouteSupportOnceSupportMapExists(t *testing.
 
 	catalog := NewCatalog(BootstrapEntries())
 	catalog.ApplyRouteModels("plan:plus", []Entry{
-		{ID: "gpt-premium-only", Source: SourceUpstream},
-	}, time.Now().UTC())
+		{ID: "gpt-premium-only"},
+	})
 
 	plusRecord := accounts.Record{ID: "acct_plus", PlanType: "plus"}
 	freeRecord := accounts.Record{ID: "acct_free", PlanType: "free"}
@@ -102,8 +101,8 @@ func TestRegisterRoutePreservesBootstrapVisibilityUntilRouteRefreshes(t *testing
 	catalog := NewCatalog(BootstrapEntries())
 	catalog.RegisterRoute("plan:free")
 	catalog.ApplyRouteModels("plan:plus", []Entry{
-		{ID: "gpt-premium-only", Source: SourceUpstream, IsDefault: true},
-	}, time.Now().UTC())
+		{ID: "gpt-premium-only", IsDefault: true},
+	})
 
 	visible := catalog.List()
 	seen := make(map[string]bool, len(visible))
@@ -131,12 +130,12 @@ func TestResolveDefaultForRecordUsesRoutableModel(t *testing.T) {
 
 	catalog := NewCatalog(BootstrapEntries())
 	catalog.ApplyRouteModels("plan:plus", []Entry{
-		{ID: "gpt-premium-default", Source: SourceUpstream, IsDefault: true},
-		{ID: "gpt-free-basic", Source: SourceUpstream},
-	}, time.Now().UTC())
+		{ID: "gpt-premium-default", IsDefault: true},
+		{ID: "gpt-free-basic"},
+	})
 	catalog.ApplyRouteModels("plan:free", []Entry{
-		{ID: "gpt-free-basic", Source: SourceUpstream},
-	}, time.Now().UTC())
+		{ID: "gpt-free-basic"},
+	})
 
 	freeRecord := accounts.Record{ID: "acct_free", PlanType: "free"}
 	if got := catalog.ResolveDefaultForRecord(freeRecord, ""); got != "gpt-free-basic" {

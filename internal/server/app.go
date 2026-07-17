@@ -33,7 +33,7 @@ type App struct {
 	httpStream      func(context.Context, accounts.Record, codex.Request, string) (eventStream, error)
 	compactCaller   func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
 	imageOpener     func(*gin.Context, string, translate.NormalizedRequest) (openedRequest, bool)
-	directImageOpen func(context.Context, accounts.Record, string, []byte, bool) (*codex.RawImageResponse, error)
+	directImageOpen func(context.Context, accounts.Record, string, []byte, bool) (*http.Response, error)
 	wsConnector     responsesWebSocketConnector
 	continuations   *accounts.ContinuationManager
 	models          *models.Catalog

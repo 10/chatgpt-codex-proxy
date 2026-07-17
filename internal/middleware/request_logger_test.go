@@ -130,7 +130,7 @@ func TestRequestLoggerWarnsOnUnauthorized(t *testing.T) {
 	t.Parallel()
 
 	engine, logs := newLoggedEngine(t)
-	engine.Use(APIKey("secret"))
+	engine.Use(APIKeyWithUnauthorized("secret", func(c *gin.Context) { c.AbortWithStatus(http.StatusUnauthorized) }))
 	engine.GET("/private", func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})

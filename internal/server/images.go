@@ -164,6 +164,7 @@ func decodeImageEditRequest(req *http.Request) (imageEditRequest, []byte, func()
 		}
 	}
 	form := req.MultipartForm
+	stream, _ := strconv.ParseBool(multipartValue(form, "stream"))
 	decoded := imageEditRequest{imageGenerationRequest: imageGenerationRequest{
 		Model:             multipartValue(form, "model"),
 		Prompt:            multipartValue(form, "prompt"),
@@ -176,7 +177,7 @@ func decodeImageEditRequest(req *http.Request) (imageEditRequest, []byte, func()
 		Moderation:        multipartValue(form, "moderation"),
 		OutputCompression: multipartInt(form, "output_compression"),
 		PartialImages:     multipartInt(form, "partial_images"),
-		Stream:            multipartBool(form, "stream"),
+		Stream:            stream,
 	}, InputFidelity: multipartValue(form, "input_fidelity")}
 
 	files := form.File["image[]"]
@@ -238,11 +239,11 @@ func (a *App) handleDirectImageResponse(c *gin.Context, endpoint, path string, p
 		a.handleOpenStreamError(c, endpoint, account.ID, account.ID, err)
 		return true
 	}
-	defer response.Close()
+	defer response.Body.Close()
 
 	a.setRequestAccount(c, account)
-	a.observeQuotaSnapshot(account.ID, codex.ParseQuotaFromHeaders(response.Headers))
-	contentType := strings.TrimSpace(response.Headers.Get("Content-Type"))
+	a.observeQuotaSnapshot(account.ID, codex.ParseQuotaFromHeaders(response.Header))
+	contentType := strings.TrimSpace(response.Header.Get("Content-Type"))
 	if stream {
 		prepareStreamResponse(c)
 		if contentType != "" {
@@ -278,7 +279,7 @@ func (a *App) handleDirectImageResponse(c *gin.Context, endpoint, path string, p
 	return true
 }
 
-func (a *App) openDirectImageWithFailover(ctx context.Context, c *gin.Context, endpoint, path string, payload []byte, stream bool) (accounts.Record, *codex.RawImageResponse, error) {
+func (a *App) openDirectImageWithFailover(ctx context.Context, c *gin.Context, endpoint, path string, payload []byte, stream bool) (accounts.Record, *http.Response, error) {
 	attempted := make(map[string]struct{})
 	var lastAccount accounts.Record
 	var lastErr error
@@ -304,7 +305,7 @@ func (a *App) openDirectImageWithFailover(ctx context.Context, c *gin.Context, e
 			if open == nil {
 				open = a.httpClient.OpenImage
 			}
-			var response *codex.RawImageResponse
+			var response *http.Response
 			response, err = open(ctx, account, path, payload, stream)
 			if err == nil {
 				return account, response, nil
@@ -350,11 +351,6 @@ func multipartInt(form *multipart.Form, key string) *int {
 		return nil
 	}
 	return &parsed
-}
-
-func multipartBool(form *multipart.Form, key string) bool {
-	parsed, _ := strconv.ParseBool(multipartValue(form, key))
-	return parsed
 }
 
 func multipartImageDataURL(file *multipart.FileHeader) (string, error) {

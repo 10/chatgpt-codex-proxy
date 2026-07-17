@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"chatgpt-codex-proxy/internal/accounts"
 )
@@ -19,7 +18,6 @@ type Catalog struct {
 	entriesByID  map[string]Entry
 	support      map[string]map[string]struct{}
 	knownRoutes  map[string]struct{}
-	fetchedAt    time.Time
 }
 
 func NewCatalog(bootstrap []Entry) *Catalog {
@@ -94,14 +92,10 @@ func (c *Catalog) LoadCache(snapshot CacheSnapshot) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if !snapshot.FetchedAt.IsZero() {
-		c.fetchedAt = snapshot.FetchedAt.UTC()
-	}
 	for _, entry := range snapshot.Models {
 		if strings.TrimSpace(entry.ID) == "" {
 			continue
 		}
-		entry.Source = SourceCache
 		c.entriesByID[entry.ID] = cloneEntry(entry)
 	}
 	c.support = make(map[string]map[string]struct{}, len(snapshot.Support))
@@ -124,7 +118,7 @@ func (c *Catalog) RegisterRoute(routeKey string) {
 	c.rebuildVisibleLocked()
 }
 
-func (c *Catalog) ApplyRouteModels(routeKey string, entries []Entry, fetchedAt time.Time) {
+func (c *Catalog) ApplyRouteModels(routeKey string, entries []Entry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -139,14 +133,10 @@ func (c *Catalog) ApplyRouteModels(routeKey string, entries []Entry, fetchedAt t
 		if strings.TrimSpace(entry.ID) == "" {
 			continue
 		}
-		entry.Source = SourceUpstream
 		c.entriesByID[entry.ID] = cloneEntry(entry)
 		ids = append(ids, entry.ID)
 	}
 	c.support[routeKey] = makeSet(ids)
-	if !fetchedAt.IsZero() && fetchedAt.After(c.fetchedAt) {
-		c.fetchedAt = fetchedAt.UTC()
-	}
 	c.rebuildVisibleLocked()
 }
 
@@ -159,9 +149,8 @@ func (c *Catalog) Snapshot() CacheSnapshot {
 		support[key] = slices.Sorted(maps.Keys(set))
 	}
 	return CacheSnapshot{
-		FetchedAt: c.fetchedAt,
-		Models:    cloneEntries(c.visible),
-		Support:   support,
+		Models:  cloneEntries(c.visible),
+		Support: support,
 	}
 }
 

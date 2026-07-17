@@ -249,8 +249,10 @@ func normalizeChatMessage(out *NormalizedRequest, instructions *[]string, toolCa
 		return appendInstructionText(instructions, message.Content)
 	case "user", "assistant":
 		if len(message.ToolCalls) > 0 {
-			if err := appendRoleContentInputIfPresent(out, message.Role, message.Content); err != nil {
-				return err
+			if len(message.Content) > 0 {
+				if err := appendRoleContentInput(&out.Input, message.Role, "", message.Content); err != nil {
+					return err
+				}
 			}
 			for _, call := range message.ToolCalls {
 				callType := normalizeChatToolCallType(call, customToolNames)
@@ -415,21 +417,6 @@ func appendRoleContentInput(out *[]codex.InputItem, role, phase string, content 
 	*out = append(*out, codex.InputItem{
 		Role:    role,
 		Phase:   strings.TrimSpace(phase),
-		Content: parts,
-	})
-	return nil
-}
-
-func appendRoleContentInputIfPresent(out *NormalizedRequest, role string, content openai.MessageContent) error {
-	parts, err := normalizeContentPartsChecked(content)
-	if err != nil {
-		return err
-	}
-	if len(parts) == 0 {
-		return nil
-	}
-	out.Input = append(out.Input, codex.InputItem{
-		Role:    role,
 		Content: parts,
 	})
 	return nil

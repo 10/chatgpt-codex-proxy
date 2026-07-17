@@ -87,7 +87,6 @@ func (f *Fetcher) refreshOnce(ctx context.Context) bool {
 	}
 
 	anySuccess := false
-	fetchedAt := time.Now().UTC()
 	for _, key := range keys {
 		record := routes[key]
 		ready, err := f.accountMgr.EnsureReady(ctx, record.ID)
@@ -104,7 +103,7 @@ func (f *Fetcher) refreshOnce(ctx context.Context) bool {
 		if len(normalized) == 0 {
 			continue
 		}
-		f.catalog.ApplyRouteModels(key, normalized, fetchedAt)
+		f.catalog.ApplyRouteModels(key, normalized)
 		anySuccess = true
 	}
 

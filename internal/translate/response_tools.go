@@ -26,7 +26,6 @@ func (a *Accumulator) applyToolArgumentEvent(event *codex.StreamEvent) {
 	case "response.function_call_arguments.delta":
 		state.ToolType = "function"
 		state.Arguments += jsonutil.StringValue(event.Raw["delta"])
-		state.SawArgumentDelta = true
 	case "response.function_call_arguments.done":
 		state.ToolType = "function"
 		if args := jsonutil.StringValue(event.Raw["arguments"]); args != "" {
@@ -36,7 +35,6 @@ func (a *Accumulator) applyToolArgumentEvent(event *codex.StreamEvent) {
 	case "response.custom_tool_call_input.delta":
 		state.ToolType = "custom"
 		state.Input += jsonutil.StringValue(event.Raw["delta"])
-		state.SawArgumentDelta = true
 	case "response.custom_tool_call_input.done":
 		state.ToolType = "custom"
 		if input := jsonutil.StringValue(event.Raw["input"]); input != "" {

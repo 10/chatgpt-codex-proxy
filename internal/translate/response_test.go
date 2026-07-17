@@ -201,7 +201,6 @@ func TestResponsesObjectMergesFunctionCallsWithExistingOutputInOrder(t *testing.
 		},
 	}
 	accumulator.OutputItems = []*outputItemState{{
-		Key:         "id:msg_123",
 		OutputIndex: 2,
 		Item: map[string]any{
 			"id":     "msg_123",

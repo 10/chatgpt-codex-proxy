@@ -32,13 +32,13 @@ func TestImagesGenerationsUsesDirectCodexEndpoint(t *testing.T) {
 	var gotPath string
 	var gotPayload []byte
 	var gotStream bool
-	app.directImageOpen = func(_ context.Context, _ accounts.Record, path string, payload []byte, stream bool) (*codex.RawImageResponse, error) {
+	app.directImageOpen = func(_ context.Context, _ accounts.Record, path string, payload []byte, stream bool) (*http.Response, error) {
 		gotPath = path
 		gotPayload = append([]byte(nil), payload...)
 		gotStream = stream
-		return &codex.RawImageResponse{
-			Body:    io.NopCloser(strings.NewReader(`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`)),
-			Headers: http.Header{"Content-Type": []string{"application/json"}},
+		return &http.Response{
+			Body:   io.NopCloser(strings.NewReader(`{"created":123,"data":[{"url":"https://example.com/image.png"}]}`)),
+			Header: http.Header{"Content-Type": []string{"application/json"}},
 		}, nil
 	}
 
@@ -78,14 +78,14 @@ func TestImagesGenerationsStreamsDirectCodexResponse(t *testing.T) {
 	const upstream = "event: image_generation.partial_image\ndata: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"partial\"}\n\n" +
 		"event: image_generation.completed\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"final\"}\n\n"
 	var gotPayload []byte
-	app.directImageOpen = func(_ context.Context, _ accounts.Record, path string, payload []byte, stream bool) (*codex.RawImageResponse, error) {
+	app.directImageOpen = func(_ context.Context, _ accounts.Record, path string, payload []byte, stream bool) (*http.Response, error) {
 		if path != "/codex/images/generations" || !stream {
 			t.Fatalf("direct call = path %q stream %v", path, stream)
 		}
 		gotPayload = append([]byte(nil), payload...)
-		return &codex.RawImageResponse{
-			Body:    io.NopCloser(strings.NewReader(upstream)),
-			Headers: http.Header{"Content-Type": []string{"text/event-stream"}},
+		return &http.Response{
+			Body:   io.NopCloser(strings.NewReader(upstream)),
+			Header: http.Header{"Content-Type": []string{"text/event-stream"}},
 		}, nil
 	}
 
@@ -112,14 +112,14 @@ func TestImagesEditsConvertsMultipartForDirectCodexEndpoint(t *testing.T) {
 
 	app := newImagesTestApp(t, nil)
 	var gotPayload []byte
-	app.directImageOpen = func(_ context.Context, _ accounts.Record, path string, payload []byte, stream bool) (*codex.RawImageResponse, error) {
+	app.directImageOpen = func(_ context.Context, _ accounts.Record, path string, payload []byte, stream bool) (*http.Response, error) {
 		if path != "/codex/images/edits" || stream {
 			t.Fatalf("direct call = path %q stream %v", path, stream)
 		}
 		gotPayload = append([]byte(nil), payload...)
-		return &codex.RawImageResponse{
-			Body:    io.NopCloser(strings.NewReader(`{"created":123,"data":[{"b64_json":"edited"}]}`)),
-			Headers: http.Header{"Content-Type": []string{"application/json"}},
+		return &http.Response{
+			Body:   io.NopCloser(strings.NewReader(`{"created":123,"data":[{"b64_json":"edited"}]}`)),
+			Header: http.Header{"Content-Type": []string{"application/json"}},
 		}, nil
 	}
 
@@ -590,7 +590,7 @@ func newImagesTestApp(t *testing.T, opener func(translate.NormalizedRequest) eve
 		continuations: accounts.NewContinuationManager(time.Minute),
 		models:        catalog,
 	}
-	app.directImageOpen = func(context.Context, accounts.Record, string, []byte, bool) (*codex.RawImageResponse, error) {
+	app.directImageOpen = func(context.Context, accounts.Record, string, []byte, bool) (*http.Response, error) {
 		return nil, &codex.UpstreamError{StatusCode: http.StatusNotFound, Body: "direct images unavailable"}
 	}
 	if opener != nil {

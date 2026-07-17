@@ -3,7 +3,6 @@ package codex
 import (
 	"bytes"
 	"context"
-	"io"
 	"net/http"
 
 	httpcloak "github.com/sardanioss/httpcloak/client"
@@ -11,16 +10,7 @@ import (
 	"chatgpt-codex-proxy/internal/accounts"
 )
 
-type RawImageResponse struct {
-	Body    io.ReadCloser
-	Headers http.Header
-}
-
-func (r *RawImageResponse) Close() error {
-	return r.Body.Close()
-}
-
-func (c *HTTPClient) OpenImage(ctx context.Context, record accounts.Record, path string, payload []byte, stream bool) (*RawImageResponse, error) {
+func (c *HTTPClient) OpenImage(ctx context.Context, record accounts.Record, path string, payload []byte, stream bool) (*http.Response, error) {
 	accept := "application/json"
 	if stream {
 		accept = "text/event-stream"
@@ -49,5 +39,5 @@ func (c *HTTPClient) OpenImage(ctx context.Context, record accounts.Record, path
 		return nil, NewUpstreamError("codex image response", resp.StatusCode, body, responseHeaders)
 	}
 
-	return &RawImageResponse{Body: resp, Headers: responseHeaders}, nil
+	return &http.Response{Body: resp, Header: responseHeaders}, nil
 }

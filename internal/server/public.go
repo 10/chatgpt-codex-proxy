@@ -445,9 +445,12 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 
 	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
 
-	finalResponse := accumulator.ChatCompletionObject()
-	finalUsage, _ := finalResponse["usage"].(map[string]any)
-	finalChunk := translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{}, chatStreamFinishReason(accumulator), createdAt)
+	finishReason := "stop"
+	if len(accumulator.ToolCalls) > 0 {
+		finishReason = "tool_calls"
+	}
+	finalUsage := accumulator.ChatUsageObject()
+	finalChunk := translate.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{}, finishReason, createdAt)
 	if finalUsage != nil {
 		finalChunk["usage"] = finalUsage
 	}
@@ -651,13 +654,6 @@ func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *translate.Ac
 	}, "", s.createdAt)))
 	s.argumentsSent[callID] = len(value)
 	return true
-}
-
-func chatStreamFinishReason(accumulator *translate.Accumulator) string {
-	if accumulator != nil && len(accumulator.ToolCalls) > 0 {
-		return "tool_calls"
-	}
-	return "stop"
 }
 
 func responseStreamPayload(event *codex.StreamEvent, accumulator *translate.Accumulator) map[string]any {

@@ -51,7 +51,6 @@ func normalizeBackendEntry(raw codex.BackendModelEntry) (Entry, bool) {
 		IsDefault:                 raw.IsDefault,
 		DefaultReasoningEffort:    defaultEffort,
 		SupportedReasoningEfforts: efforts,
-		Source:                    SourceUpstream,
 	}, true
 }
 

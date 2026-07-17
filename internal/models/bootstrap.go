@@ -35,7 +35,6 @@ func bootstrapEntry(id string, isDefault bool, defaultReasoningEffort string, ad
 		IsDefault:                 isDefault,
 		DefaultReasoningEffort:    defaultReasoningEffort,
 		SupportedReasoningEfforts: efforts,
-		Source:                    SourceBootstrap,
 	}
 }
 

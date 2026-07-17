@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -193,9 +192,8 @@ func TestHandleModelsUsesRuntimeCatalog(t *testing.T) {
 	catalog := models.NewCatalog(models.BootstrapEntries())
 	catalog.ApplyRouteModels("plan:plus", []models.Entry{{
 		ID:        "gpt-dynamic-test",
-		Source:    models.SourceUpstream,
 		IsDefault: true,
-	}}, time.Now().UTC())
+	}})
 
 	app := &App{
 		cfg:    config.Config{DefaultModel: "gpt-5.4"},
