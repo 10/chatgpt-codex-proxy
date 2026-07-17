@@ -25,7 +25,6 @@ type ChatCompletionsRequest struct {
 type ChatMessage struct {
 	Role         string           `json:"role"`
 	Content      MessageContent   `json:"content"`
-	Name         string           `json:"name,omitempty"`
 	ToolCalls    []ToolCall       `json:"tool_calls,omitempty"`
 	ToolCallID   string           `json:"tool_call_id,omitempty"`
 	FunctionCall *FunctionPayload `json:"function_call,omitempty"`

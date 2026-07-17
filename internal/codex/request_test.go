@@ -8,21 +8,13 @@ import (
 func TestInputItemMarshalJSONUsesStringForTextOnlyRoleMessages(t *testing.T) {
 	t.Parallel()
 
-	payload, err := json.Marshal(InputItem{
+	decoded := marshalInputItem(t, InputItem{
 		Role: "user",
 		Content: []ContentPart{
 			{Type: "input_text", Text: "first line"},
 			{Type: "input_text", Text: "second line"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
 
 	if decoded["content"] != "first line\nsecond line" {
 		t.Fatalf("content = %#v, want joined string", decoded["content"])
@@ -32,21 +24,13 @@ func TestInputItemMarshalJSONUsesStringForTextOnlyRoleMessages(t *testing.T) {
 func TestInputItemMarshalJSONPreservesStructuredUserContent(t *testing.T) {
 	t.Parallel()
 
-	payload, err := json.Marshal(InputItem{
+	decoded := marshalInputItem(t, InputItem{
 		Role: "user",
 		Content: []ContentPart{
 			{Type: "input_text", Text: "look at this"},
 			{Type: "input_image", ImageURL: "https://example.com/image.png"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
 
 	content, ok := decoded["content"].([]any)
 	if !ok {
@@ -60,21 +44,13 @@ func TestInputItemMarshalJSONPreservesStructuredUserContent(t *testing.T) {
 func TestInputItemMarshalJSONKeepsEmptyStringContentForRoleMessages(t *testing.T) {
 	t.Parallel()
 
-	payload, err := json.Marshal(InputItem{
+	decoded := marshalInputItem(t, InputItem{
 		Role: "user",
 		Content: []ContentPart{{
 			Type: "input_text",
 			Text: "",
 		}},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
 
 	value, ok := decoded["content"]
 	if !ok {
@@ -88,7 +64,7 @@ func TestInputItemMarshalJSONKeepsEmptyStringContentForRoleMessages(t *testing.T
 func TestInputItemMarshalJSONPreservesStructuredToolOutput(t *testing.T) {
 	t.Parallel()
 
-	payload, err := json.Marshal(InputItem{
+	decoded := marshalInputItem(t, InputItem{
 		Type:   "function_call_output",
 		CallID: "call_1",
 		OutputContent: []ContentPart{
@@ -96,14 +72,6 @@ func TestInputItemMarshalJSONPreservesStructuredToolOutput(t *testing.T) {
 			{Type: "input_text", Text: "README.md"},
 		},
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
 
 	output, ok := decoded["output"].([]any)
 	if !ok {
@@ -117,19 +85,11 @@ func TestInputItemMarshalJSONPreservesStructuredToolOutput(t *testing.T) {
 func TestInputItemMarshalJSONKeepsEmptyToolOutput(t *testing.T) {
 	t.Parallel()
 
-	payload, err := json.Marshal(InputItem{
+	decoded := marshalInputItem(t, InputItem{
 		Type:       "function_call_output",
 		CallID:     "call_1",
 		OutputText: "",
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
 
 	value, ok := decoded["output"]
 	if !ok {
@@ -143,19 +103,11 @@ func TestInputItemMarshalJSONKeepsEmptyToolOutput(t *testing.T) {
 func TestInputItemMarshalJSONIncludesEmptyReasoningSummary(t *testing.T) {
 	t.Parallel()
 
-	payload, err := json.Marshal(InputItem{
+	decoded := marshalInputItem(t, InputItem{
 		Type:             "reasoning",
 		ID:               "rs_1",
 		EncryptedContent: "encrypted-reasoning",
 	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
 
 	summary, ok := decoded["summary"].([]any)
 	if !ok {
@@ -164,4 +116,18 @@ func TestInputItemMarshalJSONIncludesEmptyReasoningSummary(t *testing.T) {
 	if len(summary) != 0 {
 		t.Fatalf("summary len = %d, want 0", len(summary))
 	}
+}
+
+func marshalInputItem(t *testing.T, item InputItem) map[string]any {
+	t.Helper()
+
+	payload, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	return decoded
 }

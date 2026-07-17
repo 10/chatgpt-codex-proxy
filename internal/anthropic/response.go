@@ -342,15 +342,10 @@ func unwrapSyntheticNullableSchema(schema, strictSchema map[string]any, value an
 
 type schemaMatcher struct {
 	compiled map[uintptr]*jsonschema.Schema
-	compiles int
 }
 
 func newSchemaMatcher() *schemaMatcher {
 	return &schemaMatcher{compiled: make(map[uintptr]*jsonschema.Schema)}
-}
-
-func schemaMatchesValue(schema map[string]any, value any) bool {
-	return newSchemaMatcher().matches(schema, value)
 }
 
 func (m *schemaMatcher) matches(schema map[string]any, value any) bool {
@@ -359,7 +354,6 @@ func (m *schemaMatcher) matches(schema map[string]any, value any) bool {
 	if !cached {
 		compiled = compileSchema(schema)
 		m.compiled[key] = compiled
-		m.compiles++
 	}
 	return compiled != nil && compiled.Validate(value) == nil
 }

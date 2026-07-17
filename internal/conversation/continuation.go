@@ -6,28 +6,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"chatgpt-codex-proxy/internal/turn"
 )
-
-type ContinuationInputItem struct {
-	Role             string                    `json:"role,omitempty"`
-	Type             string                    `json:"type,omitempty"`
-	Phase            string                    `json:"phase,omitempty"`
-	Content          []ContinuationContentPart `json:"content,omitempty"`
-	CallID           string                    `json:"call_id,omitempty"`
-	Name             string                    `json:"name,omitempty"`
-	Input            string                    `json:"input,omitempty"`
-	Arguments        string                    `json:"arguments,omitempty"`
-	OutputText       string                    `json:"output,omitempty"`
-	OutputContent    []ContinuationContentPart `json:"output_content,omitempty"`
-	ID               string                    `json:"id,omitempty"`
-	Status           string                    `json:"status,omitempty"`
-	Summary          []ContinuationSummaryPart `json:"summary,omitempty"`
-	EncryptedContent string                    `json:"encrypted_content,omitempty"`
-}
-
-type ContinuationContentPart = ContentPart
-
-type ContinuationSummaryPart = ReasoningPart
 
 type ContinuationRecord struct {
 	ResponseID      string
@@ -36,7 +17,7 @@ type ContinuationRecord struct {
 	TurnState       string
 	Instructions    string
 	Model           string
-	InputHistory    []ContinuationInputItem
+	InputHistory    []turn.InputItem
 	FunctionCallIDs []string
 	ToolNameAliases map[string]string
 	CreatedAt       time.Time

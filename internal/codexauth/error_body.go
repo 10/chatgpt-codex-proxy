@@ -17,11 +17,3 @@ func readLimitedErrorBody(r io.Reader) string {
 	}
 	return string(body)
 }
-
-func drainLimitedBody(r io.Reader) error {
-	if r == nil {
-		return nil
-	}
-	_, err := io.Copy(io.Discard, io.LimitReader(r, upstreamErrorBodyLimit))
-	return err
-}

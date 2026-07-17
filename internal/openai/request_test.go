@@ -61,7 +61,7 @@ func TestChatCompletionsTranslation(t *testing.T) {
 		}},
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -143,7 +143,7 @@ func TestResponsesTranslation(t *testing.T) {
 		},
 	}
 
-	normalized, err := Responses(request)
+	normalized, err := Responses(request, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -181,7 +181,7 @@ func TestOpenAIServiceTierAutoUsesCodexDefault(t *testing.T) {
 			Role:    "user",
 			Content: MessageContent{{Type: "text", Text: "Hello"}},
 		}},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -193,7 +193,7 @@ func TestOpenAIServiceTierAutoUsesCodexDefault(t *testing.T) {
 		Model:       "gpt-5.4",
 		ServiceTier: "auto",
 		Input:       ResponsesInput{String: "Hello"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -215,7 +215,7 @@ func TestResponsesTranslationUsesReasoningObject(t *testing.T) {
 		},
 	}
 
-	normalized, err := Responses(request)
+	normalized, err := Responses(request, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -270,7 +270,7 @@ func TestCompactTranslation(t *testing.T) {
 		},
 	}
 
-	normalized, err := Compact(request)
+	normalized, err := Compact(request, nil)
 	if err != nil {
 		t.Fatalf("Compact() error = %v", err)
 	}
@@ -307,7 +307,7 @@ func TestCompactTranslationRejectsUnsupportedContentPart(t *testing.T) {
 				}},
 			}},
 		},
-	})
+	}, nil)
 
 	if err == nil {
 		t.Fatal("Compact() error = nil, want unsupported content part error")
@@ -355,7 +355,7 @@ func TestResponsesTranslationExtractsInstructionRolesFromInput(t *testing.T) {
 		},
 	}
 
-	normalized, err := Responses(request)
+	normalized, err := Responses(request, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -399,7 +399,7 @@ func TestResponsesTranslationAcceptsModernFunctionToolShape(t *testing.T) {
 		}},
 	}
 
-	normalized, err := Responses(request)
+	normalized, err := Responses(request, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -439,7 +439,7 @@ func TestChatCompletionsTranslationPreservesCustomToolShape(t *testing.T) {
 		ToolChoice: json.RawMessage(`{"type":"custom","name":"ApplyPatch"}`),
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -493,7 +493,7 @@ func TestChatCompletionsTranslationPreservesCustomToolCallsAndOutputs(t *testing
 		},
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -549,7 +549,7 @@ func TestChatCompletionsTranslationMapsFunctionShapedReplayBackToCustomTool(t *t
 		}},
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -578,7 +578,7 @@ func TestChatCompletionsTranslationSupportsWebSearchVariants(t *testing.T) {
 		name       string
 		tool       ToolDefinition
 		toolChoice json.RawMessage
-		assertTool func(*testing.T, ToolDefinition, NormalizedRequest)
+		assertTool func(*testing.T, ToolDefinition, turn.NormalizedRequest)
 	}{
 		{
 			name: "native web_search tool",
@@ -586,7 +586,7 @@ func TestChatCompletionsTranslationSupportsWebSearchVariants(t *testing.T) {
 				Type: "web_search",
 			},
 			toolChoice: json.RawMessage(`{"type":"web_search"}`),
-			assertTool: func(t *testing.T, _ ToolDefinition, normalized NormalizedRequest) {
+			assertTool: func(t *testing.T, _ ToolDefinition, normalized turn.NormalizedRequest) {
 				t.Helper()
 
 				if normalized.Tools[0].Type != "web_search" {
@@ -605,7 +605,7 @@ func TestChatCompletionsTranslationSupportsWebSearchVariants(t *testing.T) {
 				},
 			},
 			toolChoice: json.RawMessage(`{"type":"web_search_preview"}`),
-			assertTool: func(t *testing.T, _ ToolDefinition, normalized NormalizedRequest) {
+			assertTool: func(t *testing.T, _ ToolDefinition, normalized turn.NormalizedRequest) {
 				t.Helper()
 
 				if normalized.Tools[0].Type != "web_search" {
@@ -635,7 +635,7 @@ func TestChatCompletionsTranslationSupportsWebSearchVariants(t *testing.T) {
 				ToolChoice: tc.toolChoice,
 			}
 
-			normalized, err := ChatCompletions(request)
+			normalized, err := ChatCompletions(request, nil)
 			if err != nil {
 				t.Fatalf("ChatCompletions() error = %v", err)
 			}
@@ -676,7 +676,7 @@ func TestResponsesTranslationAcceptsAssistantOutputTextReplay(t *testing.T) {
 		},
 	}
 
-	normalized, err := Responses(request)
+	normalized, err := Responses(request, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -716,7 +716,7 @@ func TestResponsesTranslationPreservesWebSearchCallReplayIdentity(t *testing.T) 
 		},
 	}
 
-	normalized, err := Responses(request)
+	normalized, err := Responses(request, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -762,7 +762,7 @@ func TestResponsesTranslationPreservesToolOutputContentTypes(t *testing.T) {
 		},
 	}
 
-	normalized, err := Responses(request)
+	normalized, err := Responses(request, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -795,7 +795,7 @@ func TestResponsesTranslationAcceptsInputFilePart(t *testing.T) {
 		},
 	}
 
-	normalized, err := Responses(request)
+	normalized, err := Responses(request, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -832,7 +832,7 @@ func TestChatCompletionsTranslationAcceptsCanonicalFilePart(t *testing.T) {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -874,7 +874,7 @@ func TestChatCompletionsTranslationPreservesMultimodalToolOutput(t *testing.T) {
 		},
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -915,7 +915,7 @@ func TestToolNamesAreShortenedConsistentlyAndRestored(t *testing.T) {
 		ToolChoice: choice,
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -962,7 +962,7 @@ func TestResponsesShortensCustomToolNameAndChoice(t *testing.T) {
 		}}},
 		Tools:      []ToolDefinition{{Type: "custom", Name: name}},
 		ToolChoice: choice,
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -1005,7 +1005,7 @@ func TestResponsesTranslationAcceptsReasoningItemReplay(t *testing.T) {
 		},
 	}
 
-	normalized, err := Responses(request)
+	normalized, err := Responses(request, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
@@ -1045,7 +1045,7 @@ func TestUnsupportedContentPartRejected(t *testing.T) {
 				Type: "audio",
 			}},
 		}},
-	})
+	}, nil)
 
 	if err == nil {
 		t.Fatal("expected unsupported content part error")
@@ -1071,7 +1071,7 @@ func TestChatCompletionsTranslationRejectsInvalidToolCallContent(t *testing.T) {
 				},
 			}},
 		}},
-	})
+	}, nil)
 
 	if err == nil {
 		t.Fatal("expected invalid tool call content error")
@@ -1090,7 +1090,7 @@ func TestUnsupportedModelRejected(t *testing.T) {
 			Role:    "user",
 			Content: MessageContent{{Type: "text", Text: "hello"}},
 		}},
-	})
+	}, nil)
 
 	if err == nil {
 		t.Fatal("expected unsupported model error")
@@ -1104,7 +1104,7 @@ func TestResponsesTranslationLeavesModelEmptyWhenOmitted(t *testing.T) {
 		Input: ResponsesInput{
 			String: "hello",
 		},
-	})
+	}, nil)
 
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
@@ -1123,7 +1123,7 @@ func TestToCodexWSCreatePayloadIncludesTurnControls(t *testing.T) {
 
 	generate := false
 	parallel := false
-	request := NormalizedRequest{
+	request := turn.NormalizedRequest{
 		Request: codex.Request{
 			Model:             "gpt-5.4",
 			Input:             []codex.InputItem{{Role: "user"}},

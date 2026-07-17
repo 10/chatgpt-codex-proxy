@@ -8,6 +8,7 @@ import (
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/models"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 const defaultInstructions = "You are a helpful assistant."
@@ -28,10 +29,10 @@ func (e *UnsupportedContentPartError) Error() string {
 	return fmt.Sprintf("unsupported_content_part: %s", e.PartType)
 }
 
-func ChatCompletions(req ChatCompletionsRequest, catalog ...*models.Catalog) (NormalizedRequest, error) {
-	model, modelExplicit, reasoning, serviceTier, err := normalizeModel(req.Model, req.ReasoningEffort, req.ServiceTier, firstCatalog(catalog...))
+func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.NormalizedRequest, error) {
+	model, modelExplicit, reasoning, serviceTier, err := normalizeModel(req.Model, req.ReasoningEffort, req.ServiceTier, catalog)
 	if err != nil {
-		return NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	tools := req.Tools
 	if len(tools) == 0 && len(req.Functions) > 0 {
@@ -59,7 +60,7 @@ func ChatCompletions(req ChatCompletionsRequest, catalog ...*models.Catalog) (No
 	if req.ResponseFormat != nil {
 		text, tupleSchema, err := normalizeChatResponseFormat(req.ResponseFormat)
 		if err != nil {
-			return NormalizedRequest{}, err
+			return turn.NormalizedRequest{}, err
 		}
 		out.Text = text
 		out.TupleSchema = tupleSchema
@@ -70,7 +71,7 @@ func ChatCompletions(req ChatCompletionsRequest, catalog ...*models.Catalog) (No
 	toolCallTypes := make(map[string]string)
 	for _, message := range req.Messages {
 		if err := normalizeChatMessage(&out, &instructions, toolCallTypes, customToolNames, toolNames, message); err != nil {
-			return NormalizedRequest{}, err
+			return turn.NormalizedRequest{}, err
 		}
 	}
 
@@ -117,16 +118,16 @@ func customToolInputFromFunctionArguments(arguments string) string {
 	return arguments
 }
 
-func Responses(req ResponsesRequest, catalog ...*models.Catalog) (NormalizedRequest, error) {
-	model, modelExplicit, reasoning, serviceTier, err := normalizeModel(req.Model, "", req.ServiceTier, firstCatalog(catalog...))
+func Responses(req ResponsesRequest, catalog *models.Catalog) (turn.NormalizedRequest, error) {
+	model, modelExplicit, reasoning, serviceTier, err := normalizeModel(req.Model, "", req.ServiceTier, catalog)
 	if err != nil {
-		return NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 	reasoning = normalizeResponsesReasoning(req.Reasoning, reasoning)
 	toolNames := NewToolNames(toolNamesForResponses(req.Tools, req.ToolChoice, req.Input))
 	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input, toolNames)
 	if err != nil {
-		return NormalizedRequest{}, err
+		return turn.NormalizedRequest{}, err
 	}
 
 	out := newNormalizedRequest(
@@ -148,19 +149,19 @@ func Responses(req ResponsesRequest, catalog ...*models.Catalog) (NormalizedRequ
 	return out, nil
 }
 
-func Compact(req ResponsesCompactRequest, catalog ...*models.Catalog) (NormalizedCompactRequest, error) {
-	model, modelExplicit, reasoning, _, err := normalizeModel(req.Model, "", "", firstCatalog(catalog...))
+func Compact(req ResponsesCompactRequest, catalog *models.Catalog) (turn.NormalizedCompactRequest, error) {
+	model, modelExplicit, reasoning, _, err := normalizeModel(req.Model, "", "", catalog)
 	if err != nil {
-		return NormalizedCompactRequest{}, err
+		return turn.NormalizedCompactRequest{}, err
 	}
 	reasoning = normalizeResponsesReasoning(req.Reasoning, reasoning)
 	toolNames := NewToolNames(toolNamesForResponses(nil, nil, req.Input))
 	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input, toolNames)
 	if err != nil {
-		return NormalizedCompactRequest{}, err
+		return turn.NormalizedCompactRequest{}, err
 	}
 
-	out := NormalizedCompactRequest{
+	out := turn.NormalizedCompactRequest{
 		ModelExplicit:      modelExplicit,
 		PreviousResponseID: strings.TrimSpace(req.PreviousResponseID),
 		CompactRequest: codex.CompactRequest{
@@ -226,8 +227,8 @@ func normalizeResponsesPayload(instructionsText string, textConfig *ResponsesTex
 	return out, nil
 }
 
-func newNormalizedRequest(model string, modelExplicit bool, stream bool, tools []codex.Tool, toolChoice json.RawMessage, reasoning *codex.Reasoning, serviceTier, previousResponseID string) NormalizedRequest {
-	return NormalizedRequest{
+func newNormalizedRequest(model string, modelExplicit bool, stream bool, tools []codex.Tool, toolChoice json.RawMessage, reasoning *codex.Reasoning, serviceTier, previousResponseID string) turn.NormalizedRequest {
+	return turn.NormalizedRequest{
 		ModelExplicit: modelExplicit,
 		Request: codex.Request{
 			Model:              model,
@@ -242,7 +243,7 @@ func newNormalizedRequest(model string, modelExplicit bool, stream bool, tools [
 	}
 }
 
-func normalizeChatMessage(out *NormalizedRequest, instructions *[]string, toolCallTypes map[string]string, customToolNames map[string]bool, toolNames *ToolNames, message ChatMessage) error {
+func normalizeChatMessage(out *turn.NormalizedRequest, instructions *[]string, toolCallTypes map[string]string, customToolNames map[string]bool, toolNames *ToolNames, message ChatMessage) error {
 	switch message.Role {
 	case "system", "developer":
 		return appendInstructionText(instructions, message.Content)

@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -68,25 +69,19 @@ func parseUpstreamErrorBody(body string) (string, int) {
 		return "", 0
 	}
 
-	nested := upstreamErrorFields{
-		Code:            payload.Code,
-		ResetsInSeconds: payload.ResetsInSeconds,
-		RetryAfter:      payload.RetryAfter,
-		ResetsAt:        payload.ResetsAt,
-	}
+	nested := upstreamErrorFields{}
 	if payload.Error != nil {
-		if nested.Code == "" {
-			nested.Code = payload.Error.Code
-		}
-		if nested.ResetsInSeconds == nil {
-			nested.ResetsInSeconds = payload.Error.ResetsInSeconds
-		}
-		if nested.RetryAfter == nil {
-			nested.RetryAfter = payload.Error.RetryAfter
-		}
-		if nested.ResetsAt == nil {
-			nested.ResetsAt = payload.Error.ResetsAt
-		}
+		nested = *payload.Error
+	}
+	nested.Code = cmp.Or(payload.Code, nested.Code)
+	if len(payload.ResetsInSeconds) > 0 {
+		nested.ResetsInSeconds = payload.ResetsInSeconds
+	}
+	if len(payload.RetryAfter) > 0 {
+		nested.RetryAfter = payload.RetryAfter
+	}
+	if len(payload.ResetsAt) > 0 {
+		nested.ResetsAt = payload.ResetsAt
 	}
 
 	code := strings.TrimSpace(nested.Code)
@@ -181,10 +176,7 @@ func (f *flexibleInt64) UnmarshalJSON(data []byte) error {
 }
 
 func (f flexibleInt64) Int64() (int64, bool) {
-	if !f.set {
-		return 0, false
-	}
-	return f.value, true
+	return f.value, f.set
 }
 
 func parsePositiveInt64(raw json.RawMessage) (int64, bool) {

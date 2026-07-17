@@ -32,6 +32,16 @@ func TestDeviceCodeResponseUnmarshalJSONAcceptsStringAndNumber(t *testing.T) {
 			body: `{"user_code":"ABC","device_auth_id":"dev_123","interval":"30"}`,
 			want: 30,
 		},
+		{
+			name: "padded string",
+			body: `{"user_code":"ABC","device_auth_id":"dev_123","interval":" 45 "}`,
+			want: 45,
+		},
+		{
+			name: "blank string",
+			body: `{"user_code":"ABC","device_auth_id":"dev_123","interval":""}`,
+			want: 0,
+		},
 	}
 
 	for _, tc := range tests {
@@ -44,6 +54,35 @@ func TestDeviceCodeResponseUnmarshalJSONAcceptsStringAndNumber(t *testing.T) {
 			}
 			if decoded.Interval != tc.want {
 				t.Fatalf("interval = %d, want %d", decoded.Interval, tc.want)
+			}
+		})
+	}
+}
+
+func TestOAuthTokenResponseUnmarshalJSONAcceptsBlankAndPaddedExpiresIn(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "padded string",
+			body: `{"access_token":"access","expires_in":" 7200 "}`,
+		},
+		{
+			name: "blank string",
+			body: `{"access_token":"access","expires_in":""}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var decoded oauthTokenResponse
+			if err := json.Unmarshal([]byte(tc.body), &decoded); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
 			}
 		})
 	}

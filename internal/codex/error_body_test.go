@@ -19,14 +19,6 @@ func TestReadLimitedErrorBodyIncludesReadFailures(t *testing.T) {
 	}
 }
 
-func TestDrainLimitedBodyReturnsReadFailures(t *testing.T) {
-	t.Parallel()
-
-	if err := drainLimitedBody(errReader{err: errors.New("boom")}); err == nil {
-		t.Fatal("drainLimitedBody() error = nil, want read failure")
-	}
-}
-
 type errReader struct {
 	err error
 }

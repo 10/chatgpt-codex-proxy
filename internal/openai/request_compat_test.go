@@ -21,7 +21,7 @@ func TestChatCompletionsTranslationAcceptsLegacyFunctionsAndChoice(t *testing.T)
 		FunctionCall: &LegacyFunctionCallChoice{Name: "lookup_weather"},
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -68,7 +68,7 @@ func TestChatCompletionsTranslationPrefersModernToolsAndToolChoice(t *testing.T)
 		FunctionCall: &LegacyFunctionCallChoice{Name: "legacy_tool"},
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -96,7 +96,7 @@ func TestChatCompletionsTranslationSupportsJSONObject(t *testing.T) {
 		ResponseFormat: &ResponseFormat{Type: "json_object"},
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -138,7 +138,7 @@ func TestChatCompletionsTranslationPreparesSchemaAndWarnings(t *testing.T) {
 		},
 	}
 
-	normalized, err := ChatCompletions(request)
+	normalized, err := ChatCompletions(request, nil)
 	if err != nil {
 		t.Fatalf("ChatCompletions() error = %v", err)
 	}
@@ -196,7 +196,7 @@ func TestResponsesTranslationPreparesSchemaAndWarnings(t *testing.T) {
 		},
 	}
 
-	normalized, err := Responses(request)
+	normalized, err := Responses(request, nil)
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}

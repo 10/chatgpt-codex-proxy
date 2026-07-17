@@ -34,12 +34,3 @@ func normalizeModel(rawModel, reasoningEffort, serviceTier string, catalog *mode
 	}
 	return model, modelExplicit, reasoning, serviceTier, nil
 }
-
-func firstCatalog(catalogs ...*models.Catalog) *models.Catalog {
-	for _, catalog := range catalogs {
-		if catalog != nil {
-			return catalog
-		}
-	}
-	return nil
-}

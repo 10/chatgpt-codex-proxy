@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
@@ -157,7 +158,7 @@ func (m *ReplayManager) Apply(sessionID string, request MessagesRequest) (Messag
 	for _, block := range record.Blocks {
 		switch block.Type {
 		case "thinking":
-			signature := strings.TrimSpace(firstNonEmpty(block.Signature, block.Data))
+			signature := strings.TrimSpace(jsonutil.FirstNonEmpty(block.Signature, block.Data))
 			if !IsValidCodexReasoningSignature(signature) {
 				continue
 			}
@@ -182,7 +183,7 @@ func (m *ReplayManager) Apply(sessionID string, request MessagesRequest) (Messag
 	for messageIndex, message := range request.Messages {
 		filtered := make(Content, 0, len(message.Content))
 		for _, block := range message.Content {
-			signature := strings.TrimSpace(firstNonEmpty(block.Signature, block.Data))
+			signature := strings.TrimSpace(jsonutil.FirstNonEmpty(block.Signature, block.Data))
 			if (block.Type == "thinking" || block.Type == "redacted_thinking") && replaySignatures[signature] {
 				if replaceAt < 0 {
 					replaceAt = messageIndex
@@ -381,7 +382,7 @@ func orderedReplayContent(cached Content, targetCalls map[string]bool, existing 
 	for _, block := range cached {
 		switch block.Type {
 		case "thinking":
-			signature := strings.TrimSpace(firstNonEmpty(block.Signature, block.Data))
+			signature := strings.TrimSpace(jsonutil.FirstNonEmpty(block.Signature, block.Data))
 			if IsValidCodexReasoningSignature(signature) {
 				ordered = append(ordered, cloneBlock(block))
 			}
@@ -476,7 +477,7 @@ func existingReasoningSignatures(messages []Message) map[string]bool {
 			if block.Type != "thinking" && block.Type != "redacted_thinking" {
 				continue
 			}
-			signature := strings.TrimSpace(firstNonEmpty(block.Signature, block.Data))
+			signature := strings.TrimSpace(jsonutil.FirstNonEmpty(block.Signature, block.Data))
 			if IsValidCodexReasoningSignature(signature) {
 				signatures[signature] = true
 			}
@@ -498,10 +499,7 @@ func firstToolResultMessage(messages []Message, target map[string]bool) int {
 
 func insertMessage(messages []Message, index int, message Message) []Message {
 	index = max(0, min(index, len(messages)))
-	messages = append(messages, Message{})
-	copy(messages[index+1:], messages[index:])
-	messages[index] = message
-	return messages
+	return slices.Insert(messages, index, message)
 }
 
 func cloneMessages(messages []Message) []Message {
@@ -533,13 +531,4 @@ func cloneBlock(block Block) Block {
 		cloned.Source = &source
 	}
 	return cloned
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }

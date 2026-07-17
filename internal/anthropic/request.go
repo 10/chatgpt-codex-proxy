@@ -14,7 +14,6 @@ import (
 	"unicode"
 
 	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/openai"
@@ -232,7 +231,7 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.I
 				flushContent()
 				item := codex.InputItem{Type: "reasoning", EncryptedContent: encrypted}
 				if text := strings.TrimSpace(block.Thinking); text != "" {
-					item.Summary = []conversation.ReasoningPart{{Type: "summary_text", Text: text}}
+					item.Summary = []turn.ReasoningPart{{Type: "summary_text", Text: text}}
 				}
 				result = append(result, item)
 			default:
@@ -544,16 +543,9 @@ func supportedOutputSchemaFormat(format string) bool {
 }
 
 func visitSchemaChildren(node map[string]any, visit func(map[string]any) error) error {
-	for _, key := range []string{"properties", "patternProperties", "$defs", "definitions"} {
-		children, _ := node[key].(map[string]any)
-		for name, raw := range children {
-			child, ok := raw.(map[string]any)
-			if !ok {
-				if key == "properties" {
-					continue
-				}
-				return fmt.Errorf("output schema %q entry %q must use an object schema", key, name)
-			}
+	properties, _ := node["properties"].(map[string]any)
+	for _, raw := range properties {
+		if child, ok := raw.(map[string]any); ok {
 			if err := visit(child); err != nil {
 				return err
 			}
@@ -568,39 +560,19 @@ func visitSchemaChildren(node map[string]any, visit func(map[string]any) error) 
 			return err
 		}
 	}
-	if children, ok := node["prefixItems"].([]any); ok {
-		for _, raw := range children {
-			if child, ok := raw.(map[string]any); ok {
-				if err := visit(child); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	for _, key := range []string{"oneOf", "anyOf", "allOf"} {
-		rawChildren, exists := node[key]
-		if !exists {
-			continue
-		}
+	if rawChildren, exists := node["anyOf"]; exists {
 		children, ok := rawChildren.([]any)
 		if !ok {
-			return fmt.Errorf("output schema %q must be an array", key)
+			return errors.New(`output schema "anyOf" must be an array`)
 		}
 		if len(children) == 0 {
-			return fmt.Errorf("output schema %q must contain at least one schema", key)
+			return errors.New(`output schema "anyOf" must contain at least one schema`)
 		}
 		for _, raw := range children {
 			child, ok := raw.(map[string]any)
 			if !ok {
-				return fmt.Errorf("output schema %q entries must use object schemas", key)
+				return errors.New(`output schema "anyOf" entries must use object schemas`)
 			}
-			if err := visit(child); err != nil {
-				return err
-			}
-		}
-	}
-	for _, key := range []string{"if", "then", "else", "not"} {
-		if child, ok := node[key].(map[string]any); ok {
 			if err := visit(child); err != nil {
 				return err
 			}

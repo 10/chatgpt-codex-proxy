@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -53,7 +51,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	modelCatalog := models.NewCatalog(models.BootstrapEntries())
 	if snapshot, err := models.LoadCache(cfg.DataDir); err == nil {
 		modelCatalog.LoadCache(snapshot)
-	} else if !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+	} else {
 		logger.Warn("load models cache failed", "error", err.Error())
 	}
 

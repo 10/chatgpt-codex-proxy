@@ -84,7 +84,3 @@ func toolChoiceName(raw json.RawMessage) string {
 	}
 	return ""
 }
-
-var RestoreToolName = turn.RestoreToolName
-var UpstreamToolName = turn.UpstreamToolName
-var MergeToolNameAliases = turn.MergeToolNameAliases

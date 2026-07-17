@@ -105,9 +105,9 @@ func TestResolveSessionBuildsReplayForExplicitHTTPContinuation(t *testing.T) {
 		ResponseID: "resp_replay",
 		AccountID:  "acct_1",
 		Model:      "gpt-5.4",
-		InputHistory: []conversation.ContinuationInputItem{
-			continuationInputItemFromCodex(userText("first")),
-			continuationInputItemFromCodex(assistantText("first answer")),
+		InputHistory: []turn.InputItem{
+			cloneContinuationInputItem(userText("first")),
+			cloneContinuationInputItem(assistantText("first answer")),
 		},
 	})
 
@@ -468,10 +468,10 @@ func assistantText(text string) codex.InputItem {
 	}
 }
 
-func continuationHistoryPrefix(items []codex.InputItem) []conversation.ContinuationInputItem {
-	history := make([]conversation.ContinuationInputItem, 0, len(items))
+func continuationHistoryPrefix(items []codex.InputItem) []turn.InputItem {
+	history := make([]turn.InputItem, 0, len(items))
 	for _, item := range items {
-		history = append(history, continuationInputItemFromCodex(item))
+		history = append(history, cloneContinuationInputItem(item))
 	}
 	return history
 }

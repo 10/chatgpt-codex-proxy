@@ -1,6 +1,7 @@
 package accounts
 
 import (
+	"cmp"
 	"strings"
 
 	"chatgpt-codex-proxy/internal/jwtutil"
@@ -36,29 +37,22 @@ func metadataFromToken(token OAuthToken) tokenMetadata {
 		return tokenMetadata{}
 	}
 
-	metadata := tokenMetadata{
-		Email:    strings.TrimSpace(claims.Email),
-		PlanType: strings.TrimSpace(claims.PlanType),
-		UserID:   strings.TrimSpace(claims.UserID),
-	}
-
+	profile := jwtProfileClaims{}
 	if claims.Profile != nil {
-		if metadata.Email == "" {
-			metadata.Email = strings.TrimSpace(claims.Profile.Email)
-		}
-		if metadata.UserID == "" {
-			metadata.UserID = strings.TrimSpace(claims.Profile.UserID)
-		}
+		profile = *claims.Profile
 	}
-
+	auth := jwtAuthClaims{}
 	if claims.Auth != nil {
-		if metadata.PlanType == "" {
-			metadata.PlanType = strings.TrimSpace(claims.Auth.PlanType)
-		}
-		if metadata.UserID == "" {
-			metadata.UserID = strings.TrimSpace(claims.Auth.UserID)
-		}
+		auth = *claims.Auth
 	}
 
-	return metadata
+	return tokenMetadata{
+		Email:    cmp.Or(strings.TrimSpace(claims.Email), strings.TrimSpace(profile.Email)),
+		PlanType: cmp.Or(strings.TrimSpace(claims.PlanType), strings.TrimSpace(auth.PlanType)),
+		UserID: cmp.Or(
+			strings.TrimSpace(claims.UserID),
+			strings.TrimSpace(profile.UserID),
+			strings.TrimSpace(auth.UserID),
+		),
+	}
 }

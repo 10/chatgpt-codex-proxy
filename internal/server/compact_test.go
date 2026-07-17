@@ -163,11 +163,11 @@ func TestHandleResponsesCompactPreservesUsageAndExpandsPreviousResponse(t *testi
 		ResponseID: "resp_prev_compact",
 		AccountID:  "acct_compact",
 		Model:      "gpt-5.4",
-		InputHistory: []conversation.ContinuationInputItem{{
+		InputHistory: []turn.InputItem{{
 			Role:  "assistant",
 			Type:  "message",
 			Phase: "output",
-			Content: []conversation.ContinuationContentPart{{
+			Content: []turn.ContentPart{{
 				Type: "output_text",
 				Text: "Earlier compacted output",
 			}},

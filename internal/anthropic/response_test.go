@@ -398,14 +398,14 @@ func TestSchemaMatchesValueUsesJSONNumericSemantics(t *testing.T) {
 	t.Parallel()
 
 	for _, value := range []json.Number{"1", "1.0", "1e0"} {
-		if !schemaMatchesValue(map[string]any{"const": float64(1)}, value) {
+		if !newSchemaMatcher().matches(map[string]any{"const": float64(1)}, value) {
 			t.Fatalf("const 1 did not match %q", value)
 		}
-		if !schemaMatchesValue(map[string]any{"type": "integer"}, value) {
+		if !newSchemaMatcher().matches(map[string]any{"type": "integer"}, value) {
 			t.Fatalf("integer did not match %q", value)
 		}
 	}
-	if schemaMatchesValue(map[string]any{"type": "integer"}, json.Number("1.5")) {
+	if newSchemaMatcher().matches(map[string]any{"type": "integer"}, json.Number("1.5")) {
 		t.Fatal("integer matched 1.5")
 	}
 }
@@ -418,8 +418,8 @@ func TestSchemaMatcherCompilesEachSchemaOnce(t *testing.T) {
 	if !matcher.matches(schema, json.Number("1")) || !matcher.matches(schema, json.Number("2")) {
 		t.Fatal("schema did not match valid integers")
 	}
-	if matcher.compiles != 1 {
-		t.Fatalf("compiles = %d, want 1", matcher.compiles)
+	if len(matcher.compiled) != 1 {
+		t.Fatalf("compiled schemas = %d, want 1", len(matcher.compiled))
 	}
 }
 

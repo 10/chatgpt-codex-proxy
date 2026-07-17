@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -53,13 +54,9 @@ func (e *oauthTokenError) Error() string {
 	return fmt.Sprintf("oauth token exchange failed: %s", message)
 }
 
-func (e *oauthTokenError) terminalCredentialFailure() bool {
-	return e != nil && strings.EqualFold(strings.TrimSpace(e.Code), "invalid_grant")
-}
-
 func IsTerminalCredentialFailure(err error) bool {
 	var oauthErr *oauthTokenError
-	return errors.As(err, &oauthErr) && oauthErr.terminalCredentialFailure()
+	return errors.As(err, &oauthErr) && strings.EqualFold(strings.TrimSpace(oauthErr.Code), "invalid_grant")
 }
 
 type oauthClaims struct {
@@ -118,10 +115,7 @@ func (f *flexibleInt64) UnmarshalJSON(data []byte) error {
 }
 
 func (f flexibleInt64) Int64() (int64, bool) {
-	if !f.set {
-		return 0, false
-	}
-	return f.value, true
+	return f.value, f.set
 }
 
 func (d *DeviceCodeResponse) UnmarshalJSON(data []byte) error {
@@ -281,7 +275,7 @@ func doDeviceAuthJSON[T any](ctx context.Context, client *http.Client, endpoint 
 	}
 	defer resp.Body.Close()
 	if allowPending && (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound) {
-		if err := drainLimitedBody(resp.Body); err != nil {
+		if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, upstreamErrorBodyLimit)); err != nil {
 			return zero, false, fmt.Errorf("drain pending oauth response: %w", err)
 		}
 		return zero, true, nil

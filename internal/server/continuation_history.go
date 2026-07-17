@@ -4,21 +4,20 @@ import (
 	"slices"
 
 	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
-func continuationInputHistory(accumulator *turn.Accumulator) []conversation.ContinuationInputItem {
-	history := make([]conversation.ContinuationInputItem, 0, len(accumulator.Normalized.Input))
+func continuationInputHistory(accumulator *turn.Accumulator) []turn.InputItem {
+	history := make([]turn.InputItem, 0, len(accumulator.Normalized.Input))
 	for _, item := range accumulator.Normalized.Input {
-		history = append(history, continuationInputItemFromCodex(item))
+		history = append(history, cloneContinuationInputItem(item))
 	}
 	history = append(history, continuationOutputHistory(accumulator)...)
 	return history
 }
 
-func continuationOutputHistory(accumulator *turn.Accumulator) []conversation.ContinuationInputItem {
+func continuationOutputHistory(accumulator *turn.Accumulator) []turn.InputItem {
 	if accumulator == nil {
 		return nil
 	}
@@ -27,7 +26,7 @@ func continuationOutputHistory(accumulator *turn.Accumulator) []conversation.Con
 	if !ok || len(output) == 0 {
 		return nil
 	}
-	history := make([]conversation.ContinuationInputItem, 0, len(output))
+	history := make([]turn.InputItem, 0, len(output))
 	for _, item := range output {
 		converted, ok := continuationInputItemFromResponseOutput(item, accumulator.Normalized.ToolNameAliases)
 		if ok {
@@ -37,11 +36,11 @@ func continuationOutputHistory(accumulator *turn.Accumulator) []conversation.Con
 	return history
 }
 
-func continuationInputItemFromResponseOutput(item map[string]any, toolNameAliases map[string]string) (conversation.ContinuationInputItem, bool) {
+func continuationInputItemFromResponseOutput(item map[string]any, toolNameAliases map[string]string) (turn.InputItem, bool) {
 	if len(item) == 0 {
-		return conversation.ContinuationInputItem{}, false
+		return turn.InputItem{}, false
 	}
-	out := conversation.ContinuationInputItem{
+	out := turn.InputItem{
 		Role:             jsonutil.StringValue(item["role"]),
 		Type:             jsonutil.StringValue(item["type"]),
 		Phase:            jsonutil.StringValue(item["phase"]),
@@ -65,45 +64,37 @@ func continuationInputItemFromResponseOutput(item map[string]any, toolNameAliase
 		out.Type = ""
 	}
 	if out.Role == "" && out.Type == "" && len(out.Content) == 0 && len(out.OutputContent) == 0 && out.CallID == "" && out.ID == "" {
-		return conversation.ContinuationInputItem{}, false
+		return turn.InputItem{}, false
 	}
 	return out, true
 }
 
-func continuationInputItemsToCodex(items []conversation.ContinuationInputItem) []codex.InputItem {
+func continuationInputItemsToCodex(items []turn.InputItem) []codex.InputItem {
 	if len(items) == 0 {
 		return nil
 	}
 	out := make([]codex.InputItem, 0, len(items))
 	for _, item := range items {
-		out = append(out, continuationInputItemToCodex(item))
+		out = append(out, cloneContinuationInputItem(item))
 	}
 	return out
 }
 
-func continuationInputItemFromCodex(item codex.InputItem) conversation.ContinuationInputItem {
-	out := conversation.ContinuationInputItem(item)
+func cloneContinuationInputItem(item turn.InputItem) turn.InputItem {
+	out := item
 	out.Summary = slices.Clone(item.Summary)
 	out.Content = slices.Clone(item.Content)
 	out.OutputContent = slices.Clone(item.OutputContent)
 	return out
 }
 
-func continuationInputItemToCodex(item conversation.ContinuationInputItem) codex.InputItem {
-	out := codex.InputItem(item)
-	out.Summary = slices.Clone(item.Summary)
-	out.Content = slices.Clone(item.Content)
-	out.OutputContent = slices.Clone(item.OutputContent)
-	return out
-}
-
-func continuationSummaryPartsFromMaps(parts []map[string]any) []conversation.ContinuationSummaryPart {
+func continuationSummaryPartsFromMaps(parts []map[string]any) []turn.ReasoningPart {
 	if len(parts) == 0 {
 		return nil
 	}
-	out := make([]conversation.ContinuationSummaryPart, 0, len(parts))
+	out := make([]turn.ReasoningPart, 0, len(parts))
 	for _, part := range parts {
-		out = append(out, conversation.ContinuationSummaryPart{
+		out = append(out, turn.ReasoningPart{
 			Type: jsonutil.StringValue(part["type"]),
 			Text: jsonutil.StringValue(part["text"]),
 		})
@@ -111,13 +102,13 @@ func continuationSummaryPartsFromMaps(parts []map[string]any) []conversation.Con
 	return out
 }
 
-func continuationContentPartsFromMaps(parts []map[string]any) []conversation.ContinuationContentPart {
+func continuationContentPartsFromMaps(parts []map[string]any) []turn.ContentPart {
 	if len(parts) == 0 {
 		return nil
 	}
-	out := make([]conversation.ContinuationContentPart, 0, len(parts))
+	out := make([]turn.ContentPart, 0, len(parts))
 	for _, part := range parts {
-		out = append(out, conversation.ContinuationContentPart{
+		out = append(out, turn.ContentPart{
 			Type:     jsonutil.StringValue(part["type"]),
 			Text:     jsonutil.StringValue(part["text"]),
 			ImageURL: jsonutil.StringValue(part["image_url"]),
