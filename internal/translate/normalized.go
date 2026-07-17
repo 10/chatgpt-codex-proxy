@@ -2,8 +2,6 @@ package translate
 
 import "chatgpt-codex-proxy/internal/codex"
 
-// NormalizedRequest extends the canonical codex request with translation-only
-// metadata that the proxy needs while mapping OpenAI payloads.
 type NormalizedRequest struct {
 	codex.Request
 	ModelExplicit   bool
@@ -13,36 +11,39 @@ type NormalizedRequest struct {
 	ToolNameAliases map[string]string
 }
 
-func (n NormalizedRequest) ToCodexWSCreatePayload() map[string]any {
+func (r NormalizedRequest) ToCodexWSCreatePayload() map[string]any {
 	payload := map[string]any{
 		"type":         "response.create",
-		"model":        n.Model,
-		"input":        n.Input,
-		"instructions": n.Instructions,
+		"model":        r.Model,
+		"input":        r.Input,
+		"instructions": r.Instructions,
 	}
-	if len(n.Tools) > 0 {
-		payload["tools"] = n.Tools
+	if len(r.Tools) > 0 {
+		payload["tools"] = r.Tools
 	}
-	if len(n.ToolChoice) > 0 {
-		payload["tool_choice"] = n.ToolChoice
+	if len(r.ToolChoice) > 0 {
+		payload["tool_choice"] = r.ToolChoice
 	}
-	if n.Text != nil {
-		payload["text"] = n.Text
+	if r.Text != nil {
+		payload["text"] = r.Text
 	}
-	if n.Reasoning != nil {
-		payload["reasoning"] = n.Reasoning
+	if r.Reasoning != nil {
+		payload["reasoning"] = r.Reasoning
 	}
-	if n.PreviousResponseID != "" {
-		payload["previous_response_id"] = n.PreviousResponseID
+	if r.PreviousResponseID != "" {
+		payload["previous_response_id"] = r.PreviousResponseID
 	}
-	if n.PromptCacheKey != "" {
-		payload["prompt_cache_key"] = n.PromptCacheKey
+	if r.PromptCacheKey != "" {
+		payload["prompt_cache_key"] = r.PromptCacheKey
 	}
-	if len(n.Include) > 0 {
-		payload["include"] = append([]string(nil), n.Include...)
+	if len(r.Include) > 0 {
+		payload["include"] = append([]string(nil), r.Include...)
 	}
-	if n.Generate != nil {
-		payload["generate"] = *n.Generate
+	if r.ParallelToolCalls != nil {
+		payload["parallel_tool_calls"] = *r.ParallelToolCalls
+	}
+	if r.Generate != nil {
+		payload["generate"] = *r.Generate
 	}
 	return payload
 }

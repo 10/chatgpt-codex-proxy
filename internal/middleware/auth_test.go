@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -57,5 +58,23 @@ func TestAPIKeyAuthentication(t *testing.T) {
 				t.Fatalf("status = %d, want %d", recorder.Code, tc.wantStatus)
 			}
 		})
+	}
+}
+
+func TestAPIKeyWithUnauthorizedUsesProtocolRenderer(t *testing.T) {
+	t.Parallel()
+
+	engine := gin.New()
+	engine.Use(APIKeyWithUnauthorized("secret", func(c *gin.Context) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"type": "anthropic_error"})
+	}))
+	engine.GET("/protected", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), "anthropic_error") {
+		t.Fatalf("status = %d body = %s", recorder.Code, recorder.Body.String())
 	}
 }

@@ -1117,3 +1117,22 @@ func TestResponsesTranslationLeavesModelEmptyWhenOmitted(t *testing.T) {
 		t.Fatal("ModelExplicit = true, want false when model is omitted")
 	}
 }
+
+func TestToCodexWSCreatePayloadIncludesTurnControls(t *testing.T) {
+	t.Parallel()
+
+	generate := false
+	parallel := false
+	request := NormalizedRequest{
+		Request: codex.Request{
+			Model:             "gpt-5.4",
+			Input:             []codex.InputItem{{Role: "user"}},
+			ParallelToolCalls: &parallel,
+		},
+		Generate: &generate,
+	}
+	payload := request.ToCodexWSCreatePayload()
+	if payload["generate"] != false || payload["parallel_tool_calls"] != false {
+		t.Fatalf("payload = %#v", payload)
+	}
+}

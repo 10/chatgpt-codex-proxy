@@ -11,7 +11,6 @@ import (
 type Reasoning = openai.Reasoning
 type TextFormat = openai.ResponsesTextFormat
 
-// Tool shares the OpenAI tool definition schema.
 type Tool = openai.ToolDefinition
 
 type Request struct {
@@ -28,6 +27,7 @@ type Request struct {
 	PreviousResponseID string          `json:"previous_response_id,omitempty"`
 	PromptCacheKey     string          `json:"prompt_cache_key,omitempty"`
 	Include            []string        `json:"include,omitempty"`
+	ParallelToolCalls  *bool           `json:"parallel_tool_calls,omitempty"`
 }
 
 type CompactRequest struct {

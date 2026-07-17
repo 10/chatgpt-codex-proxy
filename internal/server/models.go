@@ -24,6 +24,23 @@ type modelResponse struct {
 
 func (a *App) handleModels(c *gin.Context) {
 	entries := a.modelCatalog().List()
+	if strings.TrimSpace(c.GetHeader("anthropic-version")) != "" {
+		a.prepareAnthropicHeaders(c)
+		if !a.validateAnthropicVersion(c) {
+			return
+		}
+		data := make([]map[string]any, 0, len(entries))
+		for _, entry := range entries {
+			data = append(data, anthropicModelObject(entry.ID, entry.DisplayName))
+		}
+		response := gin.H{"data": data, "has_more": false}
+		if len(data) > 0 {
+			response["first_id"] = data[0]["id"]
+			response["last_id"] = data[len(data)-1]["id"]
+		}
+		c.JSON(http.StatusOK, response)
+		return
+	}
 	if strings.TrimSpace(c.Query("client_version")) != "" {
 		c.JSON(http.StatusOK, codexClientModelsResponse(entries))
 		return
@@ -91,6 +108,18 @@ func codexClientModelsResponse(entries []models.Entry) map[string]any {
 func (a *App) handleModelByID(c *gin.Context) {
 	modelID := c.Param("model_id")
 	model, ok := a.modelCatalog().Get(modelID)
+	if strings.TrimSpace(c.GetHeader("anthropic-version")) != "" {
+		a.prepareAnthropicHeaders(c)
+		if !a.validateAnthropicVersion(c) {
+			return
+		}
+		if !ok {
+			a.writeAnthropicError(c, http.StatusNotFound, "Model '"+modelID+"' not found")
+			return
+		}
+		c.JSON(http.StatusOK, anthropicModelObject(model.ID, model.DisplayName))
+		return
+	}
 	if !ok && isCodexImageModel(modelID) {
 		c.JSON(http.StatusOK, modelObject(modelID))
 		return
@@ -100,6 +129,15 @@ func (a *App) handleModelByID(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, modelObject(model.ID))
+}
+
+func anthropicModelObject(id, displayName string) map[string]any {
+	return map[string]any{
+		"type":         "model",
+		"id":           id,
+		"display_name": displayName,
+		"created_at":   "2023-11-06T00:00:00Z",
+	}
 }
 
 func isCodexImageModel(model string) bool {

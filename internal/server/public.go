@@ -188,6 +188,9 @@ func (a *App) openStream(c *gin.Context, ctx context.Context, endpoint string, r
 		fallback.ImplicitResume = false
 		return a.openStreamWithFailover(c, ctx, endpoint, &fallback, a.openHTTPStream)
 	}
+	if resolution.Request.Generate != nil {
+		return a.openStreamWithFailover(c, ctx, endpoint, resolution, a.openWSStream)
+	}
 	if requestUsesHostedWebSearch(resolution.Request) {
 		return a.openStreamWithFailover(c, ctx, endpoint, resolution, a.openWSStream)
 	}

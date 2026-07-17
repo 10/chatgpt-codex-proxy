@@ -38,7 +38,7 @@ func ChatCompletions(req openai.ChatCompletionsRequest, catalog ...*models.Catal
 	if len(tools) == 0 && len(req.Functions) > 0 {
 		tools = legacyFunctionsAsTools(req.Functions)
 	}
-	toolNames := newToolNameMapper(toolNamesForChat(req, tools))
+	toolNames := NewToolNames(toolNamesForChat(req, tools))
 	toolChoice := json.RawMessage(nil)
 	if len(req.Tools) > 0 {
 		toolChoice = normalizeToolChoice(req.ToolChoice, toolNames)
@@ -56,7 +56,7 @@ func ChatCompletions(req openai.ChatCompletionsRequest, catalog ...*models.Catal
 		req.PreviousResponseID,
 	)
 	out.PromptCacheKey = strings.TrimSpace(req.PromptCacheKey)
-	out.ToolNameAliases = toolNames.aliases()
+	out.ToolNameAliases = toolNames.Aliases()
 	if req.ResponseFormat != nil {
 		text, tupleSchema, err := normalizeChatResponseFormat(req.ResponseFormat)
 		if err != nil {
@@ -124,7 +124,7 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 		return NormalizedRequest{}, err
 	}
 	reasoning = normalizeResponsesReasoning(req.Reasoning, reasoning)
-	toolNames := newToolNameMapper(toolNamesForResponses(req.Tools, req.ToolChoice, req.Input))
+	toolNames := NewToolNames(toolNamesForResponses(req.Tools, req.ToolChoice, req.Input))
 	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input, toolNames)
 	if err != nil {
 		return NormalizedRequest{}, err
@@ -145,7 +145,7 @@ func Responses(req openai.ResponsesRequest, catalog ...*models.Catalog) (Normali
 	out.Text = payload.Text
 	out.PromptCacheKey = strings.TrimSpace(req.PromptCacheKey)
 	out.TupleSchema = payload.TupleSchema
-	out.ToolNameAliases = toolNames.aliases()
+	out.ToolNameAliases = toolNames.Aliases()
 	return out, nil
 }
 
@@ -155,7 +155,7 @@ func Compact(req openai.ResponsesCompactRequest, catalog ...*models.Catalog) (No
 		return NormalizedCompactRequest{}, err
 	}
 	reasoning = normalizeResponsesReasoning(req.Reasoning, reasoning)
-	toolNames := newToolNameMapper(toolNamesForResponses(nil, nil, req.Input))
+	toolNames := NewToolNames(toolNamesForResponses(nil, nil, req.Input))
 	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input, toolNames)
 	if err != nil {
 		return NormalizedCompactRequest{}, err
@@ -172,7 +172,7 @@ func Compact(req openai.ResponsesCompactRequest, catalog ...*models.Catalog) (No
 			Reasoning:    reasoning,
 		},
 		TupleSchema:     payload.TupleSchema,
-		ToolNameAliases: toolNames.aliases(),
+		ToolNameAliases: toolNames.Aliases(),
 	}
 	return out, nil
 }
@@ -198,7 +198,7 @@ func normalizeResponsesReasoning(explicit *openai.Reasoning, fallback *codex.Rea
 	return reasoning
 }
 
-func normalizeResponsesPayload(instructionsText string, textConfig *openai.ResponsesText, input openai.ResponsesInput, toolNames *toolNameMapper) (normalizedResponsesPayload, error) {
+func normalizeResponsesPayload(instructionsText string, textConfig *openai.ResponsesText, input openai.ResponsesInput, toolNames *ToolNames) (normalizedResponsesPayload, error) {
 	var out normalizedResponsesPayload
 	var instructions []string
 	if text := strings.TrimSpace(instructionsText); text != "" {
@@ -243,7 +243,7 @@ func newNormalizedRequest(model string, modelExplicit bool, stream bool, tools [
 	}
 }
 
-func normalizeChatMessage(out *NormalizedRequest, instructions *[]string, toolCallTypes map[string]string, customToolNames map[string]bool, toolNames *toolNameMapper, message openai.ChatMessage) error {
+func normalizeChatMessage(out *NormalizedRequest, instructions *[]string, toolCallTypes map[string]string, customToolNames map[string]bool, toolNames *ToolNames, message openai.ChatMessage) error {
 	switch message.Role {
 	case "system", "developer":
 		return appendInstructionText(instructions, message.Content)
@@ -262,7 +262,7 @@ func normalizeChatMessage(out *NormalizedRequest, instructions *[]string, toolCa
 		if message.FunctionCall != nil {
 			out.Input = append(out.Input, codex.InputItem{
 				Type:      "function_call",
-				Name:      toolNames.shorten(message.FunctionCall.Name),
+				Name:      toolNames.Shorten(message.FunctionCall.Name),
 				Arguments: message.FunctionCall.Arguments,
 			})
 			return nil
@@ -300,12 +300,12 @@ func normalizeChatToolCallType(call openai.ToolCall, customToolNames map[string]
 	return callType
 }
 
-func chatToolCallInputItem(call openai.ToolCall, callType string, toolNames *toolNameMapper) codex.InputItem {
+func chatToolCallInputItem(call openai.ToolCall, callType string, toolNames *ToolNames) codex.InputItem {
 	if callType != "custom" {
 		return codex.InputItem{
 			Type:      "function_call",
 			CallID:    call.ID,
-			Name:      toolNames.shorten(call.Function.Name),
+			Name:      toolNames.Shorten(call.Function.Name),
 			Arguments: call.Function.Arguments,
 		}
 	}
@@ -325,12 +325,12 @@ func chatToolCallInputItem(call openai.ToolCall, callType string, toolNames *too
 	return codex.InputItem{
 		Type:   "custom_tool_call",
 		CallID: call.ID,
-		Name:   toolNames.shorten(name),
+		Name:   toolNames.Shorten(name),
 		Input:  input,
 	}
 }
 
-func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, toolNames *toolNameMapper, item openai.ResponsesInputItem) error {
+func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, toolNames *ToolNames, item openai.ResponsesInputItem) error {
 	if item.Type == "" && (item.Role == "system" || item.Role == "developer") {
 		return appendInstructionText(instructions, item.Content)
 	}
@@ -346,14 +346,14 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, to
 		*out = append(*out, codex.InputItem{
 			Type:      "function_call",
 			CallID:    item.CallID,
-			Name:      toolNames.shorten(item.Name),
+			Name:      toolNames.Shorten(item.Name),
 			Arguments: item.Arguments,
 		})
 	case "custom_tool_call":
 		*out = append(*out, codex.InputItem{
 			Type:   "custom_tool_call",
 			CallID: item.CallID,
-			Name:   toolNames.shorten(item.Name),
+			Name:   toolNames.Shorten(item.Name),
 			Input:  item.Input,
 		})
 	case "function_call_output", "custom_tool_call_output":

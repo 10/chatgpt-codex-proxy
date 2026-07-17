@@ -11,14 +11,14 @@ import (
 
 const maxToolNameLength = 64
 
-type toolNameMapper struct {
+type ToolNames struct {
 	originalToShort map[string]string
 	shortToOriginal map[string]string
 	used            map[string]struct{}
 }
 
-func newToolNameMapper(names []string) *toolNameMapper {
-	mapper := &toolNameMapper{
+func NewToolNames(names []string) *ToolNames {
+	mapping := &ToolNames{
 		originalToShort: make(map[string]string),
 		shortToOriginal: make(map[string]string),
 		used:            make(map[string]struct{}),
@@ -28,16 +28,16 @@ func newToolNameMapper(names []string) *toolNameMapper {
 		if name == "" || len(name) > maxToolNameLength {
 			continue
 		}
-		mapper.originalToShort[name] = name
-		mapper.used[name] = struct{}{}
+		mapping.originalToShort[name] = name
+		mapping.used[name] = struct{}{}
 	}
 	for _, name := range names {
-		mapper.shorten(name)
+		mapping.Shorten(name)
 	}
-	return mapper
+	return mapping
 }
 
-func (m *toolNameMapper) shorten(name string) string {
+func (m *ToolNames) Shorten(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" || m == nil {
 		return name
@@ -51,12 +51,7 @@ func (m *toolNameMapper) shorten(name string) string {
 		base := candidate
 		for suffixNumber := 1; ; suffixNumber++ {
 			suffix := "_" + strconv.Itoa(suffixNumber)
-			prefixLength := maxToolNameLength - len(suffix)
-			candidate = base
-			if len(candidate) > prefixLength {
-				candidate = candidate[:prefixLength]
-			}
-			candidate += suffix
+			candidate = base[:min(len(base), maxToolNameLength-len(suffix))] + suffix
 			if _, exists := m.used[candidate]; !exists {
 				break
 			}
@@ -69,6 +64,13 @@ func (m *toolNameMapper) shorten(name string) string {
 		m.shortToOriginal[candidate] = name
 	}
 	return candidate
+}
+
+func (m *ToolNames) Aliases() map[string]string {
+	if m == nil || len(m.shortToOriginal) == 0 {
+		return nil
+	}
+	return m.shortToOriginal
 }
 
 func toolNameCandidate(name string) string {
@@ -85,13 +87,6 @@ func toolNameCandidate(name string) string {
 		}
 	}
 	return name[:maxToolNameLength]
-}
-
-func (m *toolNameMapper) aliases() map[string]string {
-	if m == nil || len(m.shortToOriginal) == 0 {
-		return nil
-	}
-	return maps.Clone(m.shortToOriginal)
 }
 
 func toolNamesForChat(req openai.ChatCompletionsRequest, tools []openai.ToolDefinition) []string {
