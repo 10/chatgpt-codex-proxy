@@ -96,6 +96,34 @@ func TestNormalizeMessagesMapsImagesAndLongToolNames(t *testing.T) {
 	}
 }
 
+func TestNormalizeMessagesShortensLongToolUseIDs(t *testing.T) {
+	t.Parallel()
+
+	longID := "toolu_" + strings.Repeat("a", 80)
+	maxTokens := 10
+	normalized, err := Normalize(MessagesRequest{
+		Model:     "gpt-5.4",
+		MaxTokens: &maxTokens,
+		Messages: []Message{
+			{Role: "assistant", Content: Content{{Type: "tool_use", ID: longID, Name: "lookup", Input: json.RawMessage(`{}`)}}},
+			{Role: "user", Content: Content{{Type: "tool_result", ToolUseID: longID, Content: Content{{Type: "text", Text: "done"}}}}},
+		},
+	}, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if len(normalized.Input) != 2 {
+		t.Fatalf("input len = %d, want 2: %#v", len(normalized.Input), normalized.Input)
+	}
+	callID := normalized.Input[0].CallID
+	if len(callID) > 64 || callID == longID {
+		t.Fatalf("shortened call ID = %q (len %d)", callID, len(callID))
+	}
+	if normalized.Input[1].CallID != callID {
+		t.Fatalf("tool result call ID = %q, want %q", normalized.Input[1].CallID, callID)
+	}
+}
+
 func TestNormalizeMessagesRejectsUnknownToolResult(t *testing.T) {
 	t.Parallel()
 
@@ -199,6 +227,70 @@ func TestNormalizeMessagesKeepsThinkingDisabledWhenEffortIsSet(t *testing.T) {
 	}
 	if len(normalized.Include) != 0 {
 		t.Fatalf("include = %#v, want no exposed thinking", normalized.Include)
+	}
+}
+
+func TestDecodeMessagesAcceptsCurrentClaudeCodeBetaFields(t *testing.T) {
+	t.Parallel()
+
+	_, err := DecodeMessages([]byte(`{
+		"model":"gpt-5.6-sol",
+		"max_tokens":32000,
+		"messages":[{"role":"user","content":"hello"}],
+		"thinking":{"type":"adaptive","display":"omitted"},
+		"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},
+		"output_config":{"effort":"high"}
+	}`))
+	if err != nil {
+		t.Fatalf("DecodeMessages() error = %v", err)
+	}
+}
+
+func TestNormalizeMessagesWrapsMessageSystemRoleAsUserReminder(t *testing.T) {
+	t.Parallel()
+
+	maxTokens := 10
+	normalized, err := Normalize(MessagesRequest{
+		Model:     "gpt-5.6-sol",
+		MaxTokens: &maxTokens,
+		Messages: []Message{
+			{Role: "user", Content: Content{{Type: "text", Text: "hello"}}},
+			{Role: "system", Content: Content{{Type: "text", Text: "Use the Workflow tool."}}},
+		},
+	}, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if len(normalized.Input) != 2 {
+		t.Fatalf("input len = %d, want 2: %#v", len(normalized.Input), normalized.Input)
+	}
+	reminder := normalized.Input[1]
+	if reminder.Role != "user" || len(reminder.Content) != 1 {
+		t.Fatalf("reminder = %#v", reminder)
+	}
+	if got := reminder.Content[0].Text; got != "<system-reminder>\nUse the Workflow tool.\n</system-reminder>" {
+		t.Fatalf("reminder text = %q", got)
+	}
+}
+
+func TestNormalizeMessagesFiltersClaudeCodeAttributionSystemText(t *testing.T) {
+	t.Parallel()
+
+	maxTokens := 10
+	normalized, err := Normalize(MessagesRequest{
+		Model:     "gpt-5.6-sol",
+		MaxTokens: &maxTokens,
+		System: Content{
+			{Type: "text", Text: " \n x-anthropic-billing-header: cc_version=2.1.211"},
+			{Type: "text", Text: "Be precise."},
+		},
+		Messages: []Message{{Role: "user", Content: Content{{Type: "text", Text: "hello"}}}},
+	}, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if normalized.Instructions != "Be precise." {
+		t.Fatalf("instructions = %q, want %q", normalized.Instructions, "Be precise.")
 	}
 }
 

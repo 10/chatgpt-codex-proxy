@@ -110,7 +110,7 @@ func responseBlocks(accumulator *translate.Accumulator) []ResponseBlock {
 			arguments := cmp.Or(jsonutil.StringValue(item["arguments"]), jsonutil.StringValue(item["input"]))
 			blocks = append(blocks, ResponseBlock{
 				Type:  "tool_use",
-				ID:    cmp.Or(jsonutil.StringValue(item["call_id"]), jsonutil.StringValue(item["id"])),
+				ID:    shortenCallID(cmp.Or(jsonutil.StringValue(item["call_id"]), jsonutil.StringValue(item["id"]))),
 				Name:  jsonutil.StringValue(item["name"]),
 				Input: decodeToolArguments(arguments),
 			})

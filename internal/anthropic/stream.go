@@ -204,7 +204,7 @@ func (e *StreamEncoder) openTool(state *translate.ToolCallState) []StreamEvent {
 	e.toolSent[state.CallID] = 0
 	return []StreamEvent{{
 		"type": "content_block_start", "index": block.Index,
-		"content_block": map[string]any{"type": "tool_use", "id": state.CallID, "name": state.Name, "input": map[string]any{}},
+		"content_block": map[string]any{"type": "tool_use", "id": shortenCallID(state.CallID), "name": state.Name, "input": map[string]any{}},
 	}}
 }
 

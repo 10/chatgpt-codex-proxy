@@ -120,6 +120,30 @@ func TestBuildMessagePreservesLargeToolArgumentNumbers(t *testing.T) {
 	}
 }
 
+func TestBuildMessageShortensLongToolUseIDs(t *testing.T) {
+	t.Parallel()
+
+	longID := "call_" + strings.Repeat("a", 80)
+	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+		"response": map[string]any{
+			"id": "resp_long_call", "status": "completed",
+			"output": []any{map[string]any{
+				"type": "function_call", "call_id": longID, "name": "lookup", "arguments": `{}`, "status": "completed",
+			}},
+		},
+	}})
+
+	message := BuildMessage(accumulator)
+	if len(message.Content) != 1 {
+		t.Fatalf("content = %#v", message.Content)
+	}
+	callID := message.Content[0].ID
+	if len(callID) > 64 || callID == longID {
+		t.Fatalf("tool use ID = %q (len %d)", callID, len(callID))
+	}
+}
+
 func TestBuildMessageSerializesSignatureOnlyThinkingWithEmptyText(t *testing.T) {
 	t.Parallel()
 

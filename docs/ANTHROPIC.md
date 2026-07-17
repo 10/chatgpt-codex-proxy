@@ -22,6 +22,7 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | Anthropic input | Codex input |
 | --- | --- |
 | Top-level `system` text | `instructions` |
+| Message-level `system` text | User `<system-reminder>` input |
 | User text | `input_text` |
 | Assistant text or prefill | `output_text` |
 | Base64 or URL image | `input_image` |
@@ -36,7 +37,9 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | JSON-schema output format | Codex structured output |
 | Fast service tier | Codex priority tier |
 
-Tool names longer than the backend limit are shortened deterministically and restored in public responses.
+Claude Code's attribution-only system block is filtered from model instructions. Its adaptive-thinking `display` and `context_management` fields are accepted as compatibility metadata; `output_config.effort` remains the field that selects Codex reasoning effort.
+
+Tool names and tool-call IDs longer than the backend limit are shortened deterministically. Original tool names are restored in public responses.
 
 Anthropic requests contain their full transcript. They deliberately bypass the proxy's implicit OpenAI continuation mechanism so transcript history is never combined with hidden server-side history.
 

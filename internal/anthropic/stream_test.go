@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"strings"
 	"testing"
 
 	"chatgpt-codex-proxy/internal/codex"
@@ -59,6 +60,28 @@ func TestStreamEncoderStreamsFragmentedToolJSON(t *testing.T) {
 	}
 	if events[len(events)-2]["delta"].(map[string]any)["stop_reason"] != "tool_use" {
 		t.Fatalf("stop = %#v", events[len(events)-2])
+	}
+}
+
+func TestStreamEncoderShortensLongToolUseIDs(t *testing.T) {
+	t.Parallel()
+
+	longID := "call_" + strings.Repeat("a", 80)
+	accumulator := translate.NewAccumulator(translate.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	encoder := NewStreamEncoder(0)
+	events := applyAndEncode(accumulator, encoder,
+		&codex.StreamEvent{Type: "response.function_call_arguments.done", Raw: map[string]any{
+			"item_id": "item_long", "call_id": longID, "name": "lookup", "arguments": `{}`,
+		}},
+		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+			"response": map[string]any{"id": "resp_long_call", "status": "completed"},
+		}},
+	)
+
+	start := events[1]["content_block"].(map[string]any)
+	callID := start["id"].(string)
+	if len(callID) > 64 || callID == longID {
+		t.Fatalf("stream tool use ID = %q (len %d)", callID, len(callID))
 	}
 }
 

@@ -62,6 +62,57 @@ func TestAnthropicMessagesNonStreaming(t *testing.T) {
 	}
 }
 
+func TestAnthropicMessagesAcceptsCurrentClaudeCodeRequestShape(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
+		if request.Instructions != "You are Claude Code." {
+			t.Fatalf("instructions = %q", request.Instructions)
+		}
+		if request.Reasoning == nil || request.Reasoning.Effort != "high" || request.Reasoning.Summary != "auto" {
+			t.Fatalf("reasoning = %#v", request.Reasoning)
+		}
+		if len(request.Input) != 2 || request.Input[1].Role != "user" {
+			t.Fatalf("input = %#v", request.Input)
+		}
+		if got := request.Input[1].Content[0].Text; got != "<system-reminder>\nUse the Workflow tool.\n</system-reminder>" {
+			t.Fatalf("system reminder = %q", got)
+		}
+		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+			"response": map[string]any{
+				"id": "resp_claude_code", "model": "gpt-5.6-sol", "status": "completed", "output_text": "Ready",
+				"usage": map[string]any{"input_tokens": 8, "output_tokens": 2},
+			},
+		}}}}, nil
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set(middleware.RequestIDKey, "req_claude_code")
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{
+		"model":"gpt-5.6-sol",
+		"max_tokens":32000,
+		"system":[
+			{"type":"text","text":" x-anthropic-billing-header: cc_version=2.1.211"},
+			{"type":"text","text":"You are Claude Code."}
+		],
+		"messages":[
+			{"role":"user","content":"hello"},
+			{"role":"system","content":"Use the Workflow tool."}
+		],
+		"thinking":{"type":"adaptive","display":"omitted"},
+		"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},
+		"output_config":{"effort":"high"}
+	}`))
+	ctx.Request.Header.Set("anthropic-version", "2023-06-01")
+	app.handleAnthropicMessages(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestAnthropicMessagesStreamingUsesNamedEventsWithoutDoneSentinel(t *testing.T) {
 	t.Parallel()
 

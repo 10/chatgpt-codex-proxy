@@ -3,12 +3,15 @@ package anthropic
 import (
 	"bytes"
 	"cmp"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
+	"unicode"
 
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/conversation"
@@ -17,6 +20,7 @@ import (
 )
 
 const defaultInstructions = "You are a helpful assistant."
+const claudeCodeAttributionSystemPrefix = "x-anthropic-billing-header:"
 
 func DecodeMessages(data []byte) (MessagesRequest, error) {
 	var request MessagesRequest
@@ -106,13 +110,14 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (translate.Norm
 	}
 	return normalized, nil
 }
+
 func normalizeSystem(content Content) (string, error) {
 	parts := make([]string, 0, len(content))
 	for _, block := range content {
 		if block.Type != "text" {
 			return "", errors.New("system only supports text blocks")
 		}
-		if text := strings.TrimSpace(block.Text); text != "" {
+		if text := strings.TrimSpace(block.Text); text != "" && !isClaudeCodeAttributionSystemText(block.Text) {
 			parts = append(parts, text)
 		}
 	}
@@ -124,6 +129,18 @@ func normalizeMessages(messages []Message, toolNames *translate.ToolNames) ([]co
 	result := make([]codex.InputItem, 0, len(messages))
 	for _, message := range messages {
 		role := strings.TrimSpace(message.Role)
+		if role == "system" {
+			if reminder := messageSystemReminderText(message.Content); reminder != "" {
+				result = append(result, codex.InputItem{
+					Role: "user",
+					Content: []codex.ContentPart{{
+						Type: "input_text",
+						Text: reminder,
+					}},
+				})
+			}
+			continue
+		}
 		if role != "user" && role != "assistant" {
 			return nil, errors.New("role must be user or assistant")
 		}
@@ -167,7 +184,7 @@ func normalizeMessages(messages []Message, toolNames *translate.ToolNames) ([]co
 					return nil, err
 				}
 				knownCalls[callID] = struct{}{}
-				result = append(result, codex.InputItem{Type: "function_call", CallID: callID, Name: toolNames.Shorten(block.Name), Arguments: arguments})
+				result = append(result, codex.InputItem{Type: "function_call", CallID: shortenCallID(callID), Name: toolNames.Shorten(block.Name), Arguments: arguments})
 			case "tool_result":
 				if role != "user" {
 					return nil, errors.New("tool_result blocks require the user role")
@@ -191,7 +208,7 @@ func normalizeMessages(messages []Message, toolNames *translate.ToolNames) ([]co
 						output = append([]codex.ContentPart{{Type: "input_text", Text: "Tool error"}}, output...)
 					}
 				}
-				result = append(result, codex.InputItem{Type: "function_call_output", CallID: callID, OutputText: text, OutputContent: output})
+				result = append(result, codex.InputItem{Type: "function_call_output", CallID: shortenCallID(callID), OutputText: text, OutputContent: output})
 			case "thinking", "redacted_thinking":
 				if role != "assistant" {
 					return nil, errors.New(block.Type + " blocks require the assistant role")
@@ -210,6 +227,40 @@ func normalizeMessages(messages []Message, toolNames *translate.ToolNames) ([]co
 		flushContent()
 	}
 	return result, nil
+}
+
+func messageSystemReminderText(content Content) string {
+	parts := make([]string, 0, len(content))
+	for _, block := range content {
+		if block.Type != "text" || block.Text == "" || isClaudeCodeAttributionSystemText(block.Text) {
+			continue
+		}
+		parts = append(parts, block.Text)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	text := strings.Join(parts, "\n")
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	return "<system-reminder>\n" + text + "\n</system-reminder>"
+}
+
+func isClaudeCodeAttributionSystemText(text string) bool {
+	text = strings.TrimLeftFunc(text, unicode.IsSpace)
+	return strings.HasPrefix(text, claudeCodeAttributionSystemPrefix)
+}
+
+func shortenCallID(id string) string {
+	const limit = 64
+	if len(id) <= limit {
+		return id
+	}
+
+	sum := sha256.Sum256([]byte(id))
+	suffix := "_" + hex.EncodeToString(sum[:8])
+	return id[:limit-len(suffix)] + suffix
 }
 
 func normalizeImageSource(source *ImageSource) (string, error) {

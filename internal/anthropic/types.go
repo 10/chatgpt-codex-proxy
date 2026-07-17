@@ -8,21 +8,22 @@ import (
 const Version = "2023-06-01"
 
 type MessagesRequest struct {
-	Model         string          `json:"model"`
-	MaxTokens     *int            `json:"max_tokens"`
-	Messages      []Message       `json:"messages"`
-	System        Content         `json:"system,omitempty"`
-	Stream        bool            `json:"stream,omitempty"`
-	StopSequences []string        `json:"stop_sequences,omitempty"`
-	Temperature   *float64        `json:"temperature,omitempty"`
-	TopP          *float64        `json:"top_p,omitempty"`
-	TopK          *int            `json:"top_k,omitempty"`
-	Tools         []Tool          `json:"tools,omitempty"`
-	ToolChoice    *ToolChoice     `json:"tool_choice,omitempty"`
-	Thinking      *Thinking       `json:"thinking,omitempty"`
-	OutputConfig  *OutputConfig   `json:"output_config,omitempty"`
-	ServiceTier   string          `json:"service_tier,omitempty"`
-	Metadata      json.RawMessage `json:"metadata,omitempty"`
+	Model             string          `json:"model"`
+	MaxTokens         *int            `json:"max_tokens"`
+	Messages          []Message       `json:"messages"`
+	System            Content         `json:"system,omitempty"`
+	Stream            bool            `json:"stream,omitempty"`
+	StopSequences     []string        `json:"stop_sequences,omitempty"`
+	Temperature       *float64        `json:"temperature,omitempty"`
+	TopP              *float64        `json:"top_p,omitempty"`
+	TopK              *int            `json:"top_k,omitempty"`
+	Tools             []Tool          `json:"tools,omitempty"`
+	ToolChoice        *ToolChoice     `json:"tool_choice,omitempty"`
+	Thinking          *Thinking       `json:"thinking,omitempty"`
+	ContextManagement json.RawMessage `json:"context_management,omitempty"`
+	OutputConfig      *OutputConfig   `json:"output_config,omitempty"`
+	ServiceTier       string          `json:"service_tier,omitempty"`
+	Metadata          json.RawMessage `json:"metadata,omitempty"`
 }
 
 type Message struct {
@@ -96,6 +97,7 @@ type ToolChoice struct {
 type Thinking struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
+	Display      string `json:"display,omitempty"`
 }
 
 type OutputConfig struct {
