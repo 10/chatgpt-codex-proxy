@@ -95,7 +95,6 @@ func TestNormalizeMessagesMapsThinkingBudgetToEffort(t *testing.T) {
 		{name: "high upper bound", budget: 24576, want: "high"},
 		{name: "xhigh lower bound", budget: 24577, want: "xhigh"},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -736,7 +735,6 @@ func TestNormalizeMessagesMapsHostedWebSearch(t *testing.T) {
 	t.Parallel()
 
 	for _, toolType := range []string{"web_search_20250305", "web_search_20260209"} {
-		toolType := toolType
 		t.Run(toolType, func(t *testing.T) {
 			t.Parallel()
 

@@ -36,7 +36,7 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 	if len(tools) == 0 && len(req.Functions) > 0 {
 		tools = legacyFunctionsAsTools(req.Functions)
 	}
-	toolNames := NewToolNames(toolNamesForChat(req, tools))
+	toolNames := turn.NewToolNames(toolNamesForChat(req, tools))
 	toolChoice := json.RawMessage(nil)
 	if len(req.Tools) > 0 {
 		toolChoice = normalizeToolChoice(req.ToolChoice, toolNames)
@@ -129,7 +129,7 @@ func Responses(req ResponsesRequest, catalog *models.Catalog) (turn.NormalizedRe
 		return turn.NormalizedRequest{}, err
 	}
 	reasoning = normalizeResponsesReasoning(req.Reasoning, reasoning)
-	toolNames := NewToolNames(toolNamesForResponses(req.Tools, req.ToolChoice, req.Input))
+	toolNames := turn.NewToolNames(toolNamesForResponses(req.Tools, req.ToolChoice, req.Input))
 	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input, toolNames)
 	if err != nil {
 		return turn.NormalizedRequest{}, err
@@ -161,7 +161,7 @@ func Compact(req ResponsesCompactRequest, catalog *models.Catalog) (turn.Normali
 		return turn.NormalizedCompactRequest{}, err
 	}
 	reasoning = normalizeResponsesReasoning(req.Reasoning, reasoning)
-	toolNames := NewToolNames(toolNamesForResponses(nil, nil, req.Input))
+	toolNames := turn.NewToolNames(toolNamesForResponses(nil, nil, req.Input))
 	payload, err := normalizeResponsesPayload(req.Instructions, req.Text, req.Input, toolNames)
 	if err != nil {
 		return turn.NormalizedCompactRequest{}, err
@@ -204,7 +204,7 @@ func normalizeResponsesReasoning(explicit *Reasoning, fallback *codex.Reasoning)
 	return reasoning
 }
 
-func normalizeResponsesPayload(instructionsText string, textConfig *ResponsesText, input ResponsesInput, toolNames *ToolNames) (normalizedResponsesPayload, error) {
+func normalizeResponsesPayload(instructionsText string, textConfig *ResponsesText, input ResponsesInput, toolNames *turn.ToolNames) (normalizedResponsesPayload, error) {
 	var out normalizedResponsesPayload
 	var instructions []string
 	if text := strings.TrimSpace(instructionsText); text != "" {
@@ -249,7 +249,7 @@ func newNormalizedRequest(model string, modelExplicit bool, stream bool, tools [
 	}
 }
 
-func normalizeChatMessage(out *turn.NormalizedRequest, instructions *[]string, toolCallTypes map[string]string, customToolNames map[string]bool, toolNames *ToolNames, message ChatMessage) error {
+func normalizeChatMessage(out *turn.NormalizedRequest, instructions *[]string, toolCallTypes map[string]string, customToolNames map[string]bool, toolNames *turn.ToolNames, message ChatMessage) error {
 	switch message.Role {
 	case "system", "developer":
 		return appendInstructionText(instructions, message.Content)
@@ -308,7 +308,7 @@ func normalizeChatToolCallType(call ToolCall, customToolNames map[string]bool) s
 	return callType
 }
 
-func chatToolCallInputItem(call ToolCall, callType string, toolNames *ToolNames) codex.InputItem {
+func chatToolCallInputItem(call ToolCall, callType string, toolNames *turn.ToolNames) codex.InputItem {
 	if callType != "custom" {
 		return codex.InputItem{
 			Type:      "function_call",
@@ -338,7 +338,7 @@ func chatToolCallInputItem(call ToolCall, callType string, toolNames *ToolNames)
 	}
 }
 
-func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, toolNames *ToolNames, item ResponsesInputItem) error {
+func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, toolNames *turn.ToolNames, item ResponsesInputItem) error {
 	if item.Type == "" && (item.Role == "system" || item.Role == "developer") {
 		return appendInstructionText(instructions, item.Content)
 	}
@@ -433,18 +433,11 @@ func normalizeToolOutput(content MessageContent) (string, []codex.ContentPart, e
 	if err != nil {
 		return "", nil, err
 	}
-	allText := true
-	for _, part := range parts {
-		if part.Type != "input_text" {
-			allText = false
-			break
-		}
-	}
-	if !allText {
-		return "", parts, nil
-	}
 	text := make([]string, 0, len(parts))
 	for _, part := range parts {
+		if part.Type != "input_text" {
+			return "", parts, nil
+		}
 		if strings.TrimSpace(part.Text) != "" {
 			text = append(text, part.Text)
 		}

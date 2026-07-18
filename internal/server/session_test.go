@@ -389,7 +389,7 @@ func TestAcquireAccountForResolutionOmittedModelUsesRouteScopedDefault(t *testin
 	app := &App{
 		cfg:        config.Config{DefaultModel: "gpt-premium-default"},
 		accounts:   accountsSvc,
-		accountMgr: accountmanager.NewAccountManager(config.Config{}, accountsSvc, nil, nil, catalog),
+		accountMgr: accountmanager.NewAccountManager(config.Config{}, accountsSvc, nil, nil, catalog.SupportsRecord),
 		models:     catalog,
 	}
 	resolution := sessionResolution{
@@ -409,7 +409,7 @@ func TestAcquireAccountForResolutionOmittedModelUsesRouteScopedDefault(t *testin
 		},
 	}
 
-	account, err := app.acquireAccountForResolution(context.Background(), &resolution)
+	account, err := app.acquireAccountForResolutionExcluding(context.Background(), &resolution, nil)
 	if err != nil {
 		t.Fatalf("acquireAccountForResolution() error = %v", err)
 	}

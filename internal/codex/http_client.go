@@ -18,6 +18,7 @@ import (
 
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/config"
+	"chatgpt-codex-proxy/internal/httpbody"
 	"chatgpt-codex-proxy/internal/jsonutil"
 )
 
@@ -178,7 +179,7 @@ func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record,
 		return nil, err
 	}
 	if streamResp.StatusCode < 200 || streamResp.StatusCode >= 300 {
-		data := readLimitedErrorBody(streamResp)
+		data := httpbody.ReadLimitedErrorBody(streamResp)
 		headers := CanonicalHeader(streamResp.Headers)
 		streamResp.Close()
 		return nil, NewUpstreamError("codex response", streamResp.StatusCode, data, headers)

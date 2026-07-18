@@ -10,7 +10,6 @@ type CompactRequest = turn.CompactRequest
 type TextConfig = turn.TextConfig
 type InputItem = turn.InputItem
 type ContentPart = turn.ContentPart
-type Usage = turn.Usage
 type StreamEvent = turn.StreamEvent
 
 type CompactResponse struct {

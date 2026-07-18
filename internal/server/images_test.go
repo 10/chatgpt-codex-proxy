@@ -608,7 +608,7 @@ func newImagesTestApp(t *testing.T, opener func(turn.NormalizedRequest) eventStr
 			}, true
 		}
 	}
-	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, catalog)
+	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, catalog.SupportsRecord)
 	app.routes()
 	return app
 }

@@ -205,17 +205,10 @@ func webSearchResultContent(item map[string]any) []map[string]any {
 			"type":     "web_search_result",
 			"title":    jsonutil.FirstNonEmpty(jsonutil.StringValue(result["title"]), url),
 			"url":      url,
-			"page_age": nullableWebSearchPageAge(result["page_age"]),
+			"page_age": nullableString(strings.TrimSpace(jsonutil.StringValue(result["page_age"]))),
 		})
 	}
 	return content
-}
-
-func nullableWebSearchPageAge(value any) any {
-	if pageAge := strings.TrimSpace(jsonutil.StringValue(value)); pageAge != "" {
-		return pageAge
-	}
-	return nil
 }
 
 func normalizedOutputText(accumulator *turn.Accumulator, text string) string {
@@ -453,10 +446,7 @@ func usageFromAccumulator(accumulator *turn.Accumulator) Usage {
 	input := accumulator.Usage.InputTokens
 	cached := int64(0)
 	if accumulator.Usage.CachedTokens != nil {
-		cached = *accumulator.Usage.CachedTokens
-		if cached > input {
-			cached = input
-		}
+		cached = min(*accumulator.Usage.CachedTokens, input)
 		input -= cached
 	}
 	return Usage{

@@ -1,7 +1,55 @@
 // Package jsonutil provides helpers for decoded JSON trees shared across packages.
 package jsonutil
 
-import "strings"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
+
+// FlexibleInt64 decodes integer or floating-point JSON numbers and numeric strings.
+type FlexibleInt64 struct {
+	value int64
+	set   bool
+}
+
+func (f *FlexibleInt64) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+
+	var number json.Number
+	numberErr := json.Unmarshal(data, &number)
+	display := number.String()
+	if numberErr != nil {
+		var text string
+		if err := json.Unmarshal(data, &text); err != nil {
+			return fmt.Errorf("unsupported numeric value %q", string(data))
+		}
+		display = text
+		if text = strings.TrimSpace(text); text == "" {
+			return nil
+		}
+		number = json.Number(text)
+	}
+
+	value, err := number.Int64()
+	if err != nil {
+		floatValue, floatErr := number.Float64()
+		if floatErr != nil {
+			return fmt.Errorf("parse numeric value %q: %w", display, err)
+		}
+		value = int64(floatValue)
+	}
+	f.value = value
+	f.set = true
+	return nil
+}
+
+// Int64 returns the decoded value and whether one was set.
+func (f FlexibleInt64) Int64() (int64, bool) {
+	return f.value, f.set
+}
 
 // StringValue returns value as a string, or "" if it is not a string.
 func StringValue(value any) string {

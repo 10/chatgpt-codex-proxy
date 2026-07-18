@@ -57,7 +57,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	httpClient := codex.NewHTTPClient(cfg)
 	oauthSvc := codexauth.NewOAuthService(cfg)
-	accountMgr := accountmanager.NewAccountManager(cfg, accountsSvc, oauthSvc, httpClient, modelCatalog)
+	accountMgr := accountmanager.NewAccountManager(cfg, accountsSvc, oauthSvc, httpClient, modelCatalog.SupportsRecord)
 	deviceLogins := devicelogin.NewDeviceLoginService(oauthSvc, accountsSvc, cfg.LoginTimeout)
 	modelRefresher := models.NewFetcher(cfg, logger, accountsSvc, accountMgr, httpClient, modelCatalog)
 

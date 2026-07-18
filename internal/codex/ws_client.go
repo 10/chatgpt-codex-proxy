@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/gorilla/websocket"
+
+	"chatgpt-codex-proxy/internal/httpbody"
 )
 
 // WSStream wraps a websocket connection and exposes the event-stream interface used by the server package.
@@ -21,7 +23,7 @@ func ConnectWS(ctx context.Context, endpoint string, headers http.Header, body a
 	conn, resp, err := dialer.DialContext(ctx, endpoint, headers)
 	if err != nil {
 		if resp != nil {
-			payload := readLimitedErrorBody(resp.Body)
+			payload := httpbody.ReadLimitedErrorBody(resp.Body)
 			resp.Body.Close()
 			return nil, NewUpstreamError("websocket dial", resp.StatusCode, payload, resp.Header)
 		}

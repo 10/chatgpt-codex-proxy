@@ -219,7 +219,20 @@ func (a *Accumulator) NativeFinishReason() string {
 }
 
 func (a *Accumulator) ChatFinishReason() string {
-	return finishReason(a)
+	if a.IsIncomplete() {
+		switch a.NativeFinishReason() {
+		case "max_tokens", "max_output_tokens", "context_length_exceeded":
+			return "length"
+		case "content_filter", "refusal":
+			return "content_filter"
+		default:
+			return "stop"
+		}
+	}
+	if len(a.ToolCalls) > 0 {
+		return "tool_calls"
+	}
+	return "stop"
 }
 
 func (a *Accumulator) ReasoningSummary() string {
@@ -361,7 +374,7 @@ func (a *Accumulator) ChatCompletionObject() map[string]any {
 	if images := a.ChatImages(); len(images) > 0 {
 		message["images"] = images
 	}
-	choice := map[string]any{"index": 0, "message": message, "finish_reason": finishReason(a)}
+	choice := map[string]any{"index": 0, "message": message, "finish_reason": a.ChatFinishReason()}
 	if nativeFinishReason := a.NativeFinishReason(); nativeFinishReason != "" {
 		choice["native_finish_reason"] = nativeFinishReason
 	}
@@ -376,7 +389,7 @@ func (a *Accumulator) ChatCompletionObject() map[string]any {
 }
 
 func (a *Accumulator) CompletionObject() map[string]any {
-	choice := map[string]any{"index": 0, "text": a.Text(), "finish_reason": finishReason(a)}
+	choice := map[string]any{"index": 0, "text": a.Text(), "finish_reason": a.ChatFinishReason()}
 	if nativeFinishReason := a.NativeFinishReason(); nativeFinishReason != "" {
 		choice["native_finish_reason"] = nativeFinishReason
 	}
@@ -587,23 +600,6 @@ func ResponseEventJSON(eventType string, responseID string, payload map[string]a
 	eventPayload["type"] = eventType
 	data, _ := json.Marshal(eventPayload)
 	return data
-}
-
-func finishReason(a *Accumulator) string {
-	if a.IsIncomplete() {
-		switch a.NativeFinishReason() {
-		case "max_tokens", "max_output_tokens", "context_length_exceeded":
-			return "length"
-		case "content_filter", "refusal":
-			return "content_filter"
-		default:
-			return "stop"
-		}
-	}
-	if len(a.ToolCalls) > 0 {
-		return "tool_calls"
-	}
-	return "stop"
 }
 
 func (a *Accumulator) resolveOutputIndex(preferred int) int {

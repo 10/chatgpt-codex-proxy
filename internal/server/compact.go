@@ -100,7 +100,7 @@ func (a *App) resolveCompactRequest(normalized turn.NormalizedCompactRequest) (t
 	}
 	normalized.ToolNameAliases = turn.MergeToolNameAliases(normalized.ToolNameAliases, record.ToolNameAliases)
 
-	history := continuationInputItemsToCodex(record.InputHistory)
+	history := cloneContinuationInputItems(record.InputHistory)
 	if len(history) > 0 {
 		normalized.Input = slices.Concat(history, normalized.Input)
 	}

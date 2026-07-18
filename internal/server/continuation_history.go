@@ -3,7 +3,6 @@ package server
 import (
 	"slices"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/turn"
 )
@@ -69,13 +68,13 @@ func continuationInputItemFromResponseOutput(item map[string]any, toolNameAliase
 	return out, true
 }
 
-func continuationInputItemsToCodex(items []turn.InputItem) []codex.InputItem {
+func cloneContinuationInputItems(items []turn.InputItem) []turn.InputItem {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]codex.InputItem, 0, len(items))
-	for _, item := range items {
-		out = append(out, cloneContinuationInputItem(item))
+	out := make([]turn.InputItem, len(items))
+	for index, item := range items {
+		out[index] = cloneContinuationInputItem(item)
 	}
 	return out
 }

@@ -9,12 +9,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/config"
+	"chatgpt-codex-proxy/internal/httpbody"
+	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/jwtutil"
 )
 
@@ -34,10 +35,10 @@ type DeviceCodeResponse struct {
 }
 
 type oauthTokenResponse struct {
-	AccessToken  string        `json:"access_token"`
-	RefreshToken string        `json:"refresh_token"`
-	IDToken      string        `json:"id_token"`
-	ExpiresIn    flexibleInt64 `json:"expires_in"`
+	AccessToken  string                 `json:"access_token"`
+	RefreshToken string                 `json:"refresh_token"`
+	IDToken      string                 `json:"id_token"`
+	ExpiresIn    jsonutil.FlexibleInt64 `json:"expires_in"`
 }
 
 type oauthTokenError struct {
@@ -68,61 +69,11 @@ type oauthAuthClaims struct {
 	ChatGPTAccountID string `json:"chatgpt_account_id"`
 }
 
-type flexibleInt64 struct {
-	value int64
-	set   bool
-}
-
-func (f *flexibleInt64) UnmarshalJSON(data []byte) error {
-	if len(data) == 0 || string(data) == "null" {
-		return nil
-	}
-	var number json.Number
-	if err := json.Unmarshal(data, &number); err == nil {
-		value, err := number.Int64()
-		if err != nil {
-			floatValue, floatErr := number.Float64()
-			if floatErr != nil {
-				return fmt.Errorf("parse numeric value %q: %w", number.String(), err)
-			}
-			value = int64(floatValue)
-		}
-		f.value = value
-		f.set = true
-		return nil
-	}
-	var text string
-	if err := json.Unmarshal(data, &text); err == nil {
-		trimmed := strings.TrimSpace(text)
-		if trimmed == "" {
-			return nil
-		}
-		value, err := strconv.ParseInt(trimmed, 10, 64)
-		if err == nil {
-			f.value = value
-			f.set = true
-			return nil
-		}
-		floatValue, floatErr := strconv.ParseFloat(trimmed, 64)
-		if floatErr != nil {
-			return fmt.Errorf("parse numeric value %q: %w", text, err)
-		}
-		f.value = int64(floatValue)
-		f.set = true
-		return nil
-	}
-	return fmt.Errorf("unsupported numeric value %q", string(data))
-}
-
-func (f flexibleInt64) Int64() (int64, bool) {
-	return f.value, f.set
-}
-
 func (d *DeviceCodeResponse) UnmarshalJSON(data []byte) error {
 	type rawDeviceCodeResponse struct {
-		UserCode     string        `json:"user_code"`
-		DeviceAuthID string        `json:"device_auth_id"`
-		Interval     flexibleInt64 `json:"interval"`
+		UserCode     string                 `json:"user_code"`
+		DeviceAuthID string                 `json:"device_auth_id"`
+		Interval     jsonutil.FlexibleInt64 `json:"interval"`
 	}
 
 	var raw rawDeviceCodeResponse
@@ -275,13 +226,13 @@ func doDeviceAuthJSON[T any](ctx context.Context, client *http.Client, endpoint 
 	}
 	defer resp.Body.Close()
 	if allowPending && (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound) {
-		if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, upstreamErrorBodyLimit)); err != nil {
+		if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, httpbody.Limit)); err != nil {
 			return zero, false, fmt.Errorf("drain pending oauth response: %w", err)
 		}
 		return zero, true, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyText := strings.TrimSpace(readLimitedErrorBody(resp.Body))
+		bodyText := strings.TrimSpace(httpbody.ReadLimitedErrorBody(resp.Body))
 		return zero, false, fmt.Errorf("oauth request failed: %s", bodyText)
 	}
 	var decoded T
@@ -303,7 +254,7 @@ func doForm(ctx context.Context, client *http.Client, endpoint string, values ur
 		return oauthTokenResponse{}, err
 	}
 	defer resp.Body.Close()
-	bodyText := readLimitedErrorBody(resp.Body)
+	bodyText := httpbody.ReadLimitedErrorBody(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var payload struct {
 			Error            string `json:"error"`

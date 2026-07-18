@@ -382,7 +382,7 @@ func newResponsesWebSocketTestApp(t *testing.T, stream *fakeResponsesWebSocketSt
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		engine:        engine,
 		accounts:      accountsSvc,
-		accountMgr:    accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, catalog),
+		accountMgr:    accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, catalog.SupportsRecord),
 		httpClient:    httpClient,
 		continuations: conversation.NewContinuationManager(time.Minute),
 		models:        catalog,

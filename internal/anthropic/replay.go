@@ -224,7 +224,7 @@ func (m *ReplayManager) Apply(scope string, request MessagesRequest) (MessagesRe
 			request.Messages[replaceAt].Content,
 		)
 	} else {
-		request.Messages = insertMessage(request.Messages, insertAt, Message{Role: "assistant", Content: replayed})
+		request.Messages = slices.Insert(request.Messages, insertAt, Message{Role: "assistant", Content: replayed})
 	}
 	return request, ReplayMatch{Applied: true, AccountID: record.AccountID}
 }
@@ -508,11 +508,6 @@ func firstToolResultMessage(messages []Message, target map[string]bool) int {
 		}
 	}
 	return len(messages)
-}
-
-func insertMessage(messages []Message, index int, message Message) []Message {
-	index = max(0, min(index, len(messages)))
-	return slices.Insert(messages, index, message)
 }
 
 func cloneMessages(messages []Message) []Message {

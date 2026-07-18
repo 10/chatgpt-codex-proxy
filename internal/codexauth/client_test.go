@@ -92,11 +92,11 @@ func TestBuildOAuthTokenUsesTypedExpiresIn(t *testing.T) {
 	t.Parallel()
 
 	before := time.Now().UTC()
-	token := buildOAuthToken(oauthTokenResponse{
-		AccessToken:  "access",
-		RefreshToken: "refresh",
-		ExpiresIn:    flexibleInt64{value: 7200, set: true},
-	})
+	var response oauthTokenResponse
+	if err := json.Unmarshal([]byte(`{"access_token":"access","refresh_token":"refresh","expires_in":7200}`), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	token := buildOAuthToken(response)
 
 	if token.AccessToken != "access" || token.RefreshToken != "refresh" {
 		t.Fatalf("token = %#v", token)

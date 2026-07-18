@@ -8,6 +8,7 @@ import (
 	httpcloak "github.com/sardanioss/httpcloak/client"
 
 	"chatgpt-codex-proxy/internal/accounts"
+	"chatgpt-codex-proxy/internal/httpbody"
 )
 
 func (c *HTTPClient) OpenImage(ctx context.Context, record accounts.Record, path string, payload []byte, stream bool) (*http.Response, error) {
@@ -34,7 +35,7 @@ func (c *HTTPClient) OpenImage(ctx context.Context, record accounts.Record, path
 	}
 	responseHeaders := CanonicalHeader(resp.Headers)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body := readLimitedErrorBody(resp)
+		body := httpbody.ReadLimitedErrorBody(resp)
 		resp.Close()
 		return nil, NewUpstreamError("codex image response", resp.StatusCode, body, responseHeaders)
 	}

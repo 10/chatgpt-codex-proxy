@@ -45,7 +45,7 @@ func (a *App) resolveSession(normalized turn.NormalizedRequest) (sessionResoluti
 		resolution.TurnState = strings.TrimSpace(record.TurnState)
 		resolution.Request.ToolNameAliases = turn.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
 		resolution.Original.ToolNameAliases = turn.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
-		if history := continuationInputItemsToCodex(record.InputHistory); len(history) > 0 {
+		if history := cloneContinuationInputItems(record.InputHistory); len(history) > 0 {
 			resolution.Original.Input = append(history, normalized.Input...)
 			resolution.Original.PreviousResponseID = ""
 			resolution.ReplayAvailable = true
@@ -167,7 +167,7 @@ func trimmedContinuationInput(input []codex.InputItem, record conversation.Conti
 		return nil, false
 	}
 
-	history := continuationInputItemsToCodex(record.InputHistory)
+	history := cloneContinuationInputItems(record.InputHistory)
 	if len(history) == 0 || len(input) <= len(history) {
 		return nil, false
 	}

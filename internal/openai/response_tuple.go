@@ -17,7 +17,7 @@ func ReconvertJSONText(text string, schema map[string]any) (string, error) {
 		return text, err
 	}
 
-	reconverted := ReconvertTupleValues(decoded, schema)
+	reconverted := reconvertTupleValues(decoded, schema, schema)
 	payload, err := json.Marshal(reconverted)
 	if err != nil {
 		return text, err

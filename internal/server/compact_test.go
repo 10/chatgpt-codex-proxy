@@ -265,7 +265,7 @@ func newCompactTestApp(t *testing.T, caller func(context.Context, accounts.Recor
 		continuations: conversation.NewContinuationManager(time.Minute),
 		models:        modelCatalog,
 	}
-	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, modelCatalog)
+	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, modelCatalog.SupportsRecord)
 	app.routes()
 	return app
 }

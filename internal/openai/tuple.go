@@ -42,10 +42,6 @@ func convertTupleSchemas(node map[string]any) map[string]any {
 	return node
 }
 
-func ReconvertTupleValues(data any, schema map[string]any) any {
-	return reconvertTupleValues(data, schema, schema)
-}
-
 func reconvertTupleValues(data any, schema map[string]any, root map[string]any) any {
 	if ref, _ := schema["$ref"].(string); strings.TrimSpace(ref) != "" {
 		if resolved := resolveTupleSchemaRef(ref, root); resolved != nil {

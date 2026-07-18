@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -127,6 +128,15 @@ func TestParseQuotaFromEvent(t *testing.T) {
 	}
 	if snapshot.CodeReviewRateLimit.LimitWindowSeconds == nil || *snapshot.CodeReviewRateLimit.LimitWindowSeconds != 86400 {
 		t.Fatalf("code_review limit_window_seconds = %#v, want 86400", snapshot.CodeReviewRateLimit.LimitWindowSeconds)
+	}
+}
+
+func TestUsageResponseIgnoresCodeReviewSecondaryWindow(t *testing.T) {
+	t.Parallel()
+
+	var response UsageResponse
+	if err := json.Unmarshal([]byte(`{"code_review_rate_limit":{"secondary_window":{"used_percent":"malformed"}}}`), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 }
 

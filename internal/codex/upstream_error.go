@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"chatgpt-codex-proxy/internal/jsonutil"
 )
 
 type UpstreamError struct {
@@ -129,58 +131,8 @@ type upstreamErrorFields struct {
 	ResetsAt        json.RawMessage `json:"resets_at"`
 }
 
-type flexibleInt64 struct {
-	value int64
-	set   bool
-}
-
-func (f *flexibleInt64) UnmarshalJSON(data []byte) error {
-	if len(data) == 0 || string(data) == "null" {
-		return nil
-	}
-	var number json.Number
-	if err := json.Unmarshal(data, &number); err == nil {
-		value, err := number.Int64()
-		if err != nil {
-			floatValue, floatErr := number.Float64()
-			if floatErr != nil {
-				return fmt.Errorf("parse numeric value %q: %w", number.String(), err)
-			}
-			value = int64(floatValue)
-		}
-		f.value = value
-		f.set = true
-		return nil
-	}
-	var text string
-	if err := json.Unmarshal(data, &text); err == nil {
-		trimmed := strings.TrimSpace(text)
-		if trimmed == "" {
-			return nil
-		}
-		value, err := strconv.ParseInt(trimmed, 10, 64)
-		if err == nil {
-			f.value = value
-			f.set = true
-			return nil
-		}
-		floatValue, floatErr := strconv.ParseFloat(trimmed, 64)
-		if floatErr != nil {
-			return fmt.Errorf("parse numeric value %q: %w", text, err)
-		}
-		f.value = int64(floatValue)
-		f.set = true
-		return nil
-	}
-	return fmt.Errorf("unsupported numeric value %q", string(data))
-}
-
-func (f flexibleInt64) Int64() (int64, bool) {
-	return f.value, f.set
-}
-
 func parsePositiveInt64(raw json.RawMessage) (int64, bool) {
-	var parsed flexibleInt64
+	var parsed jsonutil.FlexibleInt64
 	if err := parsed.UnmarshalJSON(raw); err != nil {
 		return 0, false
 	}

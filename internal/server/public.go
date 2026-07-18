@@ -696,10 +696,6 @@ func writeResponsesStreamError(writer io.Writer, status int, message string) {
 	}))
 }
 
-func (a *App) acquireAccountForResolution(ctx context.Context, resolution *sessionResolution) (accounts.Record, error) {
-	return a.acquireAccountForResolutionExcluding(ctx, resolution, nil)
-}
-
 func (a *App) acquireAccountForResolutionExcluding(ctx context.Context, resolution *sessionResolution, attempted map[string]struct{}) (accounts.Record, error) {
 	if resolution == nil {
 		return accounts.Record{}, errContinuationAccountUnavailable

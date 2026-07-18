@@ -38,7 +38,7 @@ func newFailoverTestApp(t *testing.T) *App {
 		cfg:           cfg,
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		accountMgr:    accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil, catalog),
+		accountMgr:    accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil, catalog.SupportsRecord),
 		continuations: conversation.NewContinuationManager(time.Minute),
 		claudeReplays: anthropic.NewReplayManager(time.Minute),
 		models:        catalog,

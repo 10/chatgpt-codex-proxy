@@ -882,7 +882,7 @@ func TestContinuationInputHistoryIncludesReasoningReplay(t *testing.T) {
 		t.Fatalf("history[1].Summary = %#v", history[1].Summary)
 	}
 
-	replayed := continuationInputItemsToCodex(history)
+	replayed := cloneContinuationInputItems(history)
 	if len(replayed) != 3 {
 		t.Fatalf("replayed len = %d, want 3", len(replayed))
 	}
@@ -891,6 +891,10 @@ func TestContinuationInputHistoryIncludesReasoningReplay(t *testing.T) {
 	}
 	if replayed[1].EncryptedContent != "encrypted-reasoning" {
 		t.Fatalf("replayed[1].EncryptedContent = %q, want encrypted-reasoning", replayed[1].EncryptedContent)
+	}
+	replayed[1].Summary[0].Text = "mutated"
+	if history[1].Summary[0].Text != "Reasoning summary" {
+		t.Fatalf("history[1].Summary = %#v, want independent clone", history[1].Summary)
 	}
 }
 

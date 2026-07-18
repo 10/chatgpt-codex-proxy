@@ -150,7 +150,7 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 		resolution.PreferredAccountID = session.account.ID
 	}
 
-	account, err := a.acquireAccountForResolution(c.Request.Context(), &resolution)
+	account, err := a.acquireAccountForResolutionExcluding(c.Request.Context(), &resolution, nil)
 	if err != nil {
 		status, code, message := a.responsesWebSocketOpenError(c, "", err)
 		return writeResponsesWebSocketError(conn, status, code, message, "api_error", "")

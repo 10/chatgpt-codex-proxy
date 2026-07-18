@@ -21,17 +21,13 @@ func normalizeResponsesText(text *ResponsesText) (*codex.TextConfig, map[string]
 
 	var tupleSchema map[string]any
 	format := codex.TextFormat{
-		Type: text.Format.Type,
-		Name: text.Format.Name,
+		Type:   text.Format.Type,
+		Name:   text.Format.Name,
+		Schema: text.Format.Schema,
+		Strict: text.Format.Strict,
 	}
 	if text.Format.Type == "json_schema" {
-		prepared, original := PrepareSchema(text.Format.Schema)
-		format.Schema = prepared
-		format.Strict = text.Format.Strict
-		tupleSchema = original
-	} else {
-		format.Schema = text.Format.Schema
-		format.Strict = text.Format.Strict
+		format.Schema, tupleSchema = PrepareSchema(text.Format.Schema)
 	}
 	config.Format = format
 	return config, tupleSchema

@@ -44,7 +44,6 @@ func TestSessionIDUsesHeaderThenClaudeCodeMetadata(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			if got := SessionID(test.header, json.RawMessage(test.metadata)); got != test.want {

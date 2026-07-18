@@ -19,18 +19,14 @@ type AccountManager struct {
 	accounts *accounts.Service
 	oauth    *codexauth.OAuthService
 	http     *codex.HTTPClient
-	models   ModelSupport
+	models   func(accounts.Record, string) bool
 
 	locks sync.Map
 }
 
-type ModelSupport interface {
-	SupportsRecord(record accounts.Record, modelID string) bool
-}
-
 var errAccountNotFound = errors.New("account not found")
 
-func NewAccountManager(cfg config.Config, accountsSvc *accounts.Service, oauth *codexauth.OAuthService, httpClient *codex.HTTPClient, modelSupport ModelSupport) *AccountManager {
+func NewAccountManager(cfg config.Config, accountsSvc *accounts.Service, oauth *codexauth.OAuthService, httpClient *codex.HTTPClient, modelSupport func(accounts.Record, string) bool) *AccountManager {
 	return &AccountManager{
 		cfg:      cfg,
 		accounts: accountsSvc,
@@ -53,7 +49,7 @@ func (m *AccountManager) AcquireReadyForModel(ctx context.Context, preferredID, 
 		if m.models == nil {
 			return true
 		}
-		return m.models.SupportsRecord(record, modelID)
+		return m.models(record, modelID)
 	})
 	if err != nil {
 		return accounts.Record{}, err

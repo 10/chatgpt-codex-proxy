@@ -29,8 +29,8 @@ func TestLeastUsedPrefersLowerPrimaryUsedPercent(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t, RotationLeastUsed,
-		recordWithQuota("acct_busy", 80, nil, nil),
-		recordWithQuota("acct_light", 20, nil, nil),
+		recordWithQuota("acct_busy", 80, nil),
+		recordWithQuota("acct_light", 20, nil),
 	)
 
 	record, err := svc.Acquire("")
@@ -48,8 +48,8 @@ func TestLeastUsedUsesSecondaryUsedPercentAsTieBreaker(t *testing.T) {
 	secondaryHigh := 70.0
 	secondaryLow := 10.0
 	svc := newTestService(t, RotationLeastUsed,
-		recordWithQuota("acct_high_secondary", 40, &secondaryHigh, nil),
-		recordWithQuota("acct_low_secondary", 40, &secondaryLow, nil),
+		recordWithQuota("acct_high_secondary", 40, &secondaryHigh),
+		recordWithQuota("acct_low_secondary", 40, &secondaryLow),
 	)
 
 	record, err := svc.Acquire("")
@@ -88,7 +88,7 @@ func TestLeastUsedSortsUnknownQuotaBehindKnownQuota(t *testing.T) {
 
 	svc := newTestService(t, RotationLeastUsed,
 		recordWithID("acct_unknown"),
-		recordWithQuota("acct_known", 15, nil, nil),
+		recordWithQuota("acct_known", 15, nil),
 	)
 
 	record, err := svc.Acquire("")
@@ -104,8 +104,8 @@ func TestStickyReusesLastSuccessfulEligibleAccount(t *testing.T) {
 	t.Parallel()
 
 	svc := newTestService(t, RotationSticky,
-		recordWithQuota("acct_a", 10, nil, nil),
-		recordWithQuota("acct_b", 20, nil, nil),
+		recordWithQuota("acct_a", 10, nil),
+		recordWithQuota("acct_b", 20, nil),
 	)
 	svc.NoteSuccess("acct_b")
 
@@ -124,7 +124,7 @@ func TestStickyFallsBackWhenLastSuccessfulBecomesIneligible(t *testing.T) {
 	now := time.Now().UTC()
 	resetAt := now.Add(10 * time.Minute)
 	svc := newTestService(t, RotationSticky,
-		recordWithQuota("acct_a", 10, nil, nil),
+		recordWithQuota("acct_a", 10, nil),
 		&Record{
 			ID:        "acct_b",
 			AccountID: "upstream_acct_b",
@@ -561,13 +561,12 @@ func recordWithID(id string) *Record {
 	}
 }
 
-func recordWithQuota(id string, primary float64, secondary *float64, primaryReset *time.Time) *Record {
+func recordWithQuota(id string, primary float64, secondary *float64) *Record {
 	record := recordWithID(id)
 	record.CachedQuota = &QuotaSnapshot{
 		RateLimit: RateLimitWindow{
 			Allowed:     true,
-			UsedPercent: ptr(primary),
-			ResetAt:     primaryReset,
+			UsedPercent: &primary,
 		},
 	}
 	if secondary != nil {
@@ -577,10 +576,6 @@ func recordWithQuota(id string, primary float64, secondary *float64, primaryRese
 		}
 	}
 	return record
-}
-
-func ptr[T any](value T) *T {
-	return &value
 }
 
 type testJWTClaims struct {

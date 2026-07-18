@@ -333,64 +333,45 @@ func TestNormalizedOutputTextRestoresNestedFieldsInOptionalObjects(t *testing.T)
 func TestNormalizedOutputTextUsesMatchingUnionBranch(t *testing.T) {
 	t.Parallel()
 
-	accumulator := structuredOutputAccumulator(map[string]any{
-		"anyOf": []any{
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"kind":  map[string]any{"type": "string", "const": "a"},
-					"value": map[string]any{"type": "string"},
-				},
-				"required": []any{"kind"},
-			},
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"kind":  map[string]any{"type": "string", "const": "b"},
-					"value": map[string]any{"type": []any{"string", "null"}},
-				},
-				"required": []any{"kind", "value"},
-			},
-		},
-	})
+	for _, test := range []struct {
+		constraint string
+		first      string
+		second     string
+	}{
+		{constraint: "const", first: "a", second: "b"},
+		{constraint: "pattern", first: "^a$", second: "^b$"},
+	} {
+		t.Run(test.constraint, func(t *testing.T) {
+			t.Parallel()
 
-	if got := normalizedOutputText(accumulator, `{"kind":"a","value":null}`); got != `{"kind":"a"}` {
-		t.Fatalf("optional branch = %s", got)
-	}
-	if got := normalizedOutputText(accumulator, `{"kind":"b","value":null}`); got != `{"kind":"b","value":null}` {
-		t.Fatalf("nullable branch = %s", got)
-	}
-}
-
-func TestNormalizedOutputTextUsesSchemaConstraintsToMatchUnionBranch(t *testing.T) {
-	t.Parallel()
-
-	accumulator := structuredOutputAccumulator(map[string]any{
-		"anyOf": []any{
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"kind":  map[string]any{"type": "string", "pattern": "^a$"},
-					"value": map[string]any{"type": "string"},
+			accumulator := structuredOutputAccumulator(map[string]any{
+				"anyOf": []any{
+					map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"kind":  map[string]any{"type": "string", test.constraint: test.first},
+							"value": map[string]any{"type": "string"},
+						},
+						"required": []any{"kind"},
+					},
+					map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"kind":  map[string]any{"type": "string", test.constraint: test.second},
+							"value": map[string]any{"type": []any{"string", "null"}},
+						},
+						"required": []any{"kind", "value"},
+					},
 				},
-				"required": []any{"kind"},
-			},
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"kind":  map[string]any{"type": "string", "pattern": "^b$"},
-					"value": map[string]any{"type": []any{"string", "null"}},
-				},
-				"required": []any{"kind", "value"},
-			},
-		},
-	})
+			})
 
-	if got := normalizedOutputText(accumulator, `{"kind":"a","value":null}`); got != `{"kind":"a"}` {
-		t.Fatalf("optional branch = %s", got)
-	}
-	if got := normalizedOutputText(accumulator, `{"kind":"b","value":null}`); got != `{"kind":"b","value":null}` {
-		t.Fatalf("nullable branch = %s", got)
+			if got := normalizedOutputText(accumulator, `{"kind":"a","value":null}`); got != `{"kind":"a"}` {
+				t.Fatalf("optional branch = %s", got)
+			}
+			if got := normalizedOutputText(accumulator, `{"kind":"b","value":null}`); got != `{"kind":"b","value":null}` {
+				t.Fatalf("nullable branch = %s", got)
+			}
+		})
 	}
 }
 

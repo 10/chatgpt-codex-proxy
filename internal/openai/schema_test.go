@@ -161,12 +161,12 @@ func TestReconvertTupleValuesRestoresArrays(t *testing.T) {
 		},
 	}
 
-	reconverted := ReconvertTupleValues(map[string]any{
+	reconverted := reconvertTupleValues(map[string]any{
 		"pair": map[string]any{
 			"0": "left",
 			"1": float64(2),
 		},
-	}, schema)
+	}, schema, schema)
 
 	root, _ := reconverted.(map[string]any)
 	pair, ok := root["pair"].([]any)

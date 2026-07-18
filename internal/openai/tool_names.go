@@ -3,13 +3,7 @@ package openai
 import (
 	"encoding/json"
 	"strings"
-
-	"chatgpt-codex-proxy/internal/turn"
 )
-
-type ToolNames = turn.ToolNames
-
-var NewToolNames = turn.NewToolNames
 
 func toolNamesForChat(req ChatCompletionsRequest, tools []ToolDefinition) []string {
 	names := toolDefinitionNames(tools)

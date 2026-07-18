@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"chatgpt-codex-proxy/internal/codex"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func legacyFunctionsAsTools(functions []LegacyFunctionDefinition) []ToolDefinition {
@@ -26,7 +27,7 @@ func legacyFunctionsAsTools(functions []LegacyFunctionDefinition) []ToolDefiniti
 	return tools
 }
 
-func normalizeTools(tools []ToolDefinition, toolNames *ToolNames) []codex.Tool {
+func normalizeTools(tools []ToolDefinition, toolNames *turn.ToolNames) []codex.Tool {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -70,7 +71,7 @@ func normalizeTools(tools []ToolDefinition, toolNames *ToolNames) []codex.Tool {
 	return result
 }
 
-func normalizeToolChoice(raw json.RawMessage, toolNames *ToolNames) json.RawMessage {
+func normalizeToolChoice(raw json.RawMessage, toolNames *turn.ToolNames) json.RawMessage {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -111,7 +112,7 @@ func normalizeToolChoice(raw json.RawMessage, toolNames *ToolNames) json.RawMess
 	return append(json.RawMessage(nil), raw...)
 }
 
-func normalizeLegacyFunctionChoice(choice *LegacyFunctionCallChoice, toolNames *ToolNames) json.RawMessage {
+func normalizeLegacyFunctionChoice(choice *LegacyFunctionCallChoice, toolNames *turn.ToolNames) json.RawMessage {
 	if choice == nil || (choice.Mode == "" && choice.Name == "") {
 		return nil
 	}

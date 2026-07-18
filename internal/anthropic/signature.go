@@ -15,15 +15,8 @@ func IsValidCodexReasoningSignature(raw string) bool {
 	if signature == "" || len(signature) > maxCodexReasoningSignatureLength || !strings.HasPrefix(signature, "gAAAA") {
 		return false
 	}
-	for _, character := range signature {
-		switch {
-		case character >= 'A' && character <= 'Z':
-		case character >= 'a' && character <= 'z':
-		case character >= '0' && character <= '9':
-		case character == '-' || character == '_' || character == '=':
-		default:
-			return false
-		}
+	if strings.ContainsAny(signature, "\r\n") {
+		return false
 	}
 
 	decoded, err := base64.RawURLEncoding.DecodeString(signature)
