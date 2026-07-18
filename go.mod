@@ -8,7 +8,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/klauspost/compress v1.18.6
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
-	github.com/sardanioss/httpcloak v1.6.7
+	github.com/sardanioss/httpcloak v1.6.8
 	github.com/tiktoken-go/tokenizer v0.7.0
 )
 
@@ -55,3 +55,5 @@ require (
 	golang.org/x/tools v0.45.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace github.com/sardanioss/httpcloak => github.com/10/httpcloak v1.6.9-0.20260718073330-55a29d23e369

@@ -1,3 +1,5 @@
+github.com/10/httpcloak v1.6.9-0.20260718073330-55a29d23e369 h1:oP8CePXc3K5IMcTkM6DdONFZGNqlCgp//6+EDYkasAM=
+github.com/10/httpcloak v1.6.9-0.20260718073330-55a29d23e369/go.mod h1:mucuUR50FzY2nnJXM1DXwzzeLT7e8gvIvm1LB1MKmts=
 github.com/andybalholm/brotli v1.2.1 h1:R+f5xP285VArJDRgowrfb9DqL18yVK0gKAW/F+eTWro=
 github.com/andybalholm/brotli v1.2.1/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/bytedance/gopkg v0.1.4 h1:oZnQwnX82KAIWb7033bEwtxvTqXcYMxDBaQxo5JJHWM=
@@ -67,8 +69,6 @@ github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 h1:KRzFb2m7YtdldCEkzs6KqmJw4nqEV
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.2/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
 github.com/sardanioss/http v1.2.0 h1:Zq3uxnYDLeugTvaYaCzR3Tp1qDERbA2pHgkkFWRuETs=
 github.com/sardanioss/http v1.2.0/go.mod h1:Bn2qBFItWB9mLCxWW+tnwDe0stlrxhXaVZKtrLn4dc0=
-github.com/sardanioss/httpcloak v1.6.7 h1:1QXwDMpXkmQw+AHZCySSz+2b9wZnHsEgKam0ueDvwjg=
-github.com/sardanioss/httpcloak v1.6.7/go.mod h1:nYdmEX08H3+qWllukV1/Yu/y55um0P+M1jxdw08WU6U=
 github.com/sardanioss/net v1.2.6 h1:udfFP8U+qiOs+hjdUOfuqHqy2iM5fPcaQWnjcI+HT3E=
 github.com/sardanioss/net v1.2.6/go.mod h1:jfBAWR1FCMNBh3Pl6kVPOjrKtvBvmKEO300GkAAwj3s=
 github.com/sardanioss/qpack v0.6.3 h1:XGXtEYzpqMD7kzq/kyRhjucohUD8JPiJvi6RuxAlueQ=
