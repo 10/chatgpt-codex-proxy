@@ -147,6 +147,16 @@ func (a *App) resolveAndOpenRequest(c *gin.Context, endpoint string, normalized 
 	}
 
 	account, stream, quota, err := a.openStream(c, c.Request.Context(), endpoint, &resolution)
+	if err != nil && isInvalidReasoningSignatureError(err) {
+		if sanitized, changed := resolution.Original.StripReasoningEncryptedContent(); changed {
+			resolution = sessionResolution{
+				Request:            sanitized,
+				Original:           sanitized,
+				PreferredAccountID: account.ID,
+			}
+			account, stream, quota, err = a.openStream(c, c.Request.Context(), endpoint, &resolution)
+		}
+	}
 	if err != nil {
 		a.setRequestAccount(c, account)
 		reportedAccountID := jsonutil.FirstNonEmpty(account.ID, resolution.PreferredAccountID)

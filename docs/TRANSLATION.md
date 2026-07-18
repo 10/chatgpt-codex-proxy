@@ -634,6 +634,8 @@ During streaming, classified errors are sent as SSE error payloads instead of ra
 
 For requests without explicit continuation state, retryable upstream failures (`401`, `402`, `403`, `408`, `429`, and transient `5xx` statuses) fail over to another eligible account before client-visible output begins. Each account is attempted at most once. Non-streaming responses remain retryable until the full upstream response has been buffered; streaming responses stop being retryable after the first public event is ready for delivery.
 
+If the upstream rejects replayed reasoning state with an invalid-signature error (`thinking_signature_invalid` or `invalid_encrypted_content`), the proxy drops the `reasoning` input items that carry `encrypted_content` and retries the request once on the same account before client-visible output begins. This applies to the Chat Completions and Responses paths as well as Anthropic Messages, so a replayed transcript whose encrypted reasoning was produced by a different account (for example after account rotation) recovers transparently instead of surfacing the error.
+
 ## State Recorded From Responses
 
 After a successful completed upstream response, the proxy stores a continuation record containing:

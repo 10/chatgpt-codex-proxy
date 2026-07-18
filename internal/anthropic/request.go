@@ -350,6 +350,16 @@ func normalizeThinking(request MessagesRequest, catalog *models.Catalog) (*codex
 		return nil, nil, nil
 	}
 	thinkingEnabled := typeName == "enabled" || typeName == "adaptive"
+	effortFromBudget := false
+	if effort == "" && thinkingEnabled {
+		effort = thinkingEffortForBudget(request.Thinking.BudgetTokens)
+		effortFromBudget = effort != ""
+	}
+	if effortFromBudget && catalog != nil {
+		if entry, ok := catalog.Get(strings.TrimSpace(request.Model)); ok {
+			effort = clampThinkingEffort(effort, entry.SupportedReasoningEfforts)
+		}
+	}
 	if effort == "" && thinkingEnabled && catalog != nil {
 		if entry, ok := catalog.Get(strings.TrimSpace(request.Model)); ok {
 			effort = entry.DefaultReasoningEffort
@@ -371,6 +381,53 @@ func normalizeThinking(request MessagesRequest, catalog *models.Catalog) (*codex
 	}
 	reasoning.Summary = "auto"
 	return reasoning, []string{"reasoning.encrypted_content"}, nil
+}
+
+func thinkingEffortForBudget(budget int) string {
+	switch {
+	case budget <= 0:
+		return ""
+	case budget <= 1024:
+		return "low"
+	case budget <= 8192:
+		return "medium"
+	case budget <= 24576:
+		return "high"
+	default:
+		return "xhigh"
+	}
+}
+
+func clampThinkingEffort(effort string, supported []models.ReasoningEffort) string {
+	order := []string{"minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
+	targetIndex := slices.Index(order, effort)
+	if targetIndex < 0 {
+		return effort
+	}
+
+	bestEffort := effort
+	bestIndex := -1
+	bestDistance := len(order) + 1
+	for _, candidate := range supported {
+		candidateEffort := strings.TrimSpace(candidate.ReasoningEffort)
+		if candidateEffort == effort {
+			return effort
+		}
+		candidateIndex := slices.Index(order, candidateEffort)
+		if candidateIndex < 0 {
+			continue
+		}
+		distance := candidateIndex - targetIndex
+		if distance < 0 {
+			distance = -distance
+		}
+		if distance < bestDistance || distance == bestDistance && candidateIndex < bestIndex {
+			bestEffort = candidateEffort
+			bestIndex = candidateIndex
+			bestDistance = distance
+		}
+	}
+	return bestEffort
 }
 
 func normalizeOutputFormat(config *OutputConfig) (*codex.TextConfig, map[string]any, error) {

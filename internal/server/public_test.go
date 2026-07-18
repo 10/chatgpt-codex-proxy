@@ -141,6 +141,54 @@ func TestResponsesFailsOverWhenNonStreamingResponseFailsAfterFirstEvent(t *testi
 	}
 }
 
+func TestResponsesRecoversFromInvalidReasoningSignature(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	var attempts int
+	var sawEncryptedReasoning []bool
+	app.httpStream = func(_ context.Context, _ accounts.Record, req codex.Request, _ string) (eventStream, error) {
+		attempts++
+		hasEncryptedReasoning := false
+		for _, item := range req.Input {
+			if item.Type == "reasoning" && item.EncryptedContent != "" {
+				hasEncryptedReasoning = true
+			}
+		}
+		sawEncryptedReasoning = append(sawEncryptedReasoning, hasEncryptedReasoning)
+		if hasEncryptedReasoning {
+			return nil, &codex.UpstreamError{Op: "codex response", StatusCode: http.StatusBadRequest, Code: "invalid_encrypted_content"}
+		}
+		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_recovered", "status": "completed"}}}}}, nil
+	}
+
+	body := `{"model":"gpt-5.4","stream":false,"input":[` +
+		`{"type":"reasoning","encrypted_content":"foreign-signature","summary":[]},` +
+		`{"role":"user","content":[{"type":"input_text","text":"hi"}]}]}`
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	app.handleResponses(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if response["id"] != "resp_recovered" || response["status"] != "completed" {
+		t.Fatalf("response = %#v, want recovered completed", response)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2 (fail with signature, then retry sanitized)", attempts)
+	}
+	if len(sawEncryptedReasoning) != 2 || !sawEncryptedReasoning[0] || sawEncryptedReasoning[1] {
+		t.Fatalf("sawEncryptedReasoning = %#v, want [true, false]", sawEncryptedReasoning)
+	}
+}
+
 func TestChatCompletionsNonStreamingAcceptsIncompleteResponse(t *testing.T) {
 	t.Parallel()
 

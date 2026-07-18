@@ -54,3 +54,28 @@ type NormalizedCompactRequest struct {
 	TupleSchema        map[string]any
 	ToolNameAliases    map[string]string
 }
+
+// StripReasoningEncryptedContent returns a copy of the request with every
+// reasoning input item that carries encrypted reasoning state removed, plus a
+// flag reporting whether anything was dropped.
+//
+// Codex rejects replayed reasoning encrypted_content that was not produced by
+// the account/session now serving the request ("invalid_encrypted_content" /
+// "thinking_signature_invalid"). Dropping those items lets the request be
+// retried statelessly, mirroring how the Anthropic path drops thinking blocks.
+func (r NormalizedRequest) StripReasoningEncryptedContent() (NormalizedRequest, bool) {
+	changed := false
+	filtered := make([]InputItem, 0, len(r.Input))
+	for _, item := range r.Input {
+		if item.Type == "reasoning" && item.EncryptedContent != "" {
+			changed = true
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	if !changed {
+		return r, false
+	}
+	r.Input = filtered
+	return r, true
+}

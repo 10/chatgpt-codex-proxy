@@ -71,7 +71,7 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 		PreferredAccountID: replay.AccountID,
 	}
 	account, stream, quota, err := a.openStream(c, c.Request.Context(), "anthropic_messages", &resolution)
-	if err != nil && isInvalidAnthropicReasoningSignatureError(err) {
+	if err != nil && isInvalidReasoningSignatureError(err) {
 		sanitized, changed := anthropic.WithoutThinking(request)
 		if changed {
 			a.claudeReplays.Delete(replayScope, request.Model)
@@ -176,7 +176,7 @@ func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, no
 	c.Writer.Flush()
 }
 
-func isInvalidAnthropicReasoningSignatureError(err error) bool {
+func isInvalidReasoningSignatureError(err error) bool {
 	var upstreamErr *codex.UpstreamError
 	if !errors.As(err, &upstreamErr) {
 		return false

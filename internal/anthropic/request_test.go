@@ -52,7 +52,7 @@ func TestNormalizeMessagesTextToolsAndThinking(t *testing.T) {
 	if normalized.Model != "gpt-5.4" || normalized.Instructions != "Be precise." || !normalized.Stream {
 		t.Fatalf("normalized metadata = %#v", normalized)
 	}
-	if normalized.Reasoning == nil || normalized.Reasoning.Effort != "medium" || normalized.Reasoning.Summary != "auto" {
+	if normalized.Reasoning == nil || normalized.Reasoning.Effort != "low" || normalized.Reasoning.Summary != "auto" {
 		t.Fatalf("reasoning = %#v", normalized.Reasoning)
 	}
 	if normalized.ParallelToolCalls == nil || *normalized.ParallelToolCalls {
@@ -76,6 +76,89 @@ func TestNormalizeMessagesTextToolsAndThinking(t *testing.T) {
 	var toolChoice string
 	if err := json.Unmarshal(normalized.ToolChoice, &toolChoice); err != nil || toolChoice != "auto" {
 		t.Fatalf("tool choice = %s, err = %v", normalized.ToolChoice, err)
+	}
+}
+
+func TestNormalizeMessagesMapsThinkingBudgetToEffort(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		budget int
+		want   string
+	}{
+		{name: "zero uses model default", budget: 0, want: "medium"},
+		{name: "low upper bound", budget: 1024, want: "low"},
+		{name: "medium lower bound", budget: 1025, want: "medium"},
+		{name: "medium upper bound", budget: 8192, want: "medium"},
+		{name: "high lower bound", budget: 8193, want: "high"},
+		{name: "high upper bound", budget: 24576, want: "high"},
+		{name: "xhigh lower bound", budget: 24577, want: "xhigh"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			maxTokens := 10
+			normalized, err := Normalize(MessagesRequest{
+				Model:     "gpt-5.4",
+				MaxTokens: &maxTokens,
+				Messages:  []Message{{Role: "user", Content: Content{{Type: "text", Text: "Think carefully"}}}},
+				Thinking:  &Thinking{Type: "enabled", BudgetTokens: tc.budget},
+			}, models.NewCatalog(models.BootstrapEntries()))
+			if err != nil {
+				t.Fatalf("Normalize() error = %v", err)
+			}
+			if normalized.Reasoning == nil || normalized.Reasoning.Effort != tc.want {
+				t.Fatalf("reasoning = %#v, want %s effort", normalized.Reasoning, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeMessagesClampsThinkingBudgetToSupportedEffort(t *testing.T) {
+	t.Parallel()
+
+	maxTokens := 10
+	catalog := models.NewCatalog([]models.Entry{{
+		ID:                     "gpt-test",
+		DefaultReasoningEffort: "medium",
+		SupportedReasoningEfforts: []models.ReasoningEffort{
+			{ReasoningEffort: "low"},
+			{ReasoningEffort: "medium"},
+			{ReasoningEffort: "high"},
+		},
+	}})
+	normalized, err := Normalize(MessagesRequest{
+		Model:     "gpt-test",
+		MaxTokens: &maxTokens,
+		Messages:  []Message{{Role: "user", Content: Content{{Type: "text", Text: "Think as deeply as supported"}}}},
+		Thinking:  &Thinking{Type: "enabled", BudgetTokens: 24577},
+	}, catalog)
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if normalized.Reasoning == nil || normalized.Reasoning.Effort != "high" {
+		t.Fatalf("reasoning = %#v, want high effort", normalized.Reasoning)
+	}
+}
+
+func TestNormalizeMessagesPrefersExplicitEffortOverThinkingBudget(t *testing.T) {
+	t.Parallel()
+
+	maxTokens := 10
+	normalized, err := Normalize(MessagesRequest{
+		Model:        "gpt-5.4",
+		MaxTokens:    &maxTokens,
+		Messages:     []Message{{Role: "user", Content: Content{{Type: "text", Text: "Use the requested effort"}}}},
+		Thinking:     &Thinking{Type: "enabled", BudgetTokens: 1024},
+		OutputConfig: &OutputConfig{Effort: "high"},
+	}, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if normalized.Reasoning == nil || normalized.Reasoning.Effort != "high" {
+		t.Fatalf("reasoning = %#v, want explicit high effort", normalized.Reasoning)
 	}
 }
 

@@ -40,7 +40,7 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | JSON-schema output format | Codex structured output |
 | Fast service tier | Codex priority tier |
 
-Claude Code's attribution-only system block is filtered from model instructions. Its adaptive-thinking `display` and `context_management` fields are accepted as compatibility metadata; `output_config.effort` remains the field that selects Codex reasoning effort.
+Claude Code's attribution-only system block is filtered from model instructions. Its adaptive-thinking `display` and `context_management` fields are accepted as compatibility metadata. An explicit `output_config.effort` selects Codex reasoning effort; otherwise, enabled-thinking budgets map to `low` through 1,024 tokens, `medium` through 8,192, `high` through 24,576, and `xhigh` above that. Budget-derived effort is clamped to the nearest level supported by the selected model.
 
 Tool names and tool-call IDs longer than the backend limit are shortened deterministically. Original tool names are restored in public responses.
 
@@ -75,7 +75,7 @@ The result is a Codex-oriented estimate. It is not an Anthropic billing-token gu
 - `max_tokens` is required by Messages and accepted, but positive values do not currently enforce exact output truncation. `max_tokens: 0` maps to the Codex WebSocket `generate: false` control.
 - `temperature`, `top_p`, `top_k`, and `stop_sequences` are accepted but are not forwarded because the Codex backend does not expose equivalent request fields.
 - Hosted-search `max_uses` and `blocked_domains` are rejected because the Codex backend cannot enforce them. Use `allowed_domains` for domain filtering.
-- `thinking.budget_tokens` enables thinking but does not map to an exact Codex token budget. The model catalog's default reasoning effort is used unless `output_config.effort` selects a supported effort.
+- `thinking.budget_tokens` maps to a discrete Codex reasoning effort, not an exact token cap. A zero or omitted budget uses the model catalog's default reasoning effort.
 - Prompt caching controls are accepted as content metadata. Reported cache-read usage comes from Codex cached-token counters when available.
 - Anthropic client-side tools and hosted web search are supported. Other Anthropic server-tool families are rejected until their state can be round-tripped faithfully through Codex.
 - Claude Code replay sessions share the proxy's single configured API-key trust boundary. Do not share one proxy key between mutually untrusted users.
