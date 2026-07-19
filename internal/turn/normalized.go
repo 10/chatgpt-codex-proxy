@@ -1,5 +1,7 @@
 package turn
 
+import "slices"
+
 type NormalizedRequest struct {
 	Request
 	ModelExplicit   bool
@@ -64,16 +66,10 @@ type NormalizedCompactRequest struct {
 // "thinking_signature_invalid"). Dropping those items lets the request be
 // retried statelessly, mirroring how the Anthropic path drops thinking blocks.
 func (r NormalizedRequest) StripReasoningEncryptedContent() (NormalizedRequest, bool) {
-	changed := false
-	filtered := make([]InputItem, 0, len(r.Input))
-	for _, item := range r.Input {
-		if item.Type == "reasoning" && item.EncryptedContent != "" {
-			changed = true
-			continue
-		}
-		filtered = append(filtered, item)
-	}
-	if !changed {
+	filtered := slices.DeleteFunc(slices.Clone(r.Input), func(item InputItem) bool {
+		return item.Type == "reasoning" && item.EncryptedContent != ""
+	})
+	if len(filtered) == len(r.Input) {
 		return r, false
 	}
 	r.Input = filtered

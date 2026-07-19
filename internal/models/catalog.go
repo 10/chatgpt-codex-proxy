@@ -279,8 +279,6 @@ func cloneEntries(entries []Entry) []Entry {
 
 func cloneEntry(entry Entry) Entry {
 	cloned := entry
-	if len(entry.SupportedReasoningEfforts) > 0 {
-		cloned.SupportedReasoningEfforts = slices.Clone(entry.SupportedReasoningEfforts)
-	}
+	cloned.SupportedReasoningEfforts = slices.Clone(entry.SupportedReasoningEfforts)
 	return cloned
 }

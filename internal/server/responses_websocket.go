@@ -269,7 +269,7 @@ func (a *App) responsesStreamEvents(c *gin.Context, accumulator *turn.Accumulato
 
 	payload := responseStreamPayload(event, accumulator)
 	if normalized.TupleSchema != nil && event.IsTerminalResponse() {
-		if err := openai.PatchResponseCompletedPayloadForTuple(payload, normalized.TupleSchema); err != nil {
+		if err := openai.PatchResponsesObjectForTuple(jsonutil.MapValue(payload, "response"), normalized.TupleSchema); err != nil {
 			a.logTupleReconversionWarning(c, "responses", accumulator.ResponseID, err)
 		}
 	}

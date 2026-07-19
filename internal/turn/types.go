@@ -54,15 +54,9 @@ func (t *ToolDefinition) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	delete(raw, "type")
-	delete(raw, "function")
-	delete(raw, "name")
-	delete(raw, "description")
-	delete(raw, "parameters")
-	delete(raw, "format")
-	delete(raw, "strict")
-	delete(raw, "search_context_size")
-	delete(raw, "user_location")
+	for _, key := range []string{"type", "function", "name", "description", "parameters", "format", "strict", "search_context_size", "user_location"} {
+		delete(raw, key)
+	}
 
 	decoded.ExtraFields = raw
 	*t = ToolDefinition(decoded)

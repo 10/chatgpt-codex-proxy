@@ -43,23 +43,10 @@ func PatchResponsesObjectForTuple(object map[string]any, schema map[string]any) 
 	if schema == nil || len(object) == 0 {
 		return nil
 	}
-	return patchTupleResponseBody(object, schema)
-}
-
-func PatchResponseCompletedPayloadForTuple(payload map[string]any, schema map[string]any) error {
-	if schema == nil || len(payload) == 0 {
-		return nil
-	}
-
-	response := jsonutil.MapValue(payload, "response")
-	return patchTupleResponseBody(response, schema)
-}
-
-func patchTupleResponseBody(response map[string]any, schema map[string]any) error {
-	if err := patchTupleTextField(response, "output_text", schema); err != nil {
+	if err := patchTupleTextField(object, "output_text", schema); err != nil {
 		return err
 	}
-	return patchTupleOutputMessages(jsonutil.SliceOfMaps(response["output"]), schema)
+	return patchTupleOutputMessages(jsonutil.SliceOfMaps(object["output"]), schema)
 }
 
 func patchTupleOutputMessages(items []map[string]any, schema map[string]any) error {

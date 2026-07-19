@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -296,15 +295,7 @@ func StreamRequestPayload(req Request) Request {
 }
 
 func (c *HTTPClient) codexModelsURL() string {
-	base := JoinURL(c.cfg.CodexBaseURL, "/codex/models")
-	parsed, err := url.Parse(base)
-	if err != nil {
-		return base
-	}
-	query := parsed.Query()
-	query.Set("client_version", desktopClientVersion)
-	parsed.RawQuery = query.Encode()
-	return parsed.String()
+	return JoinURL(c.cfg.CodexBaseURL, "/codex/models?client_version="+desktopClientVersion)
 }
 
 func parseCodexModelsResponse(payload string) ([]BackendModelEntry, error) {
@@ -312,7 +303,6 @@ func parseCodexModelsResponse(payload string) ([]BackendModelEntry, error) {
 		Models json.RawMessage `json:"models"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(payload))
-	decoder.UseNumber()
 	if err := decoder.Decode(&decoded); err != nil {
 		return nil, err
 	}

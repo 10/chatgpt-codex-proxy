@@ -327,14 +327,14 @@ func appendImageToolOptions(tool *openai.ToolDefinition, req imageGenerationRequ
 
 func appendImageToolString(tool *openai.ToolDefinition, key, value string) {
 	value = strings.TrimSpace(value)
-	if tool == nil || value == "" {
+	if value == "" {
 		return
 	}
 	tool.ExtraFields[key] = mustRawJSON(value)
 }
 
 func appendImageToolInt(tool *openai.ToolDefinition, key string, value *int) {
-	if tool == nil || value == nil {
+	if value == nil {
 		return
 	}
 	tool.ExtraFields[key] = mustRawJSON(*value)

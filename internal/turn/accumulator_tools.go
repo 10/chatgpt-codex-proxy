@@ -183,9 +183,6 @@ func (a *Accumulator) ensureResponseToolCallCompleted(state *ToolCallState) []Re
 }
 
 func (t *ToolCallState) chatCompletionToolCall() map[string]any {
-	if t == nil {
-		return nil
-	}
 	if t.ToolType == "custom" {
 		return map[string]any{
 			"id":   t.CallID,
@@ -207,9 +204,6 @@ func (t *ToolCallState) chatCompletionToolCall() map[string]any {
 }
 
 func (t *ToolCallState) responseOutputItem(status string) map[string]any {
-	if t == nil {
-		return nil
-	}
 	itemStatus := jsonutil.FirstNonEmpty(status, t.Status, "completed")
 	if t.ToolType == "custom" {
 		return map[string]any{

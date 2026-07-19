@@ -18,23 +18,16 @@ const (
 const maxLoggedErrorLength = 2048
 
 func SetRequestOutcome(c *gin.Context, outcome string) {
-	if c != nil {
-		c.Set(RequestOutcomeKey, strings.TrimSpace(outcome))
-	}
+	c.Set(RequestOutcomeKey, strings.TrimSpace(outcome))
 }
 
 func SetRequestError(c *gin.Context, code, message string) {
-	if c == nil {
-		return
-	}
 	c.Set(RequestErrorCodeKey, strings.TrimSpace(code))
 	c.Set(RequestErrorMessageKey, truncateLogValue(message))
 }
 
 func SetRequestResponseID(c *gin.Context, responseID string) {
-	if c != nil {
-		c.Set(RequestResponseIDKey, strings.TrimSpace(responseID))
-	}
+	c.Set(RequestResponseIDKey, strings.TrimSpace(responseID))
 }
 
 func RequestLogger(logger *slog.Logger) gin.HandlerFunc {

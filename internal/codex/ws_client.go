@@ -60,10 +60,7 @@ func (s *WSStream) NextEvent() (*StreamEvent, error) {
 	if err := json.Unmarshal(message, &raw); err != nil {
 		return nil, err
 	}
-	eventType := ""
-	if typ, ok := raw["type"].(string); ok {
-		eventType = typ
-	}
+	eventType, _ := raw["type"].(string)
 	if strings.TrimSpace(eventType) == "" {
 		return nil, io.EOF
 	}

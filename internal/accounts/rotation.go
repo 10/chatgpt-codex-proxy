@@ -17,7 +17,7 @@ func selectRoundRobin(candidates []*Record, index *int) *Record {
 func selectLeastUsed(candidates []*Record, index *int) *Record {
 	withQuota := make([]*Record, 0, len(candidates))
 	for _, candidate := range candidates {
-		if hasUsableQuota(candidate) {
+		if candidate != nil && candidate.CachedQuota != nil && candidate.CachedQuota.RateLimit.UsedPercent != nil {
 			withQuota = append(withQuota, candidate)
 		}
 	}
@@ -91,10 +91,6 @@ func primaryReset(snapshot *QuotaSnapshot) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return snapshot.RateLimit.ResetAt.UTC(), true
-}
-
-func hasUsableQuota(record *Record) bool {
-	return record != nil && record.CachedQuota != nil && record.CachedQuota.RateLimit.UsedPercent != nil
 }
 
 func normalizeQuotaSnapshot(snapshot *QuotaSnapshot, now time.Time) bool {

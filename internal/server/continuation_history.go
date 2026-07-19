@@ -17,9 +17,6 @@ func continuationInputHistory(accumulator *turn.Accumulator) []turn.InputItem {
 }
 
 func continuationOutputHistory(accumulator *turn.Accumulator) []turn.InputItem {
-	if accumulator == nil {
-		return nil
-	}
 	response := accumulator.ResponsesObject()
 	output, ok := response["output"].([]map[string]any)
 	if !ok || len(output) == 0 {

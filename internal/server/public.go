@@ -41,7 +41,6 @@ type sessionResolution struct {
 }
 
 var errIncompleteResponse = errors.New("upstream stream ended before a terminal response event")
-var errEmptyChatCompletionsBody = errors.New("request body must include chat messages or responses input")
 
 type openedRequest struct {
 	Resolution sessionResolution
@@ -546,7 +545,7 @@ func normalizeChatCompletionsBody(body []byte, catalog *models.Catalog) (turn.No
 		strings.TrimSpace(envelope.PreviousResponseID) == "" &&
 		len(bytes.TrimSpace(envelope.Text)) == 0 &&
 		len(bytes.TrimSpace(envelope.Reasoning)) == 0 {
-		return turn.NormalizedRequest{}, errEmptyChatCompletionsBody
+		return turn.NormalizedRequest{}, errors.New("request body must include chat messages or responses input")
 	}
 
 	var responsesReq openai.ResponsesRequest
@@ -697,9 +696,6 @@ func writeResponsesStreamError(writer io.Writer, status int, message string) {
 }
 
 func (a *App) acquireAccountForResolutionExcluding(ctx context.Context, resolution *sessionResolution, attempted map[string]struct{}) (accounts.Record, error) {
-	if resolution == nil {
-		return accounts.Record{}, errContinuationAccountUnavailable
-	}
 	if resolution.ExplicitPrevious || resolution.ImplicitResume {
 		preferredID := strings.TrimSpace(resolution.PreferredAccountID)
 		if preferredID == "" {

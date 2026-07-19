@@ -100,9 +100,6 @@ func ExecutionScope(sessionHeader, agentHeader string, metadata json.RawMessage)
 }
 
 func (m *ReplayManager) Remember(scope, model, accountID string, accumulator *turn.Accumulator) bool {
-	if m == nil || accumulator == nil {
-		return false
-	}
 	scope = strings.TrimSpace(scope)
 	model = strings.TrimSpace(model)
 	if scope == "" || model == "" {
@@ -128,7 +125,7 @@ func (m *ReplayManager) Remember(scope, model, accountID string, accumulator *tu
 	record := replayRecord{
 		AccountID: strings.TrimSpace(accountID),
 		Blocks:    cloneContent(blocks),
-		ExpiresAt: m.currentTime().Add(m.ttl),
+		ExpiresAt: m.now().Add(m.ttl),
 		Size:      size,
 	}
 	m.records[key] = record
@@ -140,9 +137,6 @@ func (m *ReplayManager) Remember(scope, model, accountID string, accumulator *tu
 }
 
 func (m *ReplayManager) Apply(scope string, request MessagesRequest) (MessagesRequest, ReplayMatch) {
-	if m == nil {
-		return request, ReplayMatch{}
-	}
 	record, ok := m.get(scope, request.Model)
 	if !ok {
 		return request, ReplayMatch{}
@@ -230,19 +224,13 @@ func (m *ReplayManager) Apply(scope string, request MessagesRequest) (MessagesRe
 }
 
 func (m *ReplayManager) Delete(scope, model string) {
-	if m == nil {
-		return
-	}
 	m.mu.Lock()
 	m.deleteLocked(replayKey(scope, model))
 	m.mu.Unlock()
 }
 
 func (m *ReplayManager) Sweep() {
-	if m == nil {
-		return
-	}
-	now := m.currentTime()
+	now := m.now()
 	m.mu.Lock()
 	for key, record := range m.records {
 		if !record.ExpiresAt.After(now) {
@@ -257,14 +245,10 @@ func WithoutThinking(request MessagesRequest) (MessagesRequest, bool) {
 	changed := false
 	for index := range request.Messages {
 		content := request.Messages[index].Content
-		filtered := make(Content, 0, len(content))
-		for _, block := range content {
-			if block.Type == "thinking" || block.Type == "redacted_thinking" {
-				changed = true
-				continue
-			}
-			filtered = append(filtered, block)
-		}
+		filtered := slices.DeleteFunc(content, func(block Block) bool {
+			return block.Type == "thinking" || block.Type == "redacted_thinking"
+		})
+		changed = changed || len(filtered) != len(content)
 		request.Messages[index].Content = filtered
 	}
 	return request, changed
@@ -281,9 +265,9 @@ func (m *ReplayManager) get(scope, model string) (replayRecord, bool) {
 	if !ok {
 		return replayRecord{}, false
 	}
-	if !record.ExpiresAt.After(m.currentTime()) {
+	if !record.ExpiresAt.After(m.now()) {
 		m.mu.Lock()
-		if current, exists := m.records[key]; exists && !current.ExpiresAt.After(m.currentTime()) {
+		if current, exists := m.records[key]; exists && !current.ExpiresAt.After(m.now()) {
 			m.deleteLocked(key)
 		}
 		m.mu.Unlock()
@@ -291,13 +275,6 @@ func (m *ReplayManager) get(scope, model string) (replayRecord, bool) {
 	}
 	record.Blocks = cloneContent(record.Blocks)
 	return record, true
-}
-
-func (m *ReplayManager) currentTime() time.Time {
-	if m.now != nil {
-		return m.now()
-	}
-	return time.Now()
 }
 
 func replayKey(scope, model string) string {

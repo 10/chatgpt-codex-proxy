@@ -31,21 +31,8 @@ type CompactRequest struct {
 }
 
 type TextConfig struct {
-	Format    TextFormat `json:"format"`
+	Format    TextFormat `json:"format,omitzero"`
 	Verbosity string     `json:"verbosity,omitempty"`
-}
-
-func (t TextConfig) MarshalJSON() ([]byte, error) {
-	payload := struct {
-		Format    *TextFormat `json:"format,omitempty"`
-		Verbosity string      `json:"verbosity,omitempty"`
-	}{
-		Verbosity: t.Verbosity,
-	}
-	if t.Format.Type != "" || t.Format.Name != "" || t.Format.Schema != nil || t.Format.Strict {
-		payload.Format = &t.Format
-	}
-	return json.Marshal(payload)
 }
 
 type InputItem struct {

@@ -109,9 +109,6 @@ func (a *App) resolveCompactRequest(normalized turn.NormalizedCompactRequest) (t
 }
 
 func (a *App) acquireAccountForCompact(ctx context.Context, preferredAccountID string, normalized *turn.NormalizedCompactRequest) (accounts.Record, error) {
-	if normalized == nil {
-		return accounts.Record{}, errContinuationAccountUnavailable
-	}
 	if !normalized.ModelExplicit && strings.TrimSpace(normalized.Model) == "" {
 		account, err := a.accountMgr.AcquireReady(ctx, preferredAccountID)
 		if err != nil {

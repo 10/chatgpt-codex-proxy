@@ -16,8 +16,6 @@ import (
 	"chatgpt-codex-proxy/internal/turn"
 )
 
-var errUnsupportedMultiplePrompts = errors.New("multiple prompts are not supported")
-
 type completionsRequest struct {
 	Model  string          `json:"model"`
 	Prompt json.RawMessage `json:"prompt"`
@@ -50,7 +48,7 @@ func normalizeCompletionsBody(body []byte, catalog *models.Catalog) (turn.Normal
 			return turn.NormalizedRequest{}, errors.New("prompt must be a string or an array containing one string")
 		}
 		if len(prompts) != 1 {
-			return turn.NormalizedRequest{}, errUnsupportedMultiplePrompts
+			return turn.NormalizedRequest{}, errors.New("multiple prompts are not supported")
 		}
 		prompt = prompts[0]
 	}
