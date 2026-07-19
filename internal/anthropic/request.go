@@ -76,8 +76,7 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (turn.Normalize
 		ToolNameAliases: toolNames.Aliases(),
 		Request: codex.Request{
 			Model:             model,
-			Instructions:      strings.TrimSpace(instructions),
-			Input:             input,
+			Input:             turn.PrependDeveloperInstructions(input, instructions),
 			Stream:            request.Stream,
 			Tools:             tools,
 			ToolChoice:        toolChoice,

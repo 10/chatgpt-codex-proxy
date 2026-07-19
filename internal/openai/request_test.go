@@ -85,20 +85,23 @@ func TestChatCompletionsTranslation(t *testing.T) {
 	if len(normalized.Include) != 1 || normalized.Include[0] != "reasoning.encrypted_content" {
 		t.Fatalf("include = %#v, want reasoning.encrypted_content only", normalized.Include)
 	}
-	if normalized.Instructions != "System rules\n\nDeveloper rules" {
-		t.Fatalf("instructions = %q", normalized.Instructions)
+	if normalized.Instructions != "" {
+		t.Fatalf("instructions = %q, want empty (lifted to developer input item)", normalized.Instructions)
 	}
-	if len(normalized.Input) != 3 {
-		t.Fatalf("input len = %d, want 3", len(normalized.Input))
+	if len(normalized.Input) != 4 {
+		t.Fatalf("input len = %d, want 4", len(normalized.Input))
 	}
-	if normalized.Input[0].Role != "user" {
-		t.Fatalf("first input role = %q, want user", normalized.Input[0].Role)
+	if normalized.Input[0].Role != "developer" || len(normalized.Input[0].Content) != 1 || normalized.Input[0].Content[0].Text != "System rules\n\nDeveloper rules" {
+		t.Fatalf("first input = %#v, want developer instructions item", normalized.Input[0])
 	}
-	if normalized.Input[1].Type != "function_call" {
-		t.Fatalf("second input type = %q, want function_call", normalized.Input[1].Type)
+	if normalized.Input[1].Role != "user" {
+		t.Fatalf("second input role = %q, want user", normalized.Input[1].Role)
 	}
-	if normalized.Input[2].Type != "function_call_output" {
-		t.Fatalf("third input type = %q, want function_call_output", normalized.Input[2].Type)
+	if normalized.Input[2].Type != "function_call" {
+		t.Fatalf("third input type = %q, want function_call", normalized.Input[2].Type)
+	}
+	if normalized.Input[3].Type != "function_call_output" {
+		t.Fatalf("fourth input type = %q, want function_call_output", normalized.Input[3].Type)
 	}
 	if len(normalized.Tools) != 1 || normalized.Tools[0].Type != "function" {
 		t.Fatalf("tools = %#v", normalized.Tools)
@@ -238,8 +241,14 @@ func TestResponsesTranslation(t *testing.T) {
 	if normalized.Text == nil || normalized.Text.Format.Type != "json_schema" {
 		t.Fatalf("text format = %#v", normalized.Text)
 	}
-	if len(normalized.Input) != 2 {
+	if normalized.Instructions != "" {
+		t.Fatalf("instructions = %q, want empty (lifted to developer input item)", normalized.Instructions)
+	}
+	if len(normalized.Input) != 3 {
 		t.Fatalf("input len = %d", len(normalized.Input))
+	}
+	if normalized.Input[0].Role != "developer" || len(normalized.Input[0].Content) != 1 || normalized.Input[0].Content[0].Text != "Be terse" {
+		t.Fatalf("first input = %#v, want developer instructions item", normalized.Input[0])
 	}
 	if len(normalized.Include) != 0 {
 		t.Fatalf("include = %#v, want empty when reasoning disabled", normalized.Include)
@@ -554,14 +563,17 @@ func TestResponsesTranslationExtractsInstructionRolesFromInput(t *testing.T) {
 		t.Fatalf("Responses() error = %v", err)
 	}
 
-	if normalized.Instructions != "Top-level instructions\n\nSystem rules\n\nDeveloper rules" {
-		t.Fatalf("instructions = %q", normalized.Instructions)
+	if normalized.Instructions != "" {
+		t.Fatalf("instructions = %q, want empty (lifted to developer input item)", normalized.Instructions)
 	}
-	if len(normalized.Input) != 1 {
-		t.Fatalf("input len = %d, want 1", len(normalized.Input))
+	if len(normalized.Input) != 2 {
+		t.Fatalf("input len = %d, want 2", len(normalized.Input))
 	}
-	if normalized.Input[0].Role != "user" {
-		t.Fatalf("input role = %q, want user", normalized.Input[0].Role)
+	if normalized.Input[0].Role != "developer" || len(normalized.Input[0].Content) != 1 || normalized.Input[0].Content[0].Text != "Top-level instructions\n\nSystem rules\n\nDeveloper rules" {
+		t.Fatalf("first input = %#v, want collapsed developer instructions item", normalized.Input[0])
+	}
+	if normalized.Input[1].Role != "user" {
+		t.Fatalf("input role = %q, want user", normalized.Input[1].Role)
 	}
 }
 

@@ -89,7 +89,7 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 			}},
 		})
 	}
-	out.Instructions = strings.TrimSpace(strings.Join(instructions, "\n\n"))
+	out.Input = turn.PrependDeveloperInstructions(out.Input, strings.Join(instructions, "\n\n"))
 	return out, nil
 }
 
@@ -145,8 +145,7 @@ func Responses(req ResponsesRequest, catalog *models.Catalog) (turn.NormalizedRe
 		serviceTier,
 		req.PreviousResponseID,
 	)
-	out.Instructions = payload.Instructions
-	out.Input = payload.Input
+	out.Input = turn.PrependDeveloperInstructions(payload.Input, payload.Instructions)
 	out.Text = payload.Text
 	out.PromptCacheKey = strings.TrimSpace(req.PromptCacheKey)
 	out.ParallelToolCalls = req.ParallelToolCalls

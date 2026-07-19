@@ -468,19 +468,22 @@ func TestNormalizeChatCompletionsBodyAcceptsResponsesShape(t *testing.T) {
 		t.Fatalf("normalizeChatCompletionsBody() error = %v", err)
 	}
 
-	if normalized.Instructions != "Be concise." {
-		t.Fatalf("instructions = %q, want Be concise.", normalized.Instructions)
+	if normalized.Instructions != "" {
+		t.Fatalf("instructions = %q, want empty (lifted to developer input item)", normalized.Instructions)
 	}
 	if !normalized.Stream {
 		t.Fatal("stream = false, want true")
 	}
-	if len(normalized.Input) != 1 {
-		t.Fatalf("len(input) = %d, want 1", len(normalized.Input))
+	if len(normalized.Input) != 2 {
+		t.Fatalf("len(input) = %d, want 2", len(normalized.Input))
 	}
-	if normalized.Input[0].Role != "user" {
-		t.Fatalf("input role = %q, want user", normalized.Input[0].Role)
+	if normalized.Input[0].Role != "developer" || normalized.Input[0].Content[0].Text != "Be concise." {
+		t.Fatalf("first input = %#v, want developer instructions item", normalized.Input[0])
 	}
-	if got := normalized.Input[0].Content[0].Text; got != "hello" {
+	if normalized.Input[1].Role != "user" {
+		t.Fatalf("input role = %q, want user", normalized.Input[1].Role)
+	}
+	if got := normalized.Input[1].Content[0].Text; got != "hello" {
 		t.Fatalf("input text = %q, want hello", got)
 	}
 	if len(normalized.Tools) != 1 || normalized.Tools[0].Name != "Shell" {
@@ -524,14 +527,17 @@ func TestNormalizeChatCompletionsBodyLiftsInstructionRolesFromResponsesShape(t *
 		t.Fatalf("normalizeChatCompletionsBody() error = %v", err)
 	}
 
-	if normalized.Instructions != "You are GPT-5.4." {
-		t.Fatalf("instructions = %q, want lifted system instructions", normalized.Instructions)
+	if normalized.Instructions != "" {
+		t.Fatalf("instructions = %q, want empty (lifted to developer input item)", normalized.Instructions)
 	}
-	if len(normalized.Input) != 2 {
-		t.Fatalf("len(input) = %d, want 2", len(normalized.Input))
+	if len(normalized.Input) != 3 {
+		t.Fatalf("len(input) = %d, want 3", len(normalized.Input))
 	}
-	if normalized.Input[0].Role != "user" || normalized.Input[1].Role != "user" {
-		t.Fatalf("input roles = %#v, want only user items", normalized.Input)
+	if normalized.Input[0].Role != "developer" || normalized.Input[0].Content[0].Text != "You are GPT-5.4." {
+		t.Fatalf("first input = %#v, want developer instructions item", normalized.Input[0])
+	}
+	if normalized.Input[1].Role != "user" || normalized.Input[2].Role != "user" {
+		t.Fatalf("input roles = %#v, want developer then user items", normalized.Input)
 	}
 }
 

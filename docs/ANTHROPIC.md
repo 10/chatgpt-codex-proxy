@@ -21,7 +21,7 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 
 | Anthropic input | Codex input |
 | --- | --- |
-| Top-level `system` text | `instructions` |
+| Top-level `system` text | Leading `developer` input item |
 | Message-level `system` text | User `<system-reminder>` input |
 | User text | `input_text` |
 | Assistant text or prefill | `output_text` |

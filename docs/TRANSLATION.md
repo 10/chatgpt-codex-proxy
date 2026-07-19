@@ -166,12 +166,12 @@ Whenever reasoning is enabled, the proxy also sends:
 
 ### Instructions
 
-The proxy collapses instruction-like content into one Codex `instructions` string.
+The proxy collapses instruction-like content into a single leading Codex `developer` input item, and leaves the top-level `instructions` field empty. The Codex backend reserves `instructions` for its own baseline prompt, so client-supplied instructions are sent as a `developer` turn at the front of `input` instead.
 
 - Chat Completions `system` and `developer` messages are flattened as text and joined with `\n\n`.
 - Responses `instructions` is included first if present.
-- Responses input items with `role = system` or `role = developer` and no explicit `type` are also lifted into `instructions`.
-- If no instruction text is present, the proxy sends an explicit empty `instructions` string.
+- Responses input items with `role = system` or `role = developer` and no explicit `type` are also collapsed into the same developer item.
+- The collapsed text becomes one `developer` input item placed before all other input. If no instruction text is present, no developer item is added and `instructions` is sent as an empty string.
 
 Only text-like content is allowed in lifted instruction roles. Image content is rejected with `400`.
 

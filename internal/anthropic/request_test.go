@@ -49,7 +49,7 @@ func TestNormalizeMessagesTextToolsAndThinking(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Normalize() error = %v", err)
 	}
-	if normalized.Model != "gpt-5.4" || normalized.Instructions != "Be precise." || !normalized.Stream {
+	if normalized.Model != "gpt-5.4" || normalized.Instructions != "" || !normalized.Stream {
 		t.Fatalf("normalized metadata = %#v", normalized)
 	}
 	if normalized.Reasoning == nil || normalized.Reasoning.Effort != "low" || normalized.Reasoning.Summary != "auto" {
@@ -64,14 +64,17 @@ func TestNormalizeMessagesTextToolsAndThinking(t *testing.T) {
 	if got := normalized.Tools[0].Parameters["additionalProperties"]; got != false {
 		t.Fatalf("additionalProperties = %#v, want false", got)
 	}
-	if len(normalized.Input) != 3 {
-		t.Fatalf("input len = %d, want 3: %#v", len(normalized.Input), normalized.Input)
+	if len(normalized.Input) != 4 {
+		t.Fatalf("input len = %d, want 4: %#v", len(normalized.Input), normalized.Input)
 	}
-	if normalized.Input[1].Type != "function_call" || normalized.Input[1].Arguments != `{"city":"Paris"}` {
-		t.Fatalf("tool use = %#v", normalized.Input[1])
+	if normalized.Input[0].Role != "developer" || len(normalized.Input[0].Content) != 1 || normalized.Input[0].Content[0].Text != "Be precise." {
+		t.Fatalf("instructions item = %#v, want developer input item", normalized.Input[0])
 	}
-	if normalized.Input[2].Type != "function_call_output" || normalized.Input[2].OutputText != "Sunny" {
-		t.Fatalf("tool result = %#v", normalized.Input[2])
+	if normalized.Input[2].Type != "function_call" || normalized.Input[2].Arguments != `{"city":"Paris"}` {
+		t.Fatalf("tool use = %#v", normalized.Input[2])
+	}
+	if normalized.Input[3].Type != "function_call_output" || normalized.Input[3].OutputText != "Sunny" {
+		t.Fatalf("tool result = %#v", normalized.Input[3])
 	}
 	var toolChoice string
 	if err := json.Unmarshal(normalized.ToolChoice, &toolChoice); err != nil || toolChoice != "auto" {
@@ -726,8 +729,11 @@ func TestNormalizeMessagesFiltersClaudeCodeAttributionSystemText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Normalize() error = %v", err)
 	}
-	if normalized.Instructions != "Be precise." {
-		t.Fatalf("instructions = %q, want %q", normalized.Instructions, "Be precise.")
+	if normalized.Instructions != "" {
+		t.Fatalf("instructions = %q, want empty (lifted to developer input item)", normalized.Instructions)
+	}
+	if len(normalized.Input) == 0 || normalized.Input[0].Role != "developer" || len(normalized.Input[0].Content) != 1 || normalized.Input[0].Content[0].Text != "Be precise." {
+		t.Fatalf("first input = %#v, want developer item with filtered system text", normalized.Input)
 	}
 }
 

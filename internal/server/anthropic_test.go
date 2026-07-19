@@ -36,8 +36,14 @@ func TestAnthropicMessagesNonStreaming(t *testing.T) {
 
 	app := newFailoverTestApp(t)
 	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
-		if request.Instructions != "Be brief." || len(request.Input) != 1 || request.Input[0].Content[0].Text != "Hello" {
+		if request.Instructions != "" || len(request.Input) != 2 {
 			t.Fatalf("upstream request = %#v", request)
+		}
+		if request.Input[0].Role != "developer" || request.Input[0].Content[0].Text != "Be brief." {
+			t.Fatalf("instructions item = %#v, want developer input item", request.Input[0])
+		}
+		if request.Input[1].Content[0].Text != "Hello" {
+			t.Fatalf("user item = %#v", request.Input[1])
 		}
 		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
 			"response": map[string]any{
@@ -81,16 +87,19 @@ func TestAnthropicMessagesAcceptsCurrentClaudeCodeRequestShape(t *testing.T) {
 
 	app := newFailoverTestApp(t)
 	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
-		if request.Instructions != "You are Claude Code." {
-			t.Fatalf("instructions = %q", request.Instructions)
+		if request.Instructions != "" {
+			t.Fatalf("instructions = %q, want empty (lifted to developer input item)", request.Instructions)
+		}
+		if request.Input[0].Role != "developer" || request.Input[0].Content[0].Text != "You are Claude Code." {
+			t.Fatalf("instructions item = %#v, want developer input item", request.Input[0])
 		}
 		if request.Reasoning == nil || request.Reasoning.Effort != "high" || request.Reasoning.Summary != "auto" {
 			t.Fatalf("reasoning = %#v", request.Reasoning)
 		}
-		if len(request.Input) != 2 || request.Input[1].Role != "user" {
+		if len(request.Input) != 3 || request.Input[2].Role != "user" {
 			t.Fatalf("input = %#v", request.Input)
 		}
-		if got := request.Input[1].Content[0].Text; got != "<system-reminder>\nUse the Workflow tool.\n</system-reminder>" {
+		if got := request.Input[2].Content[0].Text; got != "<system-reminder>\nUse the Workflow tool.\n</system-reminder>" {
 			t.Fatalf("system reminder = %q", got)
 		}
 		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
