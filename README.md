@@ -1,91 +1,69 @@
+<div align="center">
+
 # chatgpt-codex-proxy
 
-`chatgpt-codex-proxy` is a small Go service that lets standard OpenAI and Anthropic clients talk to ChatGPT Codex accounts.
+*Talk to ChatGPT Codex accounts using any OpenAI or Anthropic client.*
 
-It exposes OpenAI-compatible and Anthropic Messages APIs, translates requests into the private `chatgpt.com/backend-api/codex/*` format, and manages one or more locally authenticated Codex accounts.
+[![Go](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go&logoColor=white)](https://go.dev)
+[![Docker](https://img.shields.io/badge/Deploy-Compose-2496ED?style=flat&logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![API](https://img.shields.io/badge/API-OpenAI%20%2B%20Anthropic-412991?style=flat&logo=openai&logoColor=white)]()
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat)](LICENSE)
 
-The upstream Codex surface is private and undocumented. It may change at any time. This project is best suited for local or small-scale deployments.
+</div>
+
+---
+
+Codex lives behind a private API that only the official client speaks. Everything
+else — the SDKs, Claude Code, the tool you already use — speaks OpenAI or
+Anthropic.
+
+`chatgpt-codex-proxy` sits between them. It exposes OpenAI-compatible and
+Anthropic Messages endpoints, translates each request into the private
+`chatgpt.com/backend-api/codex/*` format, and routes it across one or more
+locally authenticated Codex accounts.
+
+The upstream surface is private and undocumented, so it may change without
+notice. This is built for local and small-scale deployments.
+
+## Features
+
+- **Two API surfaces, one backend** — OpenAI Chat Completions, Responses, and Images alongside Anthropic Messages, all served from the same account pool.
+- **Streaming everywhere** — SSE for HTTP, a persistent WebSocket for Responses sessions, and plain JSON when a client prefers it.
+- **Multi-account rotation** — least-used, round-robin, or sticky selection, with cooldowns, quota awareness, and per-account status.
+- **Device login onboarding** — add an account by opening a URL and polling. No cookie scraping, no hand-pasted tokens.
+- **Tool calling and structured output** — custom tools, legacy `functions` and `function_call`, `json_schema`, and `json_object`.
+- **Images** — generation and edits through Codex's native endpoints, with a Responses-tool fallback when they are unavailable.
+- **Conversation continuation** — explicit `previous_response_id`, plus guarded implicit continuation when prior history is replayed.
+- **Local state only** — accounts, OAuth tokens, and the model catalog live in JSON files you own.
 
 ## Quick Start
 
-Recommended path: Docker Compose.
-
-Requirements:
-
-- Docker Desktop or Docker Engine, or Go `1.26.x`
-- A valid `PROXY_API_KEY`
-- At least one Codex account before serving public model requests
-
-### 1. Configure
+You need Docker, or Go `1.26.x`, plus a long random string for `PROXY_API_KEY`.
 
 ```bash
-cp .env.example .env
+cp .env.example .env          # set PROXY_API_KEY
+docker compose up -d --build  # or: go run ./cmd/api
 ```
 
-Required:
-
-```env
-PROXY_API_KEY=change-me-to-a-long-random-string
-```
-
-Optional:
-
-- `PORT`
-  Default: `8080`
-- `DATA_DIR`
-  Default: `data` locally, `/app/data` in Docker
-- `DEBUG_LOG_PAYLOADS`
-  Default: `false`. Logs raw public request JSON and translated upstream payloads.
-
-Examples below assume:
+The examples below assume:
 
 ```bash
 export PROXY_URL=http://localhost:8080
 export PROXY_API_KEY=change-me-to-a-long-random-string
 ```
 
-### 2. Start the proxy
-
-Docker Compose:
-
-```bash
-docker compose up -d --build
-```
-
-Useful commands:
-
-```bash
-docker compose logs -f
-docker compose down
-```
-
-Direct Go run:
-
-```bash
-go run ./cmd/api
-```
-
-### 3. Add a Codex account
-
-Start device login:
+Add a Codex account. Start a device login, open the returned `auth_url`,
+complete it, then poll until `status` is `ready`:
 
 ```bash
 curl -sS -X POST "${PROXY_URL}/admin/accounts/device-login/start" \
   -H "Authorization: Bearer ${PROXY_API_KEY}"
-```
 
-Open the returned `auth_url`, complete the login flow, then poll:
-
-```bash
 curl -sS "${PROXY_URL}/admin/accounts/device-login/<login_id>" \
   -H "Authorization: Bearer ${PROXY_API_KEY}"
 ```
 
-When `status` becomes `ready`, the account is saved locally.
-
-### 4. Test the proxy
-
-Chat Completions:
+Then make a request:
 
 ```bash
 curl -sS "${PROXY_URL}/v1/chat/completions" \
@@ -93,83 +71,14 @@ curl -sS "${PROXY_URL}/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-5.6-sol",
-    "messages": [
-      { "role": "system", "content": "Be concise." },
-      { "role": "user", "content": "Explain what this repository does." }
-    ]
+    "messages": [{ "role": "user", "content": "Explain what this repository does." }]
   }'
 ```
 
-Responses:
+## Clients
 
-```bash
-curl -sS "${PROXY_URL}/v1/responses" \
-  -H "Authorization: Bearer ${PROXY_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-5.6-sol",
-    "input": "Summarize this project in three bullet points."
-  }'
-```
-
-Anthropic Messages:
-
-```bash
-curl -sS "${PROXY_URL}/v1/messages" \
-  -H "X-API-Key: ${PROXY_API_KEY}" \
-  -H "Anthropic-Version: 2023-06-01" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-5.6-sol",
-    "max_tokens": 1024,
-    "messages": [
-      { "role": "user", "content": "Summarize this project in three bullet points." }
-    ]
-  }'
-```
-
-Responses compact:
-
-```bash
-curl -sS "${PROXY_URL}/v1/responses/compact" \
-  -H "Authorization: Bearer ${PROXY_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-5.6-sol",
-    "input": [
-      {
-        "role": "assistant",
-        "phase": "output",
-        "content": [{"type": "output_text", "text": "Long prior answer"}]
-      },
-      {
-        "role": "user",
-        "content": "Compact this thread for the next turn."
-      }
-    ]
-  }'
-```
-
-Image generation:
-
-```bash
-curl -sS "${PROXY_URL}/v1/images/generations" \
-  -H "Authorization: Bearer ${PROXY_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-image-2",
-    "prompt": "A blue circle on a white background",
-    "size": "1024x1024",
-    "quality": "low"
-  }'
-```
-
-### 5. Point a client at it
-
-- Base URL: `http://localhost:8080/v1`
-- API key: your `PROXY_API_KEY`
-
-For an Anthropic client or Claude Code:
+Point any OpenAI client at `http://localhost:8080/v1` with your `PROXY_API_KEY`
+as the API key. For Claude Code or another Anthropic client:
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8080
@@ -177,169 +86,146 @@ export ANTHROPIC_API_KEY="${PROXY_API_KEY}"
 export ANTHROPIC_MODEL=gpt-5.6-sol
 ```
 
-Use a model ID returned by `GET /v1/models`; the proxy does not invent `claude-*` aliases for Codex models.
+Use a model ID from `GET /v1/models`. The proxy does not invent `claude-*`
+aliases for Codex models.
 
-## Authentication
+Every route except `GET /health/live` requires the key, accepted as either
+`Authorization: Bearer <key>` or `X-API-Key: <key>`. The same key protects
+public and admin routes alike.
 
-Every route except `GET /health/live` requires the proxy API key.
+## API
 
-Accepted headers:
+```
+POST /v1/completions              POST /v1/messages
+POST /v1/chat/completions         POST /v1/messages/count_tokens
+POST /v1/responses                GET  /v1/models
+GET  /v1/responses   (WebSocket)  GET  /v1/models/:model_id
+POST /v1/responses/compact        GET  /health
+POST /v1/images/generations       GET  /health/live
+POST /v1/images/edits
+```
 
-- `Authorization: Bearer <PROXY_API_KEY>`
-- `X-API-Key: <PROXY_API_KEY>`
+Text, image, and file inputs are supported, along with reasoning, hosted web
+search passthrough, and both streaming and non-streaming responses. The runtime
+model catalog is backed by the upstream Codex list.
 
-The same key protects both public and admin routes.
+Behavior worth knowing before you hit it:
 
-## Public API
-
-Routes:
-
-- `POST /v1/completions`
-- `POST /v1/chat/completions`
-- `GET /v1/responses` (WebSocket upgrade)
-- `POST /v1/responses`
-- `POST /v1/responses/compact`
-- `POST /v1/images/generations`
-- `POST /v1/images/edits`
-- `POST /v1/messages`
-- `POST /v1/messages/count_tokens`
-- `GET /v1/models`
-- `GET /v1/models/:model_id`
-- `GET /health/live`
-- `GET /health`
-
-Supported behavior:
-
-- Streaming and non-streaming responses
-- Persistent Responses WebSocket sessions with sequential `response.create` and `response.append` events
-- Legacy text Completions for a single string prompt
-- Tool calling, including custom tools
-- Legacy Chat Completions `functions` and `function_call`
-- Hosted web search passthrough
-- Structured outputs, including `json_schema` and `json_object`
-- Text, image, and file inputs
-- Reasoning support
-- Explicit `previous_response_id` continuation
-- Explicit OpenAI-style `response.compaction` support on `/v1/responses/compact`
-- Guarded implicit continuation when prior assistant or tool history is replayed
-- Runtime model catalog backed by the upstream Codex model list
-- Codex-client model metadata from `GET /v1/models?client_version=...`
-- Codex-backed image generation and editing with `gpt-image-1.5` and `gpt-image-2`
-- JSON image references and multipart image/mask uploads for edits
-- Images API partial-image streaming
-- Anthropic Messages text, image, tool-use, tool-result, thinking, structured-output, streaming, and non-streaming compatibility
-- Anthropic token-count estimates and Anthropic-shaped model discovery when `Anthropic-Version` is present
-
-Important notes:
-
+- `GET /v1/responses` is a WebSocket, not SSE. The first message must be `response.create`; later turns use `response.create` or `response.append` with array `input`. There is no `[DONE]` marker.
 - `/v1/chat/completions` also accepts a Responses-shaped body when `messages` is omitted.
-- `GET /v1/responses` is a WebSocket endpoint. The first JSON message must be `response.create`; later turns may use `response.create` or `response.append` with array `input`. The connection does not use SSE `[DONE]` markers.
-- The Chat Completions, Responses, and Responses compact JSON endpoints accept identity or zstd request bodies. Other request content encodings are rejected.
-- `/v1/responses/compact` follows the public OpenAI contract and returns `object: "response.compaction"` instead of raw Codex JSON.
-- `/v1/responses/compact` supports explicit `previous_response_id` by expanding locally stored continuation history before calling the private compact backend.
-- Compact requests currently support the same text, image, file, reasoning, tool-call, tool-output, and compaction input items used elsewhere in the proxy. Audio input is rejected locally because the current Codex upstream does not accept `input_audio` or audio MIME types as files.
-- Image requests default to `gpt-image-2` and use Codex's native `/codex/images/generations` and `/codex/images/edits` endpoints. Native JSON and SSE responses are passed through without local reconstruction.
-- Multipart edits are converted to the native JSON edit shape with data-URL image and mask references.
-- Image fields, including `n`, are forwarded to the native endpoint. Codex may report output metadata such as a different size than requested.
-- If the native endpoint returns `404`, `405`, or `501`, the proxy falls back to the Responses `image_generation` tool adapter. That fallback produces one image and returns a data URL for `response_format: "url"`.
-- Public WebSocket continuations stay on the reused upstream connection. JSON HTTP and compact continuations replay saved history locally and prefer the original account.
-- Explicit `prompt_cache_key` values are preserved. When omitted, the proxy derives a stable key when possible.
-- Some OpenAI compatibility fields are accepted and ignored. See [docs/TRANSLATION.md](docs/TRANSLATION.md) for exact behavior.
-- Anthropic requests require `Anthropic-Version: 2023-06-01`. Sampling controls, stop sequences, exact `max_tokens` truncation, and thinking budgets are accepted but are currently advisory because the private Codex request does not expose equivalent controls. See [docs/ANTHROPIC.md](docs/ANTHROPIC.md).
+- `/v1/responses/compact` returns `object: "response.compaction"` per the public OpenAI contract, and expands locally stored history for an explicit `previous_response_id`.
+- JSON endpoints accept identity or zstd request bodies. Other content encodings are rejected.
+- Images default to `gpt-image-2` on Codex's native endpoints. If those return `404`, `405`, or `501`, the proxy falls back to the Responses `image_generation` tool, which produces one image and returns a data URL for `response_format: "url"`.
+- WebSocket continuations reuse the upstream connection; HTTP and compact continuations replay saved history and prefer the original account.
+- Anthropic requests require `Anthropic-Version: 2023-06-01`. Sampling controls, stop sequences, exact `max_tokens` truncation, and thinking budgets are accepted but advisory, because the private Codex request exposes no equivalent.
+- Audio input is rejected locally — the Codex upstream does not accept `input_audio` or audio MIME types.
 
-## Admin API
+Exact translation rules live in [docs/TRANSLATION.md](docs/TRANSLATION.md) and
+[docs/ANTHROPIC.md](docs/ANTHROPIC.md).
 
-Routes:
+## Accounts
 
-- `GET /admin/accounts`
-- `POST /admin/accounts/device-login/start`
-- `GET /admin/accounts/device-login/:login_id`
-- `DELETE /admin/accounts/:account_id`
-- `PATCH /admin/accounts/:account_id`
-- `GET /admin/accounts/:account_id/usage`
-- `POST /admin/accounts/:account_id/refresh`
-- `GET /admin/rotation`
-- `PUT /admin/rotation`
+```
+GET    /admin/accounts
+POST   /admin/accounts/device-login/start
+GET    /admin/accounts/device-login/:login_id
+DELETE /admin/accounts/:account_id
+PATCH  /admin/accounts/:account_id
+GET    /admin/accounts/:account_id/usage
+POST   /admin/accounts/:account_id/refresh
+GET    /admin/rotation
+PUT    /admin/rotation
+```
 
-What it does:
+The admin API lists known accounts with their status, eligibility, cooldown, and
+cached quota; drives device login; updates an account's `label` or `status`;
+refreshes OAuth tokens; and reads or changes the rotation strategy.
 
-- Lists locally known accounts, status, eligibility, cooldown state, and cached quota
-- Starts and polls device login
-- Removes accounts or updates `label` / `status`
-- Refreshes OAuth tokens without discarding an existing refresh token when the provider does not rotate it
-- Fetches runtime or cached quota data
-- Shows or changes the global rotation strategy
+Rotation is `least_used`, `round_robin`, or `sticky`. An account is skipped when
+its status is permanent (`disabled`, `expired`, `banned`), a cooldown is active,
+its token is missing, or its primary and secondary quota are exhausted.
+`code_review_rate_limit` is tracked for observability and does not affect
+routing.
 
-Allowed rotation strategies:
+OAuth refresh failures only expire an account when the provider returns
+`invalid_grant`. Transient failures keep it active behind a 60-second cooldown.
 
-- `least_used`
-- `round_robin`
-- `sticky`
+Selection details are in
+[docs/MULTI_ACCOUNT_ROTATION_STRATEGY.md](docs/MULTI_ACCOUNT_ROTATION_STRATEGY.md).
 
-Account status values:
+## Deployment
 
-- `active`
-- `disabled`
-- `expired`
-- `banned`
+`compose.yaml` is the recommended path. It persists state in the
+`chatgpt-codex-proxy-data` volume and runs the service with basic hardening;
+`Dockerfile` is a multi-stage build of the API server on its own.
 
-General routing is blocked by permanent status, active cooldown, missing token, or exhausted primary / secondary quota. `code_review_rate_limit` is kept for observability and does not affect normal routing.
+```bash
+docker compose up -d --build
+docker compose logs -f
+docker compose down
+```
 
-OAuth refresh failures only expire an account when the provider returns `invalid_grant`. Transient refresh failures keep the account active and apply the built-in 60-second cooldown.
+Configuration is environment-only:
 
-## Deployment and Persistence
+- `PROXY_API_KEY` — required; the key for every route.
+- `PORT` — default `8080`.
+- `DATA_DIR` — default `data` locally, `/app/data` in Docker.
+- `DEBUG_LOG_PAYLOADS` — default `false`. Logs raw public request JSON and translated upstream payloads.
 
-The repository includes:
-
-- `compose.yaml`
-  Recommended deployment. Persists data in the `chatgpt-codex-proxy-data` volume and runs the service with basic hardening.
-- `Dockerfile`
-  Multi-stage image build for the API server.
-
-Local state is stored in:
-
-- `${DATA_DIR}/accounts.json`
-- `${DATA_DIR}/models-cache.json`
-
-Persisted data includes accounts, OAuth tokens, labels, status flags, cached quota, cooldown state, and the last successful model catalog snapshot.
-
-In-memory only:
-
-- Continuation mappings and conversation affinity
-- In-flight device-login coordination
+Persisted to `${DATA_DIR}` are `accounts.json` (accounts, OAuth tokens, labels,
+status, cached quota, cooldowns) and `models-cache.json` (the last good catalog
+snapshot). Continuation mappings, conversation affinity, and in-flight device
+logins are memory-only and do not survive a restart.
 
 ## How It Works
 
-1. The Gin server accepts OpenAI- or Anthropic-style requests.
-2. Public protocol adapters normalize requests into one internal turn model.
-3. The proxy selects a ready account, translates the request, and sends it to the private Codex backend over HTTP SSE or WebSocket.
-4. Upstream events are converted back into the selected public protocol's JSON or SSE format.
-
-Architecture overview:
+1. The Gin server accepts an OpenAI- or Anthropic-shaped request.
+2. Protocol adapters normalize it into one internal turn model.
+3. The proxy picks a ready account, translates the turn, and calls the private Codex backend over HTTP SSE or WebSocket.
+4. Upstream events are converted back into whichever public protocol the client asked for.
 
 <img width="4599" height="2073" alt="chatgpt-codex-proxy architecture flowchart" src="https://github.com/user-attachments/assets/05cd8446-dd4b-43bc-a3fc-eb370ad917e6" />
 
-The diagram shows the per-request translation path, local account state, and the one-time device-login onboarding flow.
+Upstream endpoints the proxy talks to:
 
-The proxy talks to:
+```
+POST https://chatgpt.com/backend-api/codex/responses
+POST https://chatgpt.com/backend-api/codex/responses/compact
+GET  https://chatgpt.com/backend-api/codex/usage
+GET  https://chatgpt.com/backend-api/codex/models
+WSS  https://chatgpt.com/backend-api/codex/responses
+     https://auth.openai.com/api/accounts/deviceauth/*
+     https://auth.openai.com/oauth/token
+```
 
-- `POST https://chatgpt.com/backend-api/codex/responses`
-- `POST https://chatgpt.com/backend-api/codex/responses/compact`
-- `GET https://chatgpt.com/backend-api/codex/usage`
-- `GET https://chatgpt.com/backend-api/codex/models`
-- `WSS https://chatgpt.com/backend-api/codex/responses`
-- `https://auth.openai.com/api/accounts/deviceauth/*`
-- `https://auth.openai.com/oauth/token`
+## Layout
 
-## Testing
+```
+chatgpt-codex-proxy/
+├── cmd/api/                  # server entrypoint
+├── internal/
+│   ├── server/               # Gin routing and handlers
+│   ├── openai/ anthropic/    # public protocol adapters
+│   ├── turn/ translate/      # internal turn model and translation
+│   ├── codex/ codexauth/     # private upstream client and OAuth
+│   ├── accounts/             # account store
+│   ├── accountmanager/       # rotation, cooldowns, quota routing
+│   ├── devicelogin/          # device-auth onboarding
+│   ├── conversation/         # continuation state and affinity
+│   ├── models/               # runtime model catalog
+│   ├── admin/ middleware/    # admin API and auth
+│   └── store/ config/        # persistence and configuration
+├── test/integration/         # live compatibility suite
+└── docs/                     # upstream and translation references
+```
 
-Unit tests:
+## Development
 
 ```bash
 go test ./...
 ```
 
-Live compatibility tests against a running local proxy:
+Live compatibility tests run against a proxy you already have up:
 
 ```bash
 OPENAI_API_KEY=change-me-to-a-long-random-string \
@@ -348,24 +234,18 @@ OPENAI_BASE_URL="${PROXY_URL}/v1" \
 go test -tags=live ./test/integration -v -count=1
 ```
 
-The live suite exercises both OpenAI and Anthropic compatibility routes.
+The live suite exercises both the OpenAI and Anthropic routes.
 
 ## Docs
 
-For the lower-level details moved out of this README:
-
-- [docs/ANTHROPIC.md](docs/ANTHROPIC.md)
-  Anthropic request mapping, streaming behavior, token counting, and compatibility limits
-- [docs/TRANSLATION.md](docs/TRANSLATION.md)
-  Exact OpenAI-to-Codex translation behavior and compatibility rules
-- [docs/MULTI_ACCOUNT_ROTATION_STRATEGY.md](docs/MULTI_ACCOUNT_ROTATION_STRATEGY.md)
-  Detailed account selection and quota-routing behavior
-- [docs/CODEX_API_DOCS.md](docs/CODEX_API_DOCS.md)
-  Private upstream Codex API behavior as inferred from this codebase
+- [docs/TRANSLATION.md](docs/TRANSLATION.md) — exact OpenAI-to-Codex translation behavior and compatibility rules
+- [docs/ANTHROPIC.md](docs/ANTHROPIC.md) — Anthropic request mapping, streaming, token counting, and limits
+- [docs/MULTI_ACCOUNT_ROTATION_STRATEGY.md](docs/MULTI_ACCOUNT_ROTATION_STRATEGY.md) — account selection and quota routing
+- [docs/CODEX_API_DOCS.md](docs/CODEX_API_DOCS.md) — private upstream Codex behavior, as inferred from this codebase
 
 ## Limitations
 
 - The upstream Codex backend is private and may change without notice.
-- Device-auth is the only onboarding flow.
-- The implementation is intentionally small and does not aim to cover every edge case of the public OpenAI platform.
-- Continuation state is in memory only and expires with the configured continuation TTL.
+- Device auth is the only onboarding flow.
+- Continuation state is in memory and expires with the configured TTL.
+- The implementation is deliberately small and does not chase every edge of the public OpenAI platform.
