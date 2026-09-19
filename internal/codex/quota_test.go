@@ -160,6 +160,62 @@ func TestQuotaFromUsageResponseKeepsOverallStateOffIndividualWindows(t *testing.
 	}
 }
 
+func TestQuotaFromUsageResponseHandlesSecondaryWindowPresence(t *testing.T) {
+	t.Parallel()
+
+	const resetAt = int64(4103049600)
+	tests := []struct {
+		name           string
+		payload        string
+		wantSecondary  bool
+		wantUsed       float64
+		wantWindowSecs int
+		wantResetAt    int64
+	}{
+		{
+			name:          "ignores an empty secondary window",
+			payload:       `{"rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":18000,"reset_at":4102444800},"secondary_window":{}}}`,
+			wantSecondary: false,
+		},
+		{
+			name:           "keeps a zero-percent secondary window with metadata",
+			payload:        `{"rate_limit":{"primary_window":{"used_percent":25,"limit_window_seconds":18000,"reset_at":4102444800},"secondary_window":{"used_percent":0,"limit_window_seconds":604800,"reset_at":4103049600}}}`,
+			wantSecondary:  true,
+			wantUsed:       0,
+			wantWindowSecs: 604800,
+			wantResetAt:    resetAt,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var usage UsageResponse
+			if err := json.Unmarshal([]byte(tc.payload), &usage); err != nil {
+				t.Fatalf("json.Unmarshal() error = %v", err)
+			}
+
+			quota := QuotaFromUsageResponse(usage)
+			if tc.wantSecondary != (quota.SecondaryRateLimit != nil) {
+				t.Fatalf("secondary_rate_limit = %#v, want present = %v", quota.SecondaryRateLimit, tc.wantSecondary)
+			}
+			if !tc.wantSecondary {
+				return
+			}
+			if quota.SecondaryRateLimit.UsedPercent == nil || *quota.SecondaryRateLimit.UsedPercent != tc.wantUsed {
+				t.Fatalf("used_percent = %#v, want %v", quota.SecondaryRateLimit.UsedPercent, tc.wantUsed)
+			}
+			if quota.SecondaryRateLimit.LimitWindowSeconds == nil || *quota.SecondaryRateLimit.LimitWindowSeconds != tc.wantWindowSecs {
+				t.Fatalf("limit_window_seconds = %#v, want %d", quota.SecondaryRateLimit.LimitWindowSeconds, tc.wantWindowSecs)
+			}
+			if quota.SecondaryRateLimit.ResetAt == nil || quota.SecondaryRateLimit.ResetAt.Unix() != tc.wantResetAt {
+				t.Fatalf("reset_at = %#v, want %d", quota.SecondaryRateLimit.ResetAt, tc.wantResetAt)
+			}
+		})
+	}
+}
+
 func TestUsageResponseIgnoresCodeReviewSecondaryWindow(t *testing.T) {
 	t.Parallel()
 

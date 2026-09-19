@@ -46,7 +46,7 @@ func QuotaFromUsageResponse(payload UsageResponse) *accounts.QuotaSnapshot {
 		FetchedAt: time.Now().UTC(),
 		RateLimit: usageWindowRateLimit(payload.RateLimit.PrimaryWindow),
 	}
-	if payload.RateLimit.SecondaryWindow != nil {
+	if usageWindowHasData(payload.RateLimit.SecondaryWindow) {
 		window := usageWindowRateLimit(payload.RateLimit.SecondaryWindow)
 		snapshot.SecondaryRateLimit = &window
 	}
@@ -213,6 +213,10 @@ func usageWindowRateLimit(window *UsageWindow) accounts.RateLimitWindow {
 	out.ResetAt = &resetAt
 	out.LimitWindowSeconds = &limitWindowSeconds
 	return out
+}
+
+func usageWindowHasData(window *UsageWindow) bool {
+	return window != nil && (window.UsedPercent != 0 || window.LimitWindowSeconds != 0 || window.ResetAt != 0)
 }
 
 func eventFloat(value any) (float64, bool) {
