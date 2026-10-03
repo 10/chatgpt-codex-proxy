@@ -857,6 +857,115 @@ func TestChatCompletionsTranslationSupportsWebSearchVariants(t *testing.T) {
 	}
 }
 
+func TestResponsesTranslationPreservesAdditionalToolsInput(t *testing.T) {
+	t.Parallel()
+
+	var request ResponsesRequest
+	if err := json.Unmarshal([]byte(`{
+		"model": "gpt-5.6-terra",
+		"input": [
+			{
+				"type": "additional_tools",
+				"role": "developer",
+				"id": "at_123",
+				"tools": [
+					{
+						"type": "namespace",
+						"name": "collaboration",
+						"description": "Multi-agent tools",
+						"tools": [
+							{
+								"type": "function",
+								"name": "spawn_agent",
+								"parameters": {"type": "object"}
+							}
+						]
+					}
+				]
+			},
+			{
+				"type": "message",
+				"role": "user",
+				"content": [{"type": "input_text", "text": "hello"}]
+			}
+		]
+	}`), &request); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	normalized, err := Responses(request, nil)
+	if err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
+	if len(normalized.Input) != 2 {
+		t.Fatalf("input len = %d, want 2", len(normalized.Input))
+	}
+
+	payload, err := json.Marshal(normalized.Request)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var outgoing struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(payload, &outgoing); err != nil {
+		t.Fatalf("outgoing request unmarshal error = %v", err)
+	}
+	additional := outgoing.Input[0]
+	if additional["type"] != "additional_tools" || additional["role"] != "developer" || additional["id"] != "at_123" {
+		t.Fatalf("outgoing input[0] = %#v", additional)
+	}
+	if _, exists := additional["content"]; exists {
+		t.Fatalf("additional_tools content = %#v, want omitted", additional["content"])
+	}
+	tools, ok := additional["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("additional_tools tools = %#v, want one tool", additional["tools"])
+	}
+	namespace, _ := tools[0].(map[string]any)
+	children, ok := namespace["tools"].([]any)
+	if !ok || len(children) != 1 {
+		t.Fatalf("namespace tools = %#v, want one nested tool", namespace["tools"])
+	}
+}
+
+func TestResponsesTranslationForwardsUntranslatedItemsVerbatim(t *testing.T) {
+	t.Parallel()
+
+	items := []string{
+		`{"type":"additional_tools","role":"developer","tools":[{"type":"namespace","name":"functions","description":"","tools":[]}]}`,
+		`{"type":"compaction_trigger"}`,
+		`{"type":"agent_message","author":"/root/worker","recipient":"/root","content":[{"type":"input_text","text":"done"}]}`,
+	}
+	var request ResponsesRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-5.6-terra","input":[`+strings.Join(items, ",")+`]}`), &request); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	normalized, err := Responses(request, nil)
+	if err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
+	payload, err := json.Marshal(normalized.Request)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var outgoing struct {
+		Input []json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(payload, &outgoing); err != nil {
+		t.Fatalf("outgoing request unmarshal error = %v", err)
+	}
+	if len(outgoing.Input) != len(items) {
+		t.Fatalf("outgoing input len = %d, want %d", len(outgoing.Input), len(items))
+	}
+	for index, want := range items {
+		if got := string(outgoing.Input[index]); got != want {
+			t.Fatalf("outgoing input[%d] = %s, want %s", index, got, want)
+		}
+	}
+}
+
 func TestResponsesTranslationAcceptsAssistantOutputTextReplay(t *testing.T) {
 	t.Parallel()
 

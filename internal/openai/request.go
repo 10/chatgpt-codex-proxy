@@ -394,6 +394,12 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, to
 			EncryptedContent: strings.TrimSpace(item.EncryptedContent),
 		})
 	default:
+		if len(item.Raw) > 0 {
+			// Codex-native items (additional_tools, compaction_trigger, ...) are
+			// already in upstream shape, so forward them untouched.
+			*out = append(*out, codex.InputItem{Type: item.Type, Raw: item.Raw})
+			return nil
+		}
 		role := item.Role
 		if role == "" {
 			role = "user"

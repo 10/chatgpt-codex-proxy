@@ -227,6 +227,7 @@ type ResponsesInputItem struct {
 	Status           string          `json:"status,omitempty"`
 	Summary          []ReasoningPart `json:"summary,omitempty"`
 	EncryptedContent string          `json:"encrypted_content,omitempty"`
+	Raw              json.RawMessage `json:"-"`
 }
 
 func (r *ResponsesInputItem) UnmarshalJSON(data []byte) error {
@@ -239,6 +240,9 @@ func (r *ResponsesInputItem) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*r = ResponsesInputItem(raw.alias)
+	if r.Type != "" && r.Type != "message" {
+		r.Raw = bytes.Clone(data)
+	}
 
 	outputText, outputContent, err := decodeResponsesOutput(raw.Output)
 	if err != nil {

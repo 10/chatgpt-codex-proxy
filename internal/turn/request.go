@@ -50,9 +50,13 @@ type InputItem struct {
 	Status           string          `json:"status,omitempty"`
 	Summary          []ReasoningPart `json:"summary,omitempty"`
 	EncryptedContent string          `json:"encrypted_content,omitempty"`
+	Raw              json.RawMessage `json:"-"`
 }
 
 func (i InputItem) MarshalJSON() ([]byte, error) {
+	if len(i.Raw) > 0 {
+		return i.Raw, nil
+	}
 	payload := map[string]any{}
 	if i.Role != "" {
 		payload["role"] = i.Role

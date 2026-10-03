@@ -245,6 +245,7 @@ Responses input is converted like this:
 - `compaction` items preserve:
   - `id`
   - `encrypted_content`
+- Any other item with a `type` other than `message` is forwarded to the Codex backend unchanged. This covers Codex-native items such as `additional_tools`, `compaction_trigger`, `agent_message`, and `local_shell_call`.
 - Generic role/content items preserve `phase` when present so assistant output messages can be replayed through compaction.
 
 ### Tool Definitions
