@@ -39,58 +39,34 @@ func selectLeastUsed(candidates []*Record, index *int) *Record {
 	return selected
 }
 
+// compareLeastUsedQuota ranks accounts by the limit they are closest to
+// hitting. Windows are ordered by usage rather than by the primary/secondary
+// slot, because upstream reports a 7-day window as primary for some plans.
 func compareLeastUsedQuota(a, b *Record) int {
-	aQuota := a.CachedQuota
-	bQuota := b.CachedQuota
-
-	aPrimary := primaryPercent(aQuota)
-	bPrimary := primaryPercent(bQuota)
-	switch {
-	case aPrimary < bPrimary:
-		return -1
-	case aPrimary > bPrimary:
-		return 1
-	}
-
-	aSecondary, aHasSecondary := secondaryPercent(aQuota)
-	bSecondary, bHasSecondary := secondaryPercent(bQuota)
-	if aHasSecondary && bHasSecondary {
-		switch {
-		case aSecondary < bSecondary:
-			return -1
-		case aSecondary > bSecondary:
-			return 1
+	aWindows := windowsByUsage(a.CachedQuota)
+	bWindows := windowsByUsage(b.CachedQuota)
+	for i := range min(len(aWindows), len(bWindows)) {
+		if order := cmp.Compare(*aWindows[i].UsedPercent, *bWindows[i].UsedPercent); order != 0 {
+			return order
 		}
 	}
-
-	aReset, aHasReset := primaryReset(aQuota)
-	bReset, bHasReset := primaryReset(bQuota)
-	if aHasReset && bHasReset {
-		return aReset.Compare(bReset)
+	if aWindows[0].ResetAt != nil && bWindows[0].ResetAt != nil {
+		return aWindows[0].ResetAt.Compare(*bWindows[0].ResetAt)
 	}
-
 	return 0
 }
 
-func primaryPercent(snapshot *QuotaSnapshot) float64 {
-	if snapshot == nil || snapshot.RateLimit.UsedPercent == nil {
-		return 0
+func windowsByUsage(snapshot *QuotaSnapshot) []*RateLimitWindow {
+	windows := make([]*RateLimitWindow, 0, 2)
+	for _, window := range []*RateLimitWindow{&snapshot.RateLimit, snapshot.SecondaryRateLimit} {
+		if window != nil && window.UsedPercent != nil {
+			windows = append(windows, window)
+		}
 	}
-	return *snapshot.RateLimit.UsedPercent
-}
-
-func secondaryPercent(snapshot *QuotaSnapshot) (float64, bool) {
-	if snapshot == nil || snapshot.SecondaryRateLimit == nil || snapshot.SecondaryRateLimit.UsedPercent == nil {
-		return 0, false
-	}
-	return *snapshot.SecondaryRateLimit.UsedPercent, true
-}
-
-func primaryReset(snapshot *QuotaSnapshot) (time.Time, bool) {
-	if snapshot == nil || snapshot.RateLimit.ResetAt == nil {
-		return time.Time{}, false
-	}
-	return snapshot.RateLimit.ResetAt.UTC(), true
+	slices.SortStableFunc(windows, func(a, b *RateLimitWindow) int {
+		return cmp.Compare(*b.UsedPercent, *a.UsedPercent)
+	})
+	return windows
 }
 
 func normalizeQuotaSnapshot(snapshot *QuotaSnapshot, now time.Time) bool {
@@ -107,9 +83,11 @@ func normalizeRateLimitWindow(window *RateLimitWindow, now time.Time) bool {
 	if window == nil || window.ResetAt == nil || window.ResetAt.After(now) {
 		return false
 	}
+	// A window that has reset starts again at zero usage.
+	zero := 0.0
 	window.Allowed = true
 	window.LimitReached = false
-	window.UsedPercent = nil
+	window.UsedPercent = &zero
 	window.ResetAt = nil
 	return true
 }

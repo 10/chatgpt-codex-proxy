@@ -42,6 +42,66 @@ func TestLeastUsedPrefersLowerPrimaryUsedPercent(t *testing.T) {
 	}
 }
 
+func TestLeastUsedComparesMostUsedWindowRegardlessOfSlot(t *testing.T) {
+	t.Parallel()
+
+	const (
+		fiveHours = 5 * 60 * 60
+		oneWeek   = 7 * 24 * 60 * 60
+	)
+	weeklyLight := recordWithQuota("acct_weekly_light", 81, nil)
+	weeklyLight.CachedQuota.RateLimit.LimitWindowSeconds = intPointer(oneWeek)
+
+	weeklyBusyPercent := 90.0
+	shortLight := recordWithQuota("acct_short_light", 10, &weeklyBusyPercent)
+	shortLight.CachedQuota.RateLimit.LimitWindowSeconds = intPointer(fiveHours)
+	shortLight.CachedQuota.SecondaryRateLimit.LimitWindowSeconds = intPointer(oneWeek)
+
+	svc := newTestService(t, RotationLeastUsed, weeklyLight, shortLight)
+	record, err := svc.Acquire("")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	if record.ID != "acct_weekly_light" {
+		t.Fatalf("Acquire() = %q, want acct_weekly_light based on weekly quota", record.ID)
+	}
+}
+
+func TestLeastUsedPrefersAccountFurthestFromAnyLimit(t *testing.T) {
+	t.Parallel()
+
+	weeklyHeadroomPercent := 30.0
+	shortBusy := recordWithQuota("acct_short_busy", 70, &weeklyHeadroomPercent)
+	weeklyBusyPercent := 75.0
+	weeklyBusy := recordWithQuota("acct_weekly_busy", 40, &weeklyBusyPercent)
+
+	svc := newTestService(t, RotationLeastUsed, shortBusy, weeklyBusy)
+	record, err := svc.Acquire("")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	if record.ID != "acct_short_busy" {
+		t.Fatalf("Acquire() = %q, want acct_short_busy because its tightest window is 70%% vs 75%%", record.ID)
+	}
+}
+
+func TestLeastUsedTreatsResetWindowAsUnused(t *testing.T) {
+	t.Parallel()
+
+	reset := recordWithQuota("acct_reset", 95, nil)
+	resetAt := time.Now().UTC().Add(-time.Minute)
+	reset.CachedQuota.RateLimit.ResetAt = &resetAt
+
+	svc := newTestService(t, RotationLeastUsed, reset, recordWithQuota("acct_busy", 60, nil))
+	record, err := svc.Acquire("")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	if record.ID != "acct_reset" {
+		t.Fatalf("Acquire() = %q, want acct_reset because its window has reset", record.ID)
+	}
+}
+
 func TestLeastUsedUsesSecondaryUsedPercentAsTieBreaker(t *testing.T) {
 	t.Parallel()
 
@@ -576,6 +636,10 @@ func recordWithQuota(id string, primary float64, secondary *float64) *Record {
 		}
 	}
 	return record
+}
+
+func intPointer(value int) *int {
+	return &value
 }
 
 type testJWTClaims struct {

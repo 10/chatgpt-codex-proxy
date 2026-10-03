@@ -119,13 +119,13 @@ These fields do not influence normal account selection:
 
 Whenever accounts are loaded or refreshed, the proxy normalizes expired quota windows.
 
-If a quota window has a `reset_at` in the past, the proxy clears:
+If a quota window has a `reset_at` in the past, the proxy:
 
-- `limit_reached`
-- `used_percent`
-- `reset_at`
+- clears `limit_reached`
+- sets `used_percent` to `0`
+- clears `reset_at`
 
-This prevents stale quota snapshots from blocking routing forever.
+This prevents stale quota snapshots from blocking routing forever, and lets `least_used` treat a freshly reset account as unused instead of as an account with unknown quota.
 
 This normalization applies to:
 
@@ -218,12 +218,14 @@ The strategy falls back to `round_robin` across eligible accounts.
 
 ### Step 3: Rank eligible accounts that have usable cached quota
 
-The comparator is applied in this exact order:
+Each account is ranked by the limit it is closest to hitting. The proxy orders an account's primary and secondary windows from most used to least used, then compares accounts in this exact order:
 
-1. Lower primary `used_percent`
-2. Lower secondary `used_percent`, but only when both accounts have secondary values
-3. Earlier primary `reset_at`, but only when both accounts have primary reset values
-4. If still tied, they are treated as equal-best candidates and the proxy round-robins among the tied subset
+1. Lower `used_percent` on the most-used window
+2. Lower `used_percent` on the next window, when both accounts have one
+3. Earlier `reset_at` on the most-used window, when both accounts have one
+4. If still tied, round-robin among the tied subset
+
+The primary or secondary slot of a window does not matter. Upstream reports a 5-hour window as primary for some plans and a 7-day window as primary for others, so the proxy compares how close each account is to any limit rather than comparing slot to slot.
 
 Accounts without usable cached quota are not compared against the ranked group at all. They are fallback candidates only, behind all eligible accounts that have primary `used_percent`.
 
@@ -235,38 +237,39 @@ Accounts without usable cached quota are not compared against the ranked group a
 - Token counts are ignored
 - `last_error` is ignored unless it corresponds to current ineligibility through cooldown or permanent status
 
-### Example 1: Lower primary usage wins
+### Example 1: The account furthest from its tightest limit wins
 
 Eligible accounts:
 
-- `acct_a`: primary `used_percent = 78`
-- `acct_b`: primary `used_percent = 32`
+- `acct_a`: primary 7-day `used_percent = 81`
+- `acct_b`: primary 5-hour `used_percent = 10`, secondary 7-day `used_percent = 90`
 
 Selection:
 
-- `acct_b` wins because `32 < 78`
+- `acct_a` wins because its most-used window is at `81`, while `acct_b`'s most-used window is at `90`
+- `acct_b`'s 5-hour value is not compared with `acct_a`'s 7-day value just because both are in the primary slot
 
-### Example 2: Primary tie, secondary breaks the tie
+### Example 2: The next window breaks a tie
 
 Eligible accounts:
 
-- `acct_a`: primary `50`, secondary `80`
-- `acct_b`: primary `50`, secondary `20`
+- `acct_a`: 5-hour `50`, 7-day `80`
+- `acct_b`: 5-hour `20`, 7-day `80`
 
 Selection:
 
-- `acct_b` wins because the primary usage is tied and secondary usage is lower
+- `acct_b` wins because both most-used windows are at `80` and its next window is lower
 
-### Example 3: Primary and secondary tie, earlier reset wins
+### Example 3: Usage ties, earlier reset wins
 
 Eligible accounts:
 
-- `acct_a`: primary `70`, reset at `12:30`
-- `acct_b`: primary `70`, reset at `12:10`
+- `acct_a`: 5-hour `70`, reset at `12:30`
+- `acct_b`: 5-hour `70`, reset at `12:10`
 
 Selection:
 
-- `acct_b` wins because the primary reset is earlier
+- `acct_b` wins because its most-used window resets earlier
 
 ### Example 4: Exact tie
 
