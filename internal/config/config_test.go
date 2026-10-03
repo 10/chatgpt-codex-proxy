@@ -61,8 +61,8 @@ func TestLoadBuildsListenAddrAndDataDir(t *testing.T) {
 			if cfg.ListenAddr != tc.wantListen {
 				t.Fatalf("Load() listen addr = %q, want %q", cfg.ListenAddr, tc.wantListen)
 			}
-			if cfg.DefaultModel != "gpt-6-astra" {
-				t.Fatalf("Load() default model = %q, want gpt-6-astra", cfg.DefaultModel)
+			if cfg.DefaultModel != "gpt-6.1-sol" {
+				t.Fatalf("Load() default model = %q, want gpt-6.1-sol", cfg.DefaultModel)
 			}
 			wantDataDir := filepath.Join(cwd, tc.wantData)
 			if cfg.DataDir != wantDataDir {

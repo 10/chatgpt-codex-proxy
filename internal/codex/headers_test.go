@@ -7,7 +7,7 @@ import (
 func TestBuildHeadersUsesDesktopIdentity(t *testing.T) {
 	headers := BuildHeaders("token", HeaderOptions{IncludeBeta: true})
 
-	if got := headers.Get("User-Agent"); got != "Codex Desktop/26.901.51231 (win32; x64)" {
+	if got := headers.Get("User-Agent"); got != "Codex Desktop/26.930.21537 (Windows NT 10.0; x64)" {
 		t.Fatalf("unexpected user-agent: %q", got)
 	}
 	if got := headers.Get("sec-ch-ua"); got != `"Chromium";v="149", "Not:A-Brand";v="24"` {

@@ -65,7 +65,7 @@ func Load() (Config, error) {
 		DataDir:          dataDir,
 		ProxyAPIKey:      strings.TrimSpace(os.Getenv("PROXY_API_KEY")),
 		DebugLogPayloads: debugLogPayloads,
-		DefaultModel:     "gpt-6-astra",
+		DefaultModel:     "gpt-6.1-sol",
 		CodexBaseURL:     "https://chatgpt.com/backend-api",
 		AuthIssuer:       "https://auth.openai.com",
 		OAuthClientID:    "app_EMoamEEZ73f0CkXaXp7hrann",

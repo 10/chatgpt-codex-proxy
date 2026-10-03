@@ -7,12 +7,23 @@ var bootstrapReasoningEfforts = []ReasoningEffort{
 	{ReasoningEffort: "xhigh", Description: "Extra high reasoning depth"},
 }
 
-// Codex limits differ from the public API. Source: openai/codex rust-v0.153.4,
+// Codex limits differ from the public API. Source: openai/codex rust-v0.160.0,
 // codex-rs/models-manager/models.json. Fetched account metadata takes precedence.
 var bootstrapEntries = []Entry{
-	bootstrapEntry("gpt-6-astra", true, "low", 872000,
+	bootstrapEntry("gpt-6.1-sol", true, "low", 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
 		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
+	),
+	bootstrapEntry("gpt-6-astra", false, "low", 872000,
+		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
+		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
+	),
+	bootstrapEntry("gpt-6-sol", false, "medium", 872000,
+		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
+		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
+	),
+	bootstrapEntry("gpt-6-luna", false, "medium", 872000,
+		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
 	),
 	bootstrapEntry("gpt-5.6-sol", false, "low", 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},

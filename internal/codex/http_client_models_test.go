@@ -100,7 +100,7 @@ func TestCodexModelsURL(t *testing.T) {
 	t.Parallel()
 
 	client := NewHTTPClient(config.Config{CodexBaseURL: "https://chatgpt.com/backend-api"})
-	want := "https://chatgpt.com/backend-api/codex/models?client_version=26.901.51231"
+	want := "https://chatgpt.com/backend-api/codex/models?client_version=26.930.21537"
 	if got := client.codexModelsURL(); got != want {
 		t.Fatalf("codexModelsURL() = %q, want %q", got, want)
 	}
