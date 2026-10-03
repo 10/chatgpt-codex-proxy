@@ -119,13 +119,13 @@ These fields do not influence normal account selection:
 
 Whenever accounts are loaded or refreshed, the proxy normalizes expired quota windows.
 
-If a quota window has a `reset_at` in the past, the proxy clears:
+If a quota window has a `reset_at` in the past, the proxy:
 
-- `limit_reached`
-- `used_percent`
-- `reset_at`
+- clears `limit_reached`
+- sets `used_percent` to `0`
+- clears `reset_at`
 
-This prevents stale quota snapshots from blocking routing forever.
+This prevents stale quota snapshots from blocking routing forever, and lets `least_used` treat a freshly reset account as unused instead of as an account with unknown quota.
 
 This normalization applies to:
 

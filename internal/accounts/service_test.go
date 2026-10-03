@@ -85,6 +85,23 @@ func TestLeastUsedPrefersAccountFurthestFromAnyLimit(t *testing.T) {
 	}
 }
 
+func TestLeastUsedTreatsResetWindowAsUnused(t *testing.T) {
+	t.Parallel()
+
+	reset := recordWithQuota("acct_reset", 95, nil)
+	resetAt := time.Now().UTC().Add(-time.Minute)
+	reset.CachedQuota.RateLimit.ResetAt = &resetAt
+
+	svc := newTestService(t, RotationLeastUsed, reset, recordWithQuota("acct_busy", 60, nil))
+	record, err := svc.Acquire("")
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	if record.ID != "acct_reset" {
+		t.Fatalf("Acquire() = %q, want acct_reset because its window has reset", record.ID)
+	}
+}
+
 func TestLeastUsedUsesSecondaryUsedPercentAsTieBreaker(t *testing.T) {
 	t.Parallel()
 

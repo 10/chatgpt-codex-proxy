@@ -83,9 +83,11 @@ func normalizeRateLimitWindow(window *RateLimitWindow, now time.Time) bool {
 	if window == nil || window.ResetAt == nil || window.ResetAt.After(now) {
 		return false
 	}
+	// A window that has reset starts again at zero usage.
+	zero := 0.0
 	window.Allowed = true
 	window.LimitReached = false
-	window.UsedPercent = nil
+	window.UsedPercent = &zero
 	window.ResetAt = nil
 	return true
 }
