@@ -44,14 +44,14 @@ func QuotaFromUsageResponse(payload UsageResponse) *accounts.QuotaSnapshot {
 		PlanType:  payload.PlanType,
 		Source:    "usage_endpoint",
 		FetchedAt: time.Now().UTC(),
-		RateLimit: usageWindowRateLimit(payload.RateLimit.PrimaryWindow, payload.RateLimit.Allowed, payload.RateLimit.LimitReached),
+		RateLimit: usageWindowRateLimit(payload.RateLimit.PrimaryWindow),
 	}
-	if payload.RateLimit.SecondaryWindow != nil {
-		window := usageWindowRateLimit(payload.RateLimit.SecondaryWindow, true, payload.RateLimit.SecondaryWindow.UsedPercent >= 100)
+	if usageWindowHasData(payload.RateLimit.SecondaryWindow) {
+		window := usageWindowRateLimit(payload.RateLimit.SecondaryWindow)
 		snapshot.SecondaryRateLimit = &window
 	}
 	if payload.CodeReviewRateLimit != nil {
-		window := usageWindowRateLimit(payload.CodeReviewRateLimit.PrimaryWindow, payload.CodeReviewRateLimit.Allowed, payload.CodeReviewRateLimit.LimitReached)
+		window := usageWindowRateLimit(payload.CodeReviewRateLimit.PrimaryWindow)
 		snapshot.CodeReviewRateLimit = &window
 	}
 	if payload.Credits != nil {
@@ -200,14 +200,12 @@ func parseCreditsFromUsage(value *UsageResponseCredits) *accounts.CreditsSnapsho
 	return credits
 }
 
-func usageWindowRateLimit(window *UsageWindow, allowed, limitReached bool) accounts.RateLimitWindow {
-	out := accounts.RateLimitWindow{
-		Allowed:      allowed,
-		LimitReached: limitReached,
-	}
+func usageWindowRateLimit(window *UsageWindow) accounts.RateLimitWindow {
+	out := accounts.RateLimitWindow{Allowed: true}
 	if window == nil {
 		return out
 	}
+	out.LimitReached = window.UsedPercent >= 100
 	usedPercent := window.UsedPercent
 	resetAt := time.Unix(window.ResetAt, 0).UTC()
 	limitWindowSeconds := window.LimitWindowSeconds
@@ -215,6 +213,10 @@ func usageWindowRateLimit(window *UsageWindow, allowed, limitReached bool) accou
 	out.ResetAt = &resetAt
 	out.LimitWindowSeconds = &limitWindowSeconds
 	return out
+}
+
+func usageWindowHasData(window *UsageWindow) bool {
+	return window != nil && (window.UsedPercent != 0 || window.LimitWindowSeconds != 0 || window.ResetAt != 0)
 }
 
 func eventFloat(value any) (float64, bool) {
