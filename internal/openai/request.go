@@ -393,16 +393,12 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, to
 			ID:               strings.TrimSpace(item.ID),
 			EncryptedContent: strings.TrimSpace(item.EncryptedContent),
 		})
-	case "additional_tools":
-		*out = append(*out, codex.InputItem{
-			Type:  "additional_tools",
-			Role:  strings.TrimSpace(item.Role),
-			ID:    strings.TrimSpace(item.ID),
-			Tools: normalizeAdditionalTools(item.Tools),
-		})
 	default:
-		if item.Type != "" && item.Type != "message" {
-			return fmt.Errorf("unsupported response input item type %q", item.Type)
+		if len(item.Raw) > 0 {
+			// Codex-native items (additional_tools, compaction_trigger, ...) are
+			// already in upstream shape, so forward them untouched.
+			*out = append(*out, codex.InputItem{Type: item.Type, Raw: item.Raw})
+			return nil
 		}
 		role := item.Role
 		if role == "" {
@@ -411,28 +407,6 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, to
 		return appendRoleContentInput(out, role, item.Phase, item.Content)
 	}
 	return nil
-}
-
-func normalizeAdditionalTools(tools []ToolDefinition) []codex.Tool {
-	if len(tools) == 0 {
-		return nil
-	}
-
-	result := make([]codex.Tool, len(tools))
-	copy(result, tools)
-	for index := range result {
-		if result[index].Type != "namespace" || strings.TrimSpace(result[index].Description) != "" {
-			continue
-		}
-
-		name := strings.TrimSpace(result[index].Name)
-		if name == "" {
-			result[index].Description = "Dynamic tool namespace"
-			continue
-		}
-		result[index].Description = "Tools in the " + name + " namespace."
-	}
-	return result
 }
 
 func appendInstructionText(instructions *[]string, content MessageContent) error {

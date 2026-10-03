@@ -36,24 +36,27 @@ type TextConfig struct {
 }
 
 type InputItem struct {
-	Role             string           `json:"role,omitempty"`
-	Type             string           `json:"type,omitempty"`
-	Phase            string           `json:"phase,omitempty"`
-	Content          []ContentPart    `json:"content,omitempty"`
-	CallID           string           `json:"call_id,omitempty"`
-	Name             string           `json:"name,omitempty"`
-	Input            string           `json:"input,omitempty"`
-	Arguments        string           `json:"arguments,omitempty"`
-	OutputText       string           `json:"-"`
-	OutputContent    []ContentPart    `json:"-"`
-	ID               string           `json:"id,omitempty"`
-	Status           string           `json:"status,omitempty"`
-	Summary          []ReasoningPart  `json:"summary,omitempty"`
-	EncryptedContent string           `json:"encrypted_content,omitempty"`
-	Tools            []ToolDefinition `json:"tools,omitempty"`
+	Role             string          `json:"role,omitempty"`
+	Type             string          `json:"type,omitempty"`
+	Phase            string          `json:"phase,omitempty"`
+	Content          []ContentPart   `json:"content,omitempty"`
+	CallID           string          `json:"call_id,omitempty"`
+	Name             string          `json:"name,omitempty"`
+	Input            string          `json:"input,omitempty"`
+	Arguments        string          `json:"arguments,omitempty"`
+	OutputText       string          `json:"-"`
+	OutputContent    []ContentPart   `json:"-"`
+	ID               string          `json:"id,omitempty"`
+	Status           string          `json:"status,omitempty"`
+	Summary          []ReasoningPart `json:"summary,omitempty"`
+	EncryptedContent string          `json:"encrypted_content,omitempty"`
+	Raw              json.RawMessage `json:"-"`
 }
 
 func (i InputItem) MarshalJSON() ([]byte, error) {
+	if len(i.Raw) > 0 {
+		return i.Raw, nil
+	}
 	payload := map[string]any{}
 	if i.Role != "" {
 		payload["role"] = i.Role
@@ -63,9 +66,6 @@ func (i InputItem) MarshalJSON() ([]byte, error) {
 	}
 	if i.Phase != "" {
 		payload["phase"] = i.Phase
-	}
-	if len(i.Tools) > 0 {
-		payload["tools"] = i.Tools
 	}
 	appendInputItemContent(payload, i)
 	if i.CallID != "" {

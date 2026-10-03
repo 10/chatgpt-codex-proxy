@@ -900,9 +900,6 @@ func TestResponsesTranslationPreservesAdditionalToolsInput(t *testing.T) {
 	if len(normalized.Input) != 2 {
 		t.Fatalf("input len = %d, want 2", len(normalized.Input))
 	}
-	if item := normalized.Input[0]; item.Type != "additional_tools" || item.Role != "developer" || item.ID != "at_123" || len(item.Tools) != 1 {
-		t.Fatalf("input[0] = %#v, want preserved additional_tools item", item)
-	}
 
 	payload, err := json.Marshal(normalized.Request)
 	if err != nil {
@@ -932,23 +929,16 @@ func TestResponsesTranslationPreservesAdditionalToolsInput(t *testing.T) {
 	}
 }
 
-func TestResponsesTranslationAddsMissingAdditionalToolsNamespaceDescription(t *testing.T) {
+func TestResponsesTranslationForwardsUntranslatedItemsVerbatim(t *testing.T) {
 	t.Parallel()
 
+	items := []string{
+		`{"type":"additional_tools","role":"developer","tools":[{"type":"namespace","name":"functions","description":"","tools":[]}]}`,
+		`{"type":"compaction_trigger"}`,
+		`{"type":"agent_message","author":"/root/worker","recipient":"/root","content":[{"type":"input_text","text":"done"}]}`,
+	}
 	var request ResponsesRequest
-	if err := json.Unmarshal([]byte(`{
-		"model": "gpt-5.6-terra",
-		"input": [{
-			"type": "additional_tools",
-			"role": "developer",
-			"id": "at_123",
-			"tools": [{
-				"type": "namespace",
-				"name": "collaboration",
-				"tools": []
-			}]
-		}]
-	}`), &request); err != nil {
+	if err := json.Unmarshal([]byte(`{"model":"gpt-5.6-terra","input":[`+strings.Join(items, ",")+`]}`), &request); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 
@@ -956,19 +946,23 @@ func TestResponsesTranslationAddsMissingAdditionalToolsNamespaceDescription(t *t
 	if err != nil {
 		t.Fatalf("Responses() error = %v", err)
 	}
-	if got := normalized.Input[0].Tools[0].Description; got != "Tools in the collaboration namespace." {
-		t.Fatalf("namespace description = %q, want fallback description", got)
+	payload, err := json.Marshal(normalized.Request)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
 	}
-}
-
-func TestResponsesTranslationRejectsUnknownInputItemType(t *testing.T) {
-	t.Parallel()
-
-	_, err := Responses(ResponsesRequest{
-		Input: ResponsesInput{Items: []ResponsesInputItem{{Type: "future_item"}}},
-	}, nil)
-	if err == nil || err.Error() != `unsupported response input item type "future_item"` {
-		t.Fatalf("Responses() error = %v, want unsupported item type", err)
+	var outgoing struct {
+		Input []json.RawMessage `json:"input"`
+	}
+	if err := json.Unmarshal(payload, &outgoing); err != nil {
+		t.Fatalf("outgoing request unmarshal error = %v", err)
+	}
+	if len(outgoing.Input) != len(items) {
+		t.Fatalf("outgoing input len = %d, want %d", len(outgoing.Input), len(items))
+	}
+	for index, want := range items {
+		if got := string(outgoing.Input[index]); got != want {
+			t.Fatalf("outgoing input[%d] = %s, want %s", index, got, want)
+		}
 	}
 }
 
