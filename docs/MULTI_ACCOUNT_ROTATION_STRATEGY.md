@@ -4,7 +4,7 @@ This document explains exactly how account rotation works in `chatgpt-codex-prox
 
 Model availability is fetched and cached per account. Accounts on the same plan
 can have different rollout or
-workspace access, including GPT-6 Astra. Explicit model requests are routed only
+workspace access, including GPT-6.1 Sol. Explicit model requests are routed only
 to accounts whose fetched catalog contains that model; until discovery succeeds,
 the bootstrap catalog applies.
 

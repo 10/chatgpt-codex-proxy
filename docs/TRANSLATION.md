@@ -147,16 +147,17 @@ Image options are passed through, not simulated locally. Live direct-endpoint te
 
 Model normalization does not rewrite user-supplied model IDs.
 
-The bootstrap catalog includes `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`,
-`gpt-5.6-luna`, `gpt-5.5`, and `gpt-5.3-codex-spark`. Astra and Sol advertise a
-`low` default reasoning level; the proxy's default model is Astra. Astra
+The bootstrap catalog includes `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`,
+`gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, and
+`gpt-5.3-codex-spark`. GPT-6.1 Sol, Astra, and GPT-5.6 Sol advertise a `low`
+default reasoning level; the proxy's default model is GPT-6.1 Sol. GPT-6.1 Sol
 accepts the Codex effort levels `low`, `medium`, `high`, `xhigh`, `max`, and
 `ultra`.
 
 Model discovery records access per account, including accounts on the same plan.
 Model limits and reasoning metadata from upstream are cached and returned to Codex
-clients requesting `/v1/models?client_version=...`. The bundled Astra context
-limits are 272,000 by default and 872,000 maximum; these are Codex client limits,
+clients requesting `/v1/models?client_version=...`. The bundled GPT-6.1 Sol
+context limits are 272,000 by default and 872,000 maximum; these are Codex client limits,
 not the public API's advertised context size.
 
 - If a model is explicitly supplied, it must exist in the current model catalog.

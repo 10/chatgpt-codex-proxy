@@ -74,7 +74,7 @@ func TestAdminEndpointLifecycle(t *testing.T) {
 		}
 	}))
 	defer oauthServer.Close()
-	cfg := config.Config{ProxyAPIKey: "test-key", DefaultModel: "gpt-6-astra", AuthIssuer: oauthServer.URL, OAuthClientID: "test-client", RequestTimeout: time.Second, LoginTimeout: 10 * time.Second}
+	cfg := config.Config{ProxyAPIKey: "test-key", DefaultModel: "gpt-6.1-sol", AuthIssuer: oauthServer.URL, OAuthClientID: "test-client", RequestTimeout: time.Second, LoginTimeout: 10 * time.Second}
 	svc := newServerAccounts(t, &accounts.Record{ID: "acct_fixture", AccountID: "upstream_fixture", Status: accounts.StatusActive,
 		Token:   accounts.OAuthToken{AccessToken: "fixture-access-secret", RefreshToken: "fixture-refresh-secret", ExpiresAt: time.Now().Add(time.Hour)},
 		Cookies: map[string]string{"session": "fixture-cookie-secret"},
@@ -108,7 +108,7 @@ func TestAdminEndpointLifecycle(t *testing.T) {
 		}
 		return result
 	}
-	if request("GET", "/health", "", 200)["default_model"] != "gpt-6-astra" {
+	if request("GET", "/health", "", 200)["default_model"] != "gpt-6.1-sol" {
 		t.Fatal("health default model missing")
 	}
 	request("GET", "/admin/accounts", "", 200)

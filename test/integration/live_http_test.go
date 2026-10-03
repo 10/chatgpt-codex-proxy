@@ -160,7 +160,7 @@ func TestLiveReadEndpoints(t *testing.T) {
 	if get("/v1/models/"+url.PathEscape(cfg.Model), nil)["id"] != cfg.Model {
 		t.Fatal("model detail mismatch")
 	}
-	codex := get("/v1/models?client_version=26.901.51231", nil)
+	codex := get("/v1/models?client_version=26.930.21537", nil)
 	if entries, _ := codex["models"].([]any); len(entries) == 0 {
 		t.Fatal("Codex model catalog empty")
 	}
