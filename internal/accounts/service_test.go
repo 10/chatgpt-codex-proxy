@@ -42,7 +42,7 @@ func TestLeastUsedPrefersLowerPrimaryUsedPercent(t *testing.T) {
 	}
 }
 
-func TestLeastUsedComparesMatchingWindowDurations(t *testing.T) {
+func TestLeastUsedComparesMostUsedWindowRegardlessOfSlot(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -67,25 +67,21 @@ func TestLeastUsedComparesMatchingWindowDurations(t *testing.T) {
 	}
 }
 
-func TestLeastUsedRoundRobinsWhenWindowDurationsDoNotMatch(t *testing.T) {
+func TestLeastUsedPrefersAccountFurthestFromAnyLimit(t *testing.T) {
 	t.Parallel()
 
-	weekly := recordWithQuota("acct_a_weekly", 81, nil)
-	weekly.CachedQuota.RateLimit.LimitWindowSeconds = intPointer(7 * 24 * 60 * 60)
-	short := recordWithQuota("acct_b_short", 10, nil)
-	short.CachedQuota.RateLimit.LimitWindowSeconds = intPointer(5 * 60 * 60)
+	weeklyHeadroomPercent := 30.0
+	shortBusy := recordWithQuota("acct_short_busy", 70, &weeklyHeadroomPercent)
+	weeklyBusyPercent := 75.0
+	weeklyBusy := recordWithQuota("acct_weekly_busy", 40, &weeklyBusyPercent)
 
-	svc := newTestService(t, RotationLeastUsed, weekly, short)
-	first, err := svc.Acquire("")
+	svc := newTestService(t, RotationLeastUsed, shortBusy, weeklyBusy)
+	record, err := svc.Acquire("")
 	if err != nil {
-		t.Fatalf("Acquire(first) error = %v", err)
+		t.Fatalf("Acquire() error = %v", err)
 	}
-	second, err := svc.Acquire("")
-	if err != nil {
-		t.Fatalf("Acquire(second) error = %v", err)
-	}
-	if first.ID != "acct_a_weekly" || second.ID != "acct_b_short" {
-		t.Fatalf("round-robin order = %q, %q; want acct_a_weekly, acct_b_short", first.ID, second.ID)
+	if record.ID != "acct_short_busy" {
+		t.Fatalf("Acquire() = %q, want acct_short_busy because its tightest window is 70%% vs 75%%", record.ID)
 	}
 }
 
