@@ -324,7 +324,7 @@ Responses ignored fields:
 - `metadata`
 - `stream_options`
 
-`service_tier` is retained on the canonical request and sent on both HTTP and WebSocket Codex paths. OpenAI's `auto` value is normalized to Codex's `default` wire value, and the compatibility alias `fast` is normalized to `priority`.
+`service_tier` is retained on the canonical request and sent on both HTTP and WebSocket Codex paths. OpenAI's `auto` value is normalized to Codex's `default` wire value, and the compatibility alias `fast` is normalized to `priority`. Other values, such as Codex's `ultrafast`, are forwarded unchanged.
 
 The Chat Completions, Responses, and Responses compact JSON handlers decode `Content-Encoding: zstd` request bodies. Identity or an omitted encoding is accepted; other request content encodings are rejected locally.
 

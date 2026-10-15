@@ -223,6 +223,27 @@ func TestNormalizeMessagesWithoutSystemStaysInstructionFree(t *testing.T) {
 	}
 }
 
+func TestNormalizeMessagesForwardsUltrafastServiceTier(t *testing.T) {
+	t.Parallel()
+
+	maxTokens := 10
+	normalized, err := Normalize(MessagesRequest{
+		Model:       "gpt-6.1-sol",
+		MaxTokens:   &maxTokens,
+		ServiceTier: "ultrafast",
+		Messages: []Message{{
+			Role:    "user",
+			Content: Content{{Type: "text", Text: "Hello"}},
+		}},
+	}, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if normalized.ServiceTier != "ultrafast" {
+		t.Fatalf("service_tier = %q, want ultrafast", normalized.ServiceTier)
+	}
+}
+
 func TestNormalizeMessagesMapsImagesAndLongToolNames(t *testing.T) {
 	t.Parallel()
 

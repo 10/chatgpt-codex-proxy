@@ -680,6 +680,8 @@ func normalizeServiceTier(raw string) (string, error) {
 		return "default", nil
 	case "fast", "priority":
 		return "priority", nil
+	case "ultrafast":
+		return "ultrafast", nil
 	default:
 		return "", fmt.Errorf("unsupported service tier %q", raw)
 	}

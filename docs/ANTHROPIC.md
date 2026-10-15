@@ -39,6 +39,7 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | Enabled/adaptive thinking | Codex reasoning summaries and encrypted reasoning state |
 | JSON-schema output format | Codex structured output |
 | Fast service tier | Codex priority tier |
+| Ultrafast service tier | Codex ultrafast tier |
 
 Claude Code's attribution-only system block is filtered from model instructions. Its adaptive-thinking `display` and `context_management` fields are accepted as compatibility metadata. An explicit `output_config.effort` selects Codex reasoning effort; otherwise, enabled-thinking budgets map to `low` through 1,024 tokens, `medium` through 8,192, `high` through 24,576, and `xhigh` above that. Budget-derived effort is clamped to the nearest level supported by the selected model.
 
