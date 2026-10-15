@@ -88,8 +88,8 @@ The proxy intentionally mimics a desktop Codex client. These headers are always 
 Authorization: Bearer <access_token>
 originator: Codex Desktop
 x-openai-internal-codex-residency: us
-User-Agent: Codex Desktop/26.930.21537 (Windows NT 10.0; x64)
-sec-ch-ua: "Chromium";v="149", "Not:A-Brand";v="24"
+User-Agent: Codex Desktop/26.1007.71326 (Windows NT 10.0; x64)
+sec-ch-ua: "Chromium";v="155", "Not(A:Brand";v="24"
 sec-ch-ua-mobile: ?0
 sec-ch-ua-platform: "Windows"
 Accept-Encoding: gzip, deflate, br, zstd
@@ -453,7 +453,7 @@ x-openai-internal-codex-residency: us
 x-client-request-id: req_<...>
 x-codex-turn-state: <turn_state>
 OpenAI-Beta: responses_websockets=2026-02-06
-User-Agent: Codex Desktop/26.930.21537 (Windows NT 10.0; x64)
+User-Agent: Codex Desktop/26.1007.71326 (Windows NT 10.0; x64)
 Content-Type: application/json
 Accept: text/event-stream
 ```
@@ -994,7 +994,7 @@ ChatGPT-Account-Id: <account_id>
 originator: Codex Desktop
 x-openai-internal-codex-residency: us
 x-client-request-id: req_<...>
-User-Agent: Codex Desktop/26.930.21537 (Windows NT 10.0; x64)
+User-Agent: Codex Desktop/26.1007.71326 (Windows NT 10.0; x64)
 Accept: application/json
 Accept-Encoding: gzip, deflate
 ```
@@ -1077,7 +1077,7 @@ Model-catalog endpoint used by this repository.
 ### URL
 
 ```http
-GET https://chatgpt.com/backend-api/codex/models?client_version=26.930.21537
+GET https://chatgpt.com/backend-api/codex/models?client_version=26.1007.71326
 ```
 
 The `client_version` query parameter is currently only attached to `/codex/models`.
@@ -1092,7 +1092,7 @@ ChatGPT-Account-Id: <account_id>
 originator: Codex Desktop
 x-openai-internal-codex-residency: us
 x-client-request-id: req_<...>
-User-Agent: Codex Desktop/26.930.21537 (Windows NT 10.0; x64)
+User-Agent: Codex Desktop/26.1007.71326 (Windows NT 10.0; x64)
 Accept: application/json
 Accept-Encoding: gzip, deflate
 ```
@@ -1149,7 +1149,7 @@ If `/codex/models` returns anything outside that shape, the proxy treats the res
 - `description`
 
 ```bash
-curl -sS "${CODEX_BASE_URL}/codex/models?client_version=26.930.21537" \
+curl -sS "${CODEX_BASE_URL}/codex/models?client_version=26.1007.71326" \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -H "ChatGPT-Account-Id: ${ACCOUNT_ID}" \
   -H "Accept: application/json"
@@ -1234,7 +1234,7 @@ POST https://auth.openai.com/api/accounts/deviceauth/usercode
 
 ```http
 Content-Type: application/json
-User-Agent: Codex Desktop/26.930.21537 (Windows NT 10.0; x64)
+User-Agent: Codex Desktop/26.1007.71326 (Windows NT 10.0; x64)
 ```
 
 ### Request body
@@ -1283,7 +1283,7 @@ POST https://auth.openai.com/api/accounts/deviceauth/token
 
 ```http
 Content-Type: application/json
-User-Agent: Codex Desktop/26.930.21537 (Windows NT 10.0; x64)
+User-Agent: Codex Desktop/26.1007.71326 (Windows NT 10.0; x64)
 ```
 
 ### Request body
@@ -1336,7 +1336,7 @@ POST https://auth.openai.com/oauth/token
 
 ```http
 Content-Type: application/x-www-form-urlencoded
-User-Agent: Codex Desktop/26.930.21537 (Windows NT 10.0; x64)
+User-Agent: Codex Desktop/26.1007.71326 (Windows NT 10.0; x64)
 ```
 
 ### Authorization-code exchange request

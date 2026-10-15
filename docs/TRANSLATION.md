@@ -148,9 +148,9 @@ Image options are passed through, not simulated locally. Live direct-endpoint te
 Model normalization does not rewrite user-supplied model IDs.
 
 The bootstrap catalog includes `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`,
-`gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, and
-`gpt-5.3-codex-spark`. GPT-6.1 Sol, Astra, and GPT-5.6 Sol advertise a `low`
-default reasoning level; the proxy's default model is GPT-6.1 Sol. GPT-6.1 Sol
+`gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. GPT-6.1 Sol,
+Astra, and GPT-5.6 Sol advertise a `low` default reasoning level; the proxy's
+default model is GPT-6.1 Sol. GPT-6.1 Sol
 accepts the Codex effort levels `low`, `medium`, `high`, `xhigh`, `max`, and
 `ultra`.
 

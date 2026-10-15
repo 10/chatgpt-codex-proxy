@@ -29,8 +29,6 @@ func TestBootstrapEntriesMatchSupportedModels(t *testing.T) {
 		"gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
-		"gpt-5.5",
-		"gpt-5.3-codex-spark",
 	}
 	if !slices.Equal(modelIDs, wantModelIDs) {
 		t.Errorf("BootstrapEntries() model IDs = %v, want %v", modelIDs, wantModelIDs)
@@ -66,9 +64,6 @@ func TestBootstrapEntriesMatchSupportedModels(t *testing.T) {
 
 	if !slices.Equal(defaults, []string{"gpt-6.1-sol"}) {
 		t.Errorf("BootstrapEntries() defaults = %v, want [gpt-6.1-sol]", defaults)
-	}
-	if got := entries["gpt-5.3-codex-spark"].DefaultReasoningEffort; got != "high" {
-		t.Errorf("BootstrapEntries() gpt-5.3-codex-spark default reasoning effort = %q, want high", got)
 	}
 	for _, id := range []string{"gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-sol"} {
 		if entry := entries[id]; entry.DefaultReasoningEffort != "low" || entry.MaxContextWindow != 872000 {

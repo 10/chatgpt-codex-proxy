@@ -7,8 +7,9 @@ var bootstrapReasoningEfforts = []ReasoningEffort{
 	{ReasoningEffort: "xhigh", Description: "Extra high reasoning depth"},
 }
 
-// Codex limits differ from the public API. Source: openai/codex rust-v0.160.0,
-// codex-rs/models-manager/models.json. Fetched account metadata takes precedence.
+// Codex limits differ from the public API. Source: openai/codex rust-v0.162.1,
+// codex-rs/models-manager/models.json, without gpt-5.5, which Codex retired on
+// 2026-10-14. Fetched account metadata takes precedence.
 var bootstrapEntries = []Entry{
 	bootstrapEntry("gpt-6.1-sol", true, "low", 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
@@ -36,8 +37,6 @@ var bootstrapEntries = []Entry{
 	bootstrapEntry("gpt-5.6-luna", false, "medium", 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
 	),
-	bootstrapEntry("gpt-5.5", false, "medium", 272000),
-	bootstrapEntry("gpt-5.3-codex-spark", false, "high", 128000),
 }
 
 func bootstrapEntry(id string, isDefault bool, defaultReasoningEffort string, maxContextWindow int, additionalEfforts ...ReasoningEffort) Entry {
