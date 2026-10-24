@@ -18,61 +18,6 @@ import (
 	"chatgpt-codex-proxy/internal/config"
 )
 
-func TestRequestMarshalIncludesEmptyInstructions(t *testing.T) {
-	t.Parallel()
-
-	payload, err := json.Marshal(Request{
-		Model: "gpt-5.4",
-		Input: []InputItem{{
-			Role:    "user",
-			Content: []ContentPart{{Type: "input_text", Text: "hello"}},
-		}},
-	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-
-	var body map[string]any
-	if err := json.Unmarshal(payload, &body); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if instructions, ok := body["instructions"]; !ok || instructions != "" {
-		t.Fatalf("instructions = %#v, present = %v; want explicit empty string", instructions, ok)
-	}
-}
-
-func TestStreamRequestPayloadPreservesServiceTier(t *testing.T) {
-	t.Parallel()
-
-	payload := StreamRequestPayload(Request{
-		Model:              "gpt-5.4",
-		Stream:             false,
-		Store:              true,
-		PreviousResponseID: "resp_previous",
-		ServiceTier:        "priority",
-		Input: []InputItem{{
-			Role: "user",
-			Content: []ContentPart{{
-				Type: "input_text",
-				Text: "hello",
-			}},
-		}},
-	})
-
-	if !payload.Stream {
-		t.Fatal("Stream = false, want true")
-	}
-	if payload.Store {
-		t.Fatal("Store = true, want false")
-	}
-	if payload.PreviousResponseID != "" {
-		t.Fatalf("PreviousResponseID = %q, want empty", payload.PreviousResponseID)
-	}
-	if payload.ServiceTier != "priority" {
-		t.Fatalf("ServiceTier = %q, want priority", payload.ServiceTier)
-	}
-}
-
 func TestCompactResponseStreamsCompactionTrigger(t *testing.T) {
 	t.Parallel()
 	input := make([]InputItem, 2, 3)

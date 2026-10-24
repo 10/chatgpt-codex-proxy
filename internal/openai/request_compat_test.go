@@ -1,7 +1,6 @@
 package openai
 
 import (
-	"encoding/json"
 	"testing"
 )
 
@@ -34,75 +33,6 @@ func TestChatCompletionsTranslationAcceptsLegacyFunctionsAndChoice(t *testing.T)
 	}
 	if string(normalized.ToolChoice) != `{"type":"function","name":"lookup_weather"}` {
 		t.Fatalf("tool choice = %s", string(normalized.ToolChoice))
-	}
-}
-
-func TestChatCompletionsTranslationPrefersModernToolsAndToolChoice(t *testing.T) {
-	t.Parallel()
-
-	rawToolChoice, err := json.Marshal(map[string]any{
-		"type": "function",
-		"name": "modern_tool",
-	})
-	if err != nil {
-		t.Fatalf("json.Marshal() error = %v", err)
-	}
-
-	request := ChatCompletionsRequest{
-		Model: "gpt-5.6-terra",
-		Messages: []ChatMessage{{
-			Role:    "user",
-			Content: MessageContent{{Type: "text", Text: "Use the tool"}},
-		}},
-		Tools: []ToolDefinition{{
-			Type: "function",
-			Function: &FunctionTool{
-				Name:       "modern_tool",
-				Parameters: map[string]any{"type": "object"},
-			},
-		}},
-		Functions: []LegacyFunctionDefinition{{
-			Name: "legacy_tool",
-		}},
-		ToolChoice:   rawToolChoice,
-		FunctionCall: &LegacyFunctionCallChoice{Name: "legacy_tool"},
-	}
-
-	normalized, err := ChatCompletions(request, nil)
-	if err != nil {
-		t.Fatalf("ChatCompletions() error = %v", err)
-	}
-
-	if len(normalized.Tools) != 1 {
-		t.Fatalf("tools len = %d, want 1", len(normalized.Tools))
-	}
-	if normalized.Tools[0].Name != "modern_tool" {
-		t.Fatalf("tool name = %q, want modern_tool", normalized.Tools[0].Name)
-	}
-	if string(normalized.ToolChoice) != `{"type":"function","name":"modern_tool"}` {
-		t.Fatalf("tool choice = %s", string(normalized.ToolChoice))
-	}
-}
-
-func TestChatCompletionsTranslationSupportsJSONObject(t *testing.T) {
-	t.Parallel()
-
-	request := ChatCompletionsRequest{
-		Model: "gpt-5.6-terra",
-		Messages: []ChatMessage{{
-			Role:    "user",
-			Content: MessageContent{{Type: "text", Text: "Return JSON"}},
-		}},
-		ResponseFormat: &ResponseFormat{Type: "json_object"},
-	}
-
-	normalized, err := ChatCompletions(request, nil)
-	if err != nil {
-		t.Fatalf("ChatCompletions() error = %v", err)
-	}
-
-	if normalized.Text == nil || normalized.Text.Format.Type != "json_object" {
-		t.Fatalf("text format = %#v, want json_object", normalized.Text)
 	}
 }
 

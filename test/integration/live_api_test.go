@@ -5,7 +5,6 @@ package integration_test
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -24,7 +23,34 @@ func TestLiveChatCompletionsCustomToolStreamingRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	cfg := loadLiveConfig(t)
-	tool := applyPatchToolDefinition()
+	tool := map[string]any{
+		"type":        "custom",
+		"name":        "ApplyPatch",
+		"description": "Apply a patch to the workspace",
+		"format": map[string]any{
+			"type":   "grammar",
+			"syntax": "lark",
+			"definition": strings.Join([]string{
+				"start: begin_patch hunk end_patch",
+				`begin_patch: "*** Begin Patch" LF`,
+				`end_patch: "*** End Patch" LF?`,
+				"",
+				"hunk: add_hunk | update_hunk",
+				`add_hunk: "*** Add File: " filename LF add_line+`,
+				`update_hunk: "*** Update File: " filename LF change?`,
+				"",
+				"filename: /(.+)/",
+				`add_line: "+" /(.*)/ LF -> line`,
+				"",
+				"change: (change_context | change_line)+ eof_line?",
+				`change_context: ("@@" | "@@ " /(.+)/) LF`,
+				`change_line: ("+" | "-" | " ") /(.*)/ LF`,
+				`eof_line: "*** End of File" LF`,
+				"",
+				"%import common.LF",
+			}, "\n"),
+		},
+	}
 	userPrompt := "Use the ApplyPatch tool to create test.txt with the exact contents hello. Do not answer in natural language before calling the tool."
 
 	streamBody := postJSON(t, cfg, "/chat/completions", map[string]any{
@@ -83,12 +109,19 @@ func TestLiveChatCompletionsCustomToolStreamingRoundTrip(t *testing.T) {
 		"tool_choice": "none",
 	})
 
-	message, toolCalls := extractChatCompletionMessage(t, followUpBody)
-	if len(toolCalls) != 0 {
-		t.Fatalf("follow-up completion emitted unexpected tool calls: %#v", toolCalls)
+	var response struct {
+		Choices []struct {
+			Message struct {
+				Content   string            `json:"content"`
+				ToolCalls []json.RawMessage `json:"tool_calls"`
+			} `json:"message"`
+		} `json:"choices"`
 	}
-	if strings.TrimSpace(message) != "DONE" {
-		t.Fatalf("follow-up assistant message = %q, want DONE", message)
+	if err := json.Unmarshal(followUpBody, &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Choices) != 1 || len(response.Choices[0].Message.ToolCalls) != 0 || strings.TrimSpace(response.Choices[0].Message.Content) != "DONE" {
+		t.Fatalf("unexpected follow-up completion: %s", followUpBody)
 	}
 }
 
@@ -111,37 +144,6 @@ func loadLiveConfig(t *testing.T) liveConfig {
 	}
 
 	return cfg
-}
-
-func applyPatchToolDefinition() map[string]any {
-	return map[string]any{
-		"type":        "custom",
-		"name":        "ApplyPatch",
-		"description": "Apply a patch to the workspace",
-		"format": map[string]any{
-			"type":   "grammar",
-			"syntax": "lark",
-			"definition": strings.Join([]string{
-				"start: begin_patch hunk end_patch",
-				`begin_patch: "*** Begin Patch" LF`,
-				`end_patch: "*** End Patch" LF?`,
-				"",
-				"hunk: add_hunk | update_hunk",
-				`add_hunk: "*** Add File: " filename LF add_line+`,
-				`update_hunk: "*** Update File: " filename LF change?`,
-				"",
-				"filename: /(.+)/",
-				`add_line: "+" /(.*)/ LF -> line`,
-				"",
-				"change: (change_context | change_line)+ eof_line?",
-				`change_context: ("@@" | "@@ " /(.+)/) LF`,
-				`change_line: ("+" | "-" | " ") /(.*)/ LF`,
-				`eof_line: "*** End of File" LF`,
-				"",
-				"%import common.LF",
-			}, "\n"),
-		},
-	}
 }
 
 func postJSON(t *testing.T, cfg liveConfig, path string, payload any, headers ...map[string]string) []byte {
@@ -188,34 +190,13 @@ func extractStreamedToolCall(t *testing.T, body []byte) (string, string, string)
 	t.Helper()
 
 	var (
-		callID       string
-		toolName     string
-		arguments    strings.Builder
-		sawToolCalls bool
-		sawFinish    bool
+		callID    string
+		toolName  string
+		arguments strings.Builder
+		sawFinish bool
 	)
 
-	for _, event := range strings.Split(string(body), "\n\n") {
-		event = strings.TrimSpace(event)
-		if event == "" || strings.Contains(event, "data: [DONE]") {
-			continue
-		}
-
-		var dataLines []string
-		for _, line := range strings.Split(event, "\n") {
-			if strings.HasPrefix(line, "data: ") {
-				dataLines = append(dataLines, strings.TrimPrefix(line, "data: "))
-			}
-		}
-		if len(dataLines) == 0 {
-			continue
-		}
-
-		var payload map[string]any
-		if err := json.Unmarshal([]byte(strings.Join(dataLines, "\n")), &payload); err != nil {
-			t.Fatalf("decode sse payload: %v\npayload=%s", err, strings.Join(dataLines, "\n"))
-		}
-
+	for _, payload := range liveSSEObjects(t, body) {
 		choices, _ := payload["choices"].([]any)
 		if len(choices) == 0 {
 			continue
@@ -233,7 +214,6 @@ func extractStreamedToolCall(t *testing.T, body []byte) (string, string, string)
 		if len(rawToolCalls) == 0 {
 			continue
 		}
-		sawToolCalls = true
 
 		first, _ := rawToolCalls[0].(map[string]any)
 		if id, _ := first["id"].(string); id != "" {
@@ -251,65 +231,9 @@ func extractStreamedToolCall(t *testing.T, body []byte) (string, string, string)
 		}
 	}
 
-	if !sawToolCalls {
-		t.Fatalf("stream body did not contain tool_calls events: %s", string(body))
-	}
 	if !sawFinish {
 		t.Fatalf("stream body did not end with finish_reason=tool_calls: %s", string(body))
 	}
 
 	return callID, toolName, arguments.String()
-}
-
-func extractChatCompletionMessage(t *testing.T, body []byte) (string, []map[string]any) {
-	t.Helper()
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		t.Fatalf("decode chat completion response: %v\nbody=%s", err, string(body))
-	}
-
-	choices, _ := payload["choices"].([]any)
-	if len(choices) == 0 {
-		t.Fatalf("chat completion response had no choices: %s", string(body))
-	}
-	choice, _ := choices[0].(map[string]any)
-	message, _ := choice["message"].(map[string]any)
-	if message == nil {
-		t.Fatalf("chat completion choice had no message: %s", string(body))
-	}
-
-	content := extractMessageContent(message["content"])
-	var toolCalls []map[string]any
-	if rawToolCalls, _ := message["tool_calls"].([]any); len(rawToolCalls) > 0 {
-		toolCalls = make([]map[string]any, 0, len(rawToolCalls))
-		for _, item := range rawToolCalls {
-			if m, _ := item.(map[string]any); m != nil {
-				toolCalls = append(toolCalls, m)
-			}
-		}
-	}
-
-	return content, toolCalls
-}
-
-func extractMessageContent(raw any) string {
-	switch content := raw.(type) {
-	case string:
-		return content
-	case []any:
-		var parts []string
-		for _, item := range content {
-			part, _ := item.(map[string]any)
-			if part == nil {
-				continue
-			}
-			if text, _ := part["text"].(string); text != "" {
-				parts = append(parts, text)
-			}
-		}
-		return strings.Join(parts, "")
-	default:
-		return fmt.Sprint(raw)
-	}
 }

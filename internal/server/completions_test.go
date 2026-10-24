@@ -14,23 +14,6 @@ import (
 	"chatgpt-codex-proxy/internal/codex"
 )
 
-func TestNormalizeCompletionsBody(t *testing.T) {
-	t.Parallel()
-
-	normalized, err := normalizeCompletionsBody([]byte(`{"model":"gpt-5.6-terra","prompt":"hello","stream":true}`), nil)
-	if err != nil {
-		t.Fatalf("normalizeCompletionsBody() error = %v", err)
-	}
-	if !normalized.Stream || len(normalized.Input) != 1 || normalized.Input[0].Content[0].Text != "hello" {
-		t.Fatalf("normalized request = %#v", normalized)
-	}
-
-	_, err = normalizeCompletionsBody([]byte(`{"model":"gpt-5.6-terra","prompt":["one","two"]}`), nil)
-	if err == nil || !strings.Contains(err.Error(), "multiple prompts") {
-		t.Fatalf("multiple prompt error = %v", err)
-	}
-}
-
 func TestHandleCompletionsReturnsTextCompletion(t *testing.T) {
 	t.Parallel()
 

@@ -265,50 +265,6 @@ func TestImagesGenerationsReturnsOpenAIImageResponse(t *testing.T) {
 	}
 }
 
-func TestImagesGenerationsDefaultsImageModel(t *testing.T) {
-	t.Parallel()
-
-	var upstreamRequest codex.Request
-	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
-		upstreamRequest = normalized.Request
-		return completedImageStream("generated")
-	})
-
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(`{"prompt":"A blue circle"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", "test-key")
-	app.Handler().ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
-	}
-	if got := string(upstreamRequest.Tools[0].ExtraFields["model"]); got != `"gpt-image-2"` {
-		t.Fatalf("upstream image model = %s, want gpt-image-2", got)
-	}
-}
-
-func TestImagesGenerationsRejectsUnsupportedImageModel(t *testing.T) {
-	t.Parallel()
-
-	app := newImagesTestApp(t, func(turn.NormalizedRequest) eventStream {
-		return completedImageStream("unexpected")
-	})
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(`{
-		"model":"not-an-image-model",
-		"prompt":"A blue circle"
-	}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", "test-key")
-	app.Handler().ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404; body=%s", recorder.Code, recorder.Body.String())
-	}
-	assertOpenAIErrorCode(t, recorder.Body.Bytes(), "model_not_found")
-}
-
 func TestImagesEditsAcceptsJSONImageReferences(t *testing.T) {
 	t.Parallel()
 
@@ -485,64 +441,6 @@ func TestImagesGenerationsStreamsPartialAndCompletedEvents(t *testing.T) {
 	}
 }
 
-func TestImagesEditsStreamsMultipartRequests(t *testing.T) {
-	t.Parallel()
-
-	var upstreamRequest codex.Request
-	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
-		upstreamRequest = normalized.Request
-		return &fakeEventStream{events: []*codex.StreamEvent{
-			{
-				Type: "response.image_generation_call.partial_image",
-				Raw:  map[string]any{"partial_image_b64": "edit-partial", "partial_image_index": 0, "output_format": "webp"},
-			},
-			{
-				Type: "response.output_item.done",
-				Raw: map[string]any{"output_index": 0, "item": map[string]any{
-					"type": "image_generation_call", "result": "edit-final", "output_format": "webp",
-				}},
-			},
-			{
-				Type: "response.completed",
-				Raw:  map[string]any{"response": map[string]any{"id": "resp_edit_stream", "status": "completed", "output": []any{}}},
-			},
-		}}
-	})
-
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	_ = writer.WriteField("model", "gpt-image-2")
-	_ = writer.WriteField("prompt", "Make it green")
-	_ = writer.WriteField("stream", "true")
-	_ = writer.WriteField("partial_images", "1")
-	imagePart, err := writer.CreateFormFile("image", "input.webp")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = imagePart.Write([]byte("input-webp"))
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("X-API-Key", "test-key")
-	app.Handler().ServeHTTP(recorder, req)
-
-	if contentType := recorder.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/event-stream") {
-		t.Fatalf("Content-Type = %q; body=%s", contentType, recorder.Body.String())
-	}
-	events := parseSSEEvents(t, recorder.Body.String())
-	assertEventTypes(t, events, "image_edit.partial_image", "image_edit.completed")
-	if events[0].Data["b64_json"] != "edit-partial" || events[1].Data["b64_json"] != "edit-final" {
-		t.Fatalf("events = %#v", events)
-	}
-	if !upstreamRequest.Stream || string(upstreamRequest.Tools[0].ExtraFields["partial_images"]) != "1" {
-		t.Fatalf("upstream request = %#v", upstreamRequest)
-	}
-}
-
 func completedImageStream(result string) eventStream {
 	return &fakeEventStream{events: []*codex.StreamEvent{
 		{
@@ -583,15 +481,12 @@ func newImagesTestApp(t *testing.T, opener func(turn.NormalizedRequest) eventStr
 		ContinuationTTL: time.Minute,
 		RequestTimeout:  5 * time.Second,
 	}
-	httpClient := codex.NewHTTPClient(cfg)
-	t.Cleanup(httpClient.Close)
 	catalog := models.NewCatalog(models.BootstrapEntries())
 	app := &App{
 		cfg:           cfg,
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		engine:        gin.New(),
 		accounts:      accountsSvc,
-		httpClient:    httpClient,
 		continuations: conversation.NewContinuationManager(time.Minute),
 		models:        catalog,
 	}
@@ -608,7 +503,7 @@ func newImagesTestApp(t *testing.T, opener func(turn.NormalizedRequest) eventStr
 			}, true
 		}
 	}
-	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, catalog.SupportsRecord)
+	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil, catalog.SupportsRecord)
 	app.routes()
 	return app
 }

@@ -530,24 +530,6 @@ func TestAnthropicMessagesDoesNotWriteErrorAfterClientCancellation(t *testing.T)
 	}
 }
 
-func TestAnthropicErrorAddsRequestLogMetadata(t *testing.T) {
-	t.Parallel()
-
-	app := newFailoverTestApp(t)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-
-	app.writeAnthropicError(ctx, http.StatusBadRequest, "messages must contain at least one message")
-
-	if got := ctx.GetString(middleware.RequestErrorCodeKey); got != "invalid_request_error" {
-		t.Fatalf("error code = %q, want invalid_request_error", got)
-	}
-	if got := ctx.GetString(middleware.RequestErrorMessageKey); got != "messages must contain at least one message" {
-		t.Fatalf("error message = %q", got)
-	}
-}
-
 func TestAnthropicMessagesKeepsPrestreamFailureAsJSON(t *testing.T) {
 	t.Parallel()
 

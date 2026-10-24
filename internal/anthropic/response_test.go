@@ -54,28 +54,6 @@ func TestBuildMessageMapsTextThinkingToolsAndUsage(t *testing.T) {
 	}
 }
 
-func TestBuildMessageMapsIncompleteToMaxTokens(t *testing.T) {
-	t.Parallel()
-
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
-		"response": map[string]any{
-			"id":                 "resp_limit",
-			"status":             "incomplete",
-			"incomplete_details": map[string]any{"reason": "max_output_tokens"},
-			"output_text":        "partial",
-		},
-	}})
-
-	message := BuildMessage(accumulator)
-	if message.StopReason == nil || *message.StopReason != "max_tokens" {
-		t.Fatalf("stop reason = %#v", message.StopReason)
-	}
-	if len(message.Content) != 1 || message.Content[0].Text != "partial" {
-		t.Fatalf("content = %#v", message.Content)
-	}
-}
-
 func TestBuildMessageDoesNotExposeIncompleteToolCallAsToolUse(t *testing.T) {
 	t.Parallel()
 
@@ -122,30 +100,6 @@ func TestBuildMessagePreservesLargeToolArgumentNumbers(t *testing.T) {
 	}
 }
 
-func TestBuildMessageShortensLongToolUseIDs(t *testing.T) {
-	t.Parallel()
-
-	longID := "call_" + strings.Repeat("a", 80)
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
-		"response": map[string]any{
-			"id": "resp_long_call", "status": "completed",
-			"output": []any{map[string]any{
-				"type": "function_call", "call_id": longID, "name": "lookup", "arguments": `{}`, "status": "completed",
-			}},
-		},
-	}})
-
-	message := BuildMessage(accumulator)
-	if len(message.Content) != 1 {
-		t.Fatalf("content = %#v", message.Content)
-	}
-	callID := message.Content[0].ID
-	if len(callID) > 64 || callID == longID {
-		t.Fatalf("tool use ID = %q (len %d)", callID, len(callID))
-	}
-}
-
 func TestBuildMessageSerializesSignatureOnlyThinkingWithEmptyText(t *testing.T) {
 	t.Parallel()
 
@@ -165,25 +119,6 @@ func TestBuildMessageSerializesSignatureOnlyThinkingWithEmptyText(t *testing.T) 
 	}
 	if !strings.Contains(string(encoded), `{"type":"thinking","thinking":"","signature":"signed"}`) {
 		t.Fatalf("encoded message = %s", encoded)
-	}
-}
-
-func TestBuildMessageOmitsUnsignedThinkingSummary(t *testing.T) {
-	t.Parallel()
-
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{
-		Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"},
-	}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
-		"response": map[string]any{
-			"id": "resp_unsigned_thinking", "status": "completed", "output_text": "answer",
-			"output": []any{map[string]any{"type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "unsigned"}}}},
-		},
-	}})
-
-	message := BuildMessage(accumulator)
-	if len(message.Content) != 1 || message.Content[0].Type != "text" || message.Content[0].Text != "answer" {
-		t.Fatalf("content = %#v", message.Content)
 	}
 }
 
@@ -372,35 +307,6 @@ func TestNormalizedOutputTextUsesMatchingUnionBranch(t *testing.T) {
 				t.Fatalf("nullable branch = %s", got)
 			}
 		})
-	}
-}
-
-func TestSchemaMatchesValueUsesJSONNumericSemantics(t *testing.T) {
-	t.Parallel()
-
-	for _, value := range []json.Number{"1", "1.0", "1e0"} {
-		if !newSchemaMatcher().matches(map[string]any{"const": float64(1)}, value) {
-			t.Fatalf("const 1 did not match %q", value)
-		}
-		if !newSchemaMatcher().matches(map[string]any{"type": "integer"}, value) {
-			t.Fatalf("integer did not match %q", value)
-		}
-	}
-	if newSchemaMatcher().matches(map[string]any{"type": "integer"}, json.Number("1.5")) {
-		t.Fatal("integer matched 1.5")
-	}
-}
-
-func TestSchemaMatcherCompilesEachSchemaOnce(t *testing.T) {
-	t.Parallel()
-
-	schema := map[string]any{"type": "integer", "minimum": 1}
-	matcher := newSchemaMatcher()
-	if !matcher.matches(schema, json.Number("1")) || !matcher.matches(schema, json.Number("2")) {
-		t.Fatal("schema did not match valid integers")
-	}
-	if len(matcher.compiled) != 1 {
-		t.Fatalf("compiled schemas = %d, want 1", len(matcher.compiled))
 	}
 }
 

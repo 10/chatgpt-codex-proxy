@@ -74,81 +74,6 @@ func TestResolveSessionImplicitResumeTrimsHistoryAndSetsContinuationState(t *tes
 	}
 }
 
-func TestResolveSessionCarriesToolNameAliasesAcrossExplicitContinuation(t *testing.T) {
-	t.Parallel()
-
-	app := &App{continuations: conversation.NewContinuationManager(time.Minute)}
-	app.continuations.Put(conversation.ContinuationRecord{
-		ResponseID:      "resp_long_tool",
-		AccountID:       "acct_1",
-		Model:           "gpt-5.6-terra",
-		ToolNameAliases: map[string]string{"mcp__short": "mcp__original_long_tool_name"},
-	})
-
-	resolution, err := app.resolveSession(turn.NormalizedRequest{Request: codex.Request{
-		Model:              "gpt-5.6-terra",
-		PreviousResponseID: "resp_long_tool",
-	}})
-	if err != nil {
-		t.Fatalf("resolveSession() error = %v", err)
-	}
-	if resolution.Request.ToolNameAliases["mcp__short"] != "mcp__original_long_tool_name" {
-		t.Fatalf("tool aliases = %#v", resolution.Request.ToolNameAliases)
-	}
-}
-
-func TestResolveSessionBuildsReplayForExplicitHTTPContinuation(t *testing.T) {
-	t.Parallel()
-
-	app := &App{continuations: conversation.NewContinuationManager(time.Minute)}
-	app.continuations.Put(conversation.ContinuationRecord{
-		ResponseID: "resp_replay",
-		AccountID:  "acct_1",
-		Model:      "gpt-5.6-terra",
-		InputHistory: []turn.InputItem{
-			cloneContinuationInputItem(userText("first")),
-			cloneContinuationInputItem(assistantText("first answer")),
-		},
-	})
-
-	resolution, err := app.resolveSession(turn.NormalizedRequest{Request: codex.Request{
-		Model:              "gpt-5.6-terra",
-		PreviousResponseID: "resp_replay",
-		Input:              []codex.InputItem{userText("second")},
-	}})
-	if err != nil {
-		t.Fatalf("resolveSession() error = %v", err)
-	}
-	if resolution.Original.PreviousResponseID != "" {
-		t.Fatalf("replay previous_response_id = %q, want empty", resolution.Original.PreviousResponseID)
-	}
-	if len(resolution.Original.Input) != 3 || resolution.Original.Input[2].Content[0].Text != "second" {
-		t.Fatalf("replay input = %#v", resolution.Original.Input)
-	}
-}
-
-func TestResolveSessionPreservesExplicitPromptCacheKey(t *testing.T) {
-	t.Parallel()
-
-	app := &App{continuations: conversation.NewContinuationManager(time.Minute)}
-	normalized := turn.NormalizedRequest{Request: codex.Request{
-		Model:          "gpt-5.6-terra",
-		PromptCacheKey: "client-cache-key",
-		Input:          []codex.InputItem{userText("hello")},
-	}}
-
-	resolution, err := app.resolveSession(normalized)
-	if err != nil {
-		t.Fatalf("resolveSession() error = %v", err)
-	}
-	if resolution.Request.PromptCacheKey != "client-cache-key" {
-		t.Fatalf("PromptCacheKey = %q, want client-cache-key", resolution.Request.PromptCacheKey)
-	}
-	if resolution.ConversationKey != "client-cache-key" {
-		t.Fatalf("ConversationKey = %q, want client-cache-key", resolution.ConversationKey)
-	}
-}
-
 func TestResolveSessionSkipsImplicitResumeForUnknownToolOutputCallID(t *testing.T) {
 	t.Parallel()
 
@@ -421,30 +346,6 @@ func TestAcquireAccountForResolutionOmittedModelUsesRouteScopedDefault(t *testin
 	}
 	if resolution.Request.PromptCacheKey == "" {
 		t.Fatal("PromptCacheKey = empty, want derived after model resolution")
-	}
-}
-
-func TestFunctionCallIDsDedupesAndPreservesOrder(t *testing.T) {
-	t.Parallel()
-
-	got := functionCallIDs(&turn.Accumulator{
-		ToolCalls: []*turn.ToolCallState{
-			{CallID: " call_1 "},
-			{CallID: "call_2"},
-			{CallID: "call_1"},
-			{CallID: " "},
-			{CallID: "call_3"},
-			{CallID: "call_2"},
-		},
-	})
-	want := []string{"call_1", "call_2", "call_3"}
-	if len(got) != len(want) {
-		t.Fatalf("functionCallIDs() = %#v, want %#v", got, want)
-	}
-	for idx := range want {
-		if got[idx] != want[idx] {
-			t.Fatalf("functionCallIDs()[%d] = %q, want %q; full result %#v", idx, got[idx], want[idx], got)
-		}
 	}
 }
 

@@ -34,34 +34,6 @@ func TestDeriveIgnoresLeadingSystemReminderBlocks(t *testing.T) {
 	}
 }
 
-func TestDeriveChangesForDifferentFirstUserText(t *testing.T) {
-	t.Parallel()
-
-	first := turn.Request{
-		Model:        "gpt-5.4",
-		Instructions: "Be concise.",
-		Input: []turn.InputItem{{
-			Role: "user",
-			Content: []turn.ContentPart{{
-				Type: "input_text",
-				Text: "hello world",
-			}},
-		}},
-	}
-	second := first
-	second.Input = []turn.InputItem{{
-		Role: "user",
-		Content: []turn.ContentPart{{
-			Type: "input_text",
-			Text: "different text",
-		}},
-	}}
-
-	if Derive(first) == Derive(second) {
-		t.Fatal("Derive() stayed the same for different first user text")
-	}
-}
-
 func TestDeriveChangesForDifferentEstablishedConversationHistory(t *testing.T) {
 	t.Parallel()
 

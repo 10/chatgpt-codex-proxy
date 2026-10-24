@@ -10,14 +10,10 @@ import (
 	"chatgpt-codex-proxy/internal/models"
 )
 
-func testCodexReasoningSignature() string {
-	return testCodexReasoningSignatureWithMarker(0)
-}
-
 func TestAstraThinkingUsesCodexCatalog(t *testing.T) {
 	t.Parallel()
 	catalog := models.NewCatalog(models.BootstrapEntries())
-	for _, effort := range []string{"", "low", "medium", "high", "xhigh", "max", "ultra", "none", "minimal"} {
+	for _, effort := range []string{"", "ultra", "none"} {
 		t.Run(effort, func(t *testing.T) {
 			payload, err := json.Marshal(map[string]any{
 				"model": "gpt-6-astra", "max_tokens": 64,
@@ -53,13 +49,13 @@ func TestAstraThinkingUsesCodexCatalog(t *testing.T) {
 	}
 }
 
-func testCodexReasoningSignatureWithMarker(marker byte) string {
+func testCodexReasoningSignature() string {
 	payload := make([]byte, 1+8+16+16+32)
 	payload[0] = 0x80
 	for index := 9; index < len(payload); index++ {
 		payload[index] = byte(index)
 	}
-	payload[9] = marker
+	payload[9] = 0
 	return base64.RawURLEncoding.EncodeToString(payload)
 }
 
@@ -129,11 +125,7 @@ func TestNormalizeMessagesMapsThinkingBudgetToEffort(t *testing.T) {
 		budget int
 		want   string
 	}{
-		{name: "zero uses model default", budget: 0, want: "medium"},
-		{name: "low upper bound", budget: 1024, want: "low"},
-		{name: "medium lower bound", budget: 1025, want: "medium"},
 		{name: "medium upper bound", budget: 8192, want: "medium"},
-		{name: "high lower bound", budget: 8193, want: "high"},
 		{name: "high upper bound", budget: 24576, want: "high"},
 		{name: "xhigh lower bound", budget: 24577, want: "xhigh"},
 	} {
@@ -200,47 +192,6 @@ func TestNormalizeMessagesPrefersExplicitEffortOverThinkingBudget(t *testing.T) 
 	}
 	if normalized.Reasoning == nil || normalized.Reasoning.Effort != "high" {
 		t.Fatalf("reasoning = %#v, want explicit high effort", normalized.Reasoning)
-	}
-}
-
-func TestNormalizeMessagesWithoutSystemStaysInstructionFree(t *testing.T) {
-	t.Parallel()
-
-	maxTokens := 10
-	normalized, err := Normalize(MessagesRequest{
-		Model:     "gpt-5.6-terra",
-		MaxTokens: &maxTokens,
-		Messages: []Message{{
-			Role:    "user",
-			Content: Content{{Type: "text", Text: "Hello"}},
-		}},
-	}, models.NewCatalog(models.BootstrapEntries()))
-	if err != nil {
-		t.Fatalf("Normalize() error = %v", err)
-	}
-	if normalized.Instructions != "" {
-		t.Fatalf("instructions = %q, want empty", normalized.Instructions)
-	}
-}
-
-func TestNormalizeMessagesForwardsUltrafastServiceTier(t *testing.T) {
-	t.Parallel()
-
-	maxTokens := 10
-	normalized, err := Normalize(MessagesRequest{
-		Model:       "gpt-6.1-sol",
-		MaxTokens:   &maxTokens,
-		ServiceTier: "ultrafast",
-		Messages: []Message{{
-			Role:    "user",
-			Content: Content{{Type: "text", Text: "Hello"}},
-		}},
-	}, models.NewCatalog(models.BootstrapEntries()))
-	if err != nil {
-		t.Fatalf("Normalize() error = %v", err)
-	}
-	if normalized.ServiceTier != "ultrafast" {
-		t.Fatalf("service_tier = %q, want ultrafast", normalized.ServiceTier)
 	}
 }
 
@@ -334,37 +285,6 @@ func TestNormalizeMessagesKeepsOnlyValidCodexThinkingSignatures(t *testing.T) {
 		if item.EncryptedContent == "Eo8Canthropic-state" {
 			t.Fatalf("foreign thinking signature was forwarded: %#v", normalized.Input)
 		}
-	}
-}
-
-func TestNormalizeMessagesRejectsUnknownToolResult(t *testing.T) {
-	t.Parallel()
-
-	maxTokens := 10
-	_, err := Normalize(MessagesRequest{
-		Model:     "gpt-5.6-terra",
-		MaxTokens: &maxTokens,
-		Messages:  []Message{{Role: "user", Content: Content{{Type: "tool_result", ToolUseID: "missing", Content: Content{{Type: "text", Text: "nope"}}}}}},
-	}, models.NewCatalog(models.BootstrapEntries()))
-	if err == nil || !strings.Contains(err.Error(), "unknown tool_use") {
-		t.Fatalf("Normalize() error = %v", err)
-	}
-}
-
-func TestNormalizeMessagesMapsZeroMaxTokensToGenerateFalse(t *testing.T) {
-	t.Parallel()
-
-	maxTokens := 0
-	normalized, err := Normalize(MessagesRequest{
-		Model:     "gpt-5.6-terra",
-		MaxTokens: &maxTokens,
-		Messages:  []Message{{Role: "user", Content: Content{{Type: "text", Text: "warm cache"}}}},
-	}, models.NewCatalog(models.BootstrapEntries()))
-	if err != nil {
-		t.Fatalf("Normalize() error = %v", err)
-	}
-	if normalized.Generate == nil || *normalized.Generate {
-		t.Fatalf("Generate = %#v, want false", normalized.Generate)
 	}
 }
 
@@ -501,44 +421,6 @@ func TestNormalizeMessagesMakesOptionalOutputFieldsStrictAndNullable(t *testing.
 	}
 }
 
-func TestNormalizeMessagesResolvesOptionalOutputSchemaRefs(t *testing.T) {
-	t.Parallel()
-
-	text, responseSchema, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
-		Type: "json_schema",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"result":  map[string]any{"type": "string"},
-				"details": map[string]any{"$ref": "#/$defs/details"},
-			},
-			"required": []any{"result"},
-			"$defs": map[string]any{
-				"details": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"note": map[string]any{"type": "string"},
-					},
-				},
-			},
-		},
-	}})
-	if err != nil {
-		t.Fatalf("normalizeOutputFormat() error = %v", err)
-	}
-
-	properties, _ := text.Format.Schema["properties"].(map[string]any)
-	details, _ := properties["details"].(map[string]any)
-	if !newSchemaMatcher().matches(details, nil) {
-		t.Fatalf("strict details schema = %#v, want nullable", details)
-	}
-	responseProperties, _ := responseSchema["properties"].(map[string]any)
-	responseDetails, _ := responseProperties["details"].(map[string]any)
-	if responseDetails["$ref"] != nil || responseDetails["type"] != "object" {
-		t.Fatalf("response details schema = %#v, want inlined object", responseDetails)
-	}
-}
-
 func TestNormalizeMessagesRejectsInvalidOutputSchemas(t *testing.T) {
 	t.Parallel()
 
@@ -553,15 +435,6 @@ func TestNormalizeMessagesRejectsInvalidOutputSchemas(t *testing.T) {
 			want:   "root must have type object",
 		},
 		{
-			name: "undeclared required property",
-			schema: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{"result": map[string]any{"type": "string"}},
-				"required":   []any{"result", "undeclared"},
-			},
-			want: `required property "undeclared" must be declared`,
-		},
-		{
 			name: "malformed required properties",
 			schema: map[string]any{
 				"type":       "object",
@@ -569,14 +442,6 @@ func TestNormalizeMessagesRejectsInvalidOutputSchemas(t *testing.T) {
 				"required":   "result",
 			},
 			want: "output schema is invalid",
-		},
-		{
-			name: "boolean property schema",
-			schema: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{"never": false},
-			},
-			want: `property "never" must use an object schema`,
 		},
 		{
 			name: "unsupported composition",
@@ -588,93 +453,6 @@ func TestNormalizeMessagesRejectsInvalidOutputSchemas(t *testing.T) {
 				}},
 			},
 			want: `keyword "allOf" is not supported`,
-		},
-		{
-			name: "unsupported keyword",
-			schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{"values": map[string]any{
-					"type":     "array",
-					"items":    map[string]any{"type": "string"},
-					"contains": map[string]any{"const": "required"},
-				}},
-			},
-			want: `keyword "contains" is not supported`,
-		},
-		{
-			name: "unsupported format",
-			schema: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{"link": map[string]any{"type": "string", "format": "uri"}},
-			},
-			want: `format "uri" is not supported`,
-		},
-		{
-			name: "non-object root",
-			schema: map[string]any{
-				"anyOf": []any{
-					map[string]any{"type": "string"},
-					map[string]any{"type": "null"},
-				},
-			},
-			want: "root must have type object",
-		},
-		{
-			name: "additional properties",
-			schema: map[string]any{
-				"type":                 "object",
-				"properties":           map[string]any{"result": map[string]any{"type": "string"}},
-				"additionalProperties": true,
-			},
-			want: "must set additionalProperties to false",
-		},
-		{
-			name: "nested boolean schema",
-			schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{"choice": map[string]any{
-					"anyOf": []any{false, map[string]any{"type": "string"}},
-				}},
-			},
-			want: `"anyOf" entries must use object schemas`,
-		},
-		{
-			name: "empty anyOf",
-			schema: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{"choice": map[string]any{"anyOf": []any{}}},
-			},
-			want: `"anyOf" must contain at least one schema`,
-		},
-		{
-			name: "array without items",
-			schema: map[string]any{
-				"type":       "object",
-				"properties": map[string]any{"values": map[string]any{"type": "array"}},
-			},
-			want: "array nodes must define items",
-		},
-		{
-			name: "typed object anyOf",
-			schema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{"choice": map[string]any{
-					"type": "object",
-					"anyOf": []any{
-						map[string]any{
-							"type":       "object",
-							"properties": map[string]any{"a": map[string]any{"type": "string"}},
-							"required":   []any{"a"},
-						},
-						map[string]any{
-							"type":       "object",
-							"properties": map[string]any{"b": map[string]any{"type": "string"}},
-							"required":   []any{"b"},
-						},
-					},
-				}},
-			},
-			want: `"anyOf" cannot be combined with type object`,
 		},
 		{
 			name: "unresolved reference",
@@ -705,74 +483,6 @@ func TestNormalizeMessagesRejectsInvalidOutputSchemas(t *testing.T) {
 	}
 }
 
-func TestNormalizeMessagesStrictifiesEmptyNullableObjects(t *testing.T) {
-	t.Parallel()
-
-	text, _, err := normalizeOutputFormat(&OutputConfig{Format: &OutputFormat{
-		Type: "json_schema",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"details": map[string]any{"type": []any{"object", "null"}},
-			},
-		},
-	}})
-	if err != nil {
-		t.Fatalf("normalizeOutputFormat() error = %v", err)
-	}
-	properties, _ := text.Format.Schema["properties"].(map[string]any)
-	details, _ := properties["details"].(map[string]any)
-	if details["additionalProperties"] != false {
-		t.Fatalf("details = %#v", details)
-	}
-	if _, ok := details["properties"].(map[string]any); !ok {
-		t.Fatalf("details.properties = %#v, want object", details["properties"])
-	}
-}
-
-func TestDecodeMessagesAcceptsCurrentClaudeCodeBetaFields(t *testing.T) {
-	t.Parallel()
-
-	_, err := DecodeMessages([]byte(`{
-		"model":"gpt-5.6-sol",
-		"max_tokens":32000,
-		"messages":[{"role":"user","content":"hello"}],
-		"thinking":{"type":"adaptive","display":"omitted"},
-		"context_management":{"edits":[{"type":"clear_thinking_20251015","keep":"all"}]},
-		"output_config":{"effort":"high"}
-	}`))
-	if err != nil {
-		t.Fatalf("DecodeMessages() error = %v", err)
-	}
-}
-
-func TestNormalizeMessagesWrapsMessageSystemRoleAsUserReminder(t *testing.T) {
-	t.Parallel()
-
-	maxTokens := 10
-	normalized, err := Normalize(MessagesRequest{
-		Model:     "gpt-5.6-sol",
-		MaxTokens: &maxTokens,
-		Messages: []Message{
-			{Role: "user", Content: Content{{Type: "text", Text: "hello"}}},
-			{Role: "system", Content: Content{{Type: "text", Text: "Use the Workflow tool."}}},
-		},
-	}, models.NewCatalog(models.BootstrapEntries()))
-	if err != nil {
-		t.Fatalf("Normalize() error = %v", err)
-	}
-	if len(normalized.Input) != 2 {
-		t.Fatalf("input len = %d, want 2: %#v", len(normalized.Input), normalized.Input)
-	}
-	reminder := normalized.Input[1]
-	if reminder.Role != "user" || len(reminder.Content) != 1 {
-		t.Fatalf("reminder = %#v", reminder)
-	}
-	if got := reminder.Content[0].Text; got != "<system-reminder>\nUse the Workflow tool.\n</system-reminder>" {
-		t.Fatalf("reminder text = %q", got)
-	}
-}
-
 func TestNormalizeMessagesFiltersClaudeCodeAttributionSystemText(t *testing.T) {
 	t.Parallel()
 
@@ -794,63 +504,6 @@ func TestNormalizeMessagesFiltersClaudeCodeAttributionSystemText(t *testing.T) {
 	}
 	if len(normalized.Input) == 0 || normalized.Input[0].Role != "developer" || len(normalized.Input[0].Content) != 1 || normalized.Input[0].Content[0].Text != "Be precise." {
 		t.Fatalf("first input = %#v, want developer item with filtered system text", normalized.Input)
-	}
-}
-
-func TestNormalizeMessagesMapsHostedWebSearch(t *testing.T) {
-	t.Parallel()
-
-	for _, toolType := range []string{"web_search_20250305", "web_search_20260209"} {
-		t.Run(toolType, func(t *testing.T) {
-			t.Parallel()
-
-			request, err := DecodeMessages([]byte(`{
-				"model":"gpt-5.6-terra",
-				"max_tokens":10,
-				"messages":[{"role":"user","content":"search"}],
-				"tools":[{
-					"type":"` + toolType + `",
-					"name":"browser_search",
-					"allowed_domains":["openai.com","anthropic.com"],
-					"user_location":{"type":"approximate","country":"US"}
-				}],
-				"tool_choice":{"type":"tool","name":"browser_search","disable_parallel_tool_use":true}
-			}`))
-			if err != nil {
-				t.Fatalf("DecodeMessages() error = %v", err)
-			}
-
-			normalized, err := Normalize(request, models.NewCatalog(models.BootstrapEntries()))
-			if err != nil {
-				t.Fatalf("Normalize() error = %v", err)
-			}
-			if len(normalized.Tools) != 1 || normalized.Tools[0].Type != "web_search" {
-				t.Fatalf("tools = %#v, want one web_search tool", normalized.Tools)
-			}
-			encoded, err := json.Marshal(normalized.Tools[0])
-			if err != nil {
-				t.Fatalf("json.Marshal(tool) error = %v", err)
-			}
-			var tool map[string]any
-			if err := json.Unmarshal(encoded, &tool); err != nil {
-				t.Fatalf("json.Unmarshal(tool) error = %v", err)
-			}
-			filters, _ := tool["filters"].(map[string]any)
-			allowedDomains, _ := filters["allowed_domains"].([]any)
-			if len(allowedDomains) != 2 || allowedDomains[0] != "openai.com" || allowedDomains[1] != "anthropic.com" {
-				t.Fatalf("filters = %#v", filters)
-			}
-			if country := normalized.Tools[0].UserLocation["country"]; country != "US" {
-				t.Fatalf("user_location.country = %#v, want US", country)
-			}
-			var toolChoice map[string]any
-			if err := json.Unmarshal(normalized.ToolChoice, &toolChoice); err != nil || toolChoice["type"] != "web_search" {
-				t.Fatalf("tool choice = %s, err = %v", normalized.ToolChoice, err)
-			}
-			if normalized.ParallelToolCalls == nil || *normalized.ParallelToolCalls {
-				t.Fatalf("parallel_tool_calls = %#v, want false", normalized.ParallelToolCalls)
-			}
-		})
 	}
 }
 

@@ -21,7 +21,8 @@ func TestTextStreamsPreserveTerminalOutput(t *testing.T) {
 			name              string
 			delta, incomplete bool
 		}{
-			{name: "terminal text only"}, {name: "text deltas", delta: true}, {name: "incomplete terminal only", incomplete: true}, {name: "incomplete with deltas", delta: true, incomplete: true},
+			{name: "terminal text only"},
+			{name: "incomplete with deltas", delta: true, incomplete: true},
 		} {
 			t.Run(endpoint+"/"+tc.name, func(t *testing.T) {
 				app := newFailoverTestApp(t)

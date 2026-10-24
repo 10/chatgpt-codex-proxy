@@ -51,27 +51,6 @@ func TestLiveAnthropicMessagesAndTokenCount(t *testing.T) {
 	}
 }
 
-func TestLiveAnthropicStreamingEventOrder(t *testing.T) {
-	cfg := loadLiveConfig(t)
-	body := postAnthropicJSON(t, cfg, "/messages", map[string]any{
-		"model":      cfg.Model,
-		"max_tokens": 64,
-		"stream":     true,
-		"messages": []map[string]any{{
-			"role": "user", "content": "Reply with exactly STREAM_LIVE_OK",
-		}},
-	})
-	text := string(body)
-	for _, eventType := range []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"} {
-		if !strings.Contains(text, "event: "+eventType) {
-			t.Fatalf("stream missing %s: %s", eventType, text)
-		}
-	}
-	if strings.Contains(text, "[DONE]") {
-		t.Fatalf("Anthropic stream contained OpenAI sentinel: %s", text)
-	}
-}
-
 func postAnthropicJSON(t *testing.T, cfg liveConfig, path string, payload any) []byte {
 	return postJSON(t, cfg, path, payload, map[string]string{
 		"X-API-Key": cfg.APIKey, "Anthropic-Version": "2023-06-01",

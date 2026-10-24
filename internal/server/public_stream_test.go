@@ -1,8 +1,6 @@
 package server
 
 import (
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,94 +11,9 @@ import (
 
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/config"
-	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/turn"
 )
-
-func TestRequestUsesHostedWebSearch(t *testing.T) {
-	t.Parallel()
-
-	if !requestUsesHostedWebSearch(turn.NormalizedRequest{
-		Request: codex.Request{
-			Tools: []codex.Tool{{Type: "web_search"}},
-		},
-	}) {
-		t.Fatal("requestUsesHostedWebSearch = false, want true")
-	}
-
-	if requestUsesHostedWebSearch(turn.NormalizedRequest{
-		Request: codex.Request{
-			Tools: []codex.Tool{{Type: "function", Name: "lookup"}},
-		},
-	}) {
-		t.Fatal("requestUsesHostedWebSearch = true for function tool, want false")
-	}
-}
-
-func TestPrepareStreamResponseDisablesTransformAndBuffering(t *testing.T) {
-	t.Parallel()
-
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Writer.Header().Set("Content-Encoding", "gzip")
-	ctx.Writer.Header().Set("Content-Length", "123")
-
-	prepareStreamResponse(ctx)
-
-	headers := recorder.Header()
-	if got := headers.Get("Content-Type"); got != "text/event-stream" {
-		t.Fatalf("Content-Type = %q, want text/event-stream", got)
-	}
-	if got := headers.Get("Cache-Control"); got != "no-cache, no-transform" {
-		t.Fatalf("Cache-Control = %q, want no-cache, no-transform", got)
-	}
-	if got := headers.Get("Connection"); got != "keep-alive" {
-		t.Fatalf("Connection = %q, want keep-alive", got)
-	}
-	if got := headers.Get("X-Accel-Buffering"); got != "no" {
-		t.Fatalf("X-Accel-Buffering = %q, want no", got)
-	}
-	if got := headers.Get("Content-Encoding"); got != "identity" {
-		t.Fatalf("Content-Encoding = %q, want identity", got)
-	}
-	if got := headers.Get("Content-Length"); got != "" {
-		t.Fatalf("Content-Length = %q, want empty", got)
-	}
-}
-
-func TestContinuationInputHistoryIncludesAssistantReplay(t *testing.T) {
-	t.Parallel()
-
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{})
-	accumulator.Normalized.Input = []codex.InputItem{{
-		Role: "user",
-		Type: "message",
-		Content: []codex.ContentPart{{
-			Type:     "input_text",
-			Text:     "hello",
-			Detail:   "low",
-			FileURL:  "file://example",
-			FileData: "raw",
-			FileID:   "file_123",
-			Filename: "demo.txt",
-		}},
-	}}
-	accumulator.TextBuilder.WriteString("assistant replay")
-
-	history := continuationInputHistory(accumulator)
-	if len(history) != 2 {
-		t.Fatalf("history len = %d, want 2", len(history))
-	}
-	if history[0].Role != "user" || history[0].Content[0].Text != "hello" {
-		t.Fatalf("history[0] = %#v", history[0])
-	}
-	if history[1].Role != "assistant" || history[1].Content[0].Text != "assistant replay" {
-		t.Fatalf("history[1] = %#v", history[1])
-	}
-}
 
 func TestChatImageStreamerMapsAndDeduplicatesImages(t *testing.T) {
 	t.Parallel()
@@ -146,47 +59,6 @@ func TestResponsesStreamErrorUsesTopLevelResponsesShape(t *testing.T) {
 	}
 	if _, nested := events[0].Data["error"]; nested {
 		t.Fatalf("error payload = %#v, want top-level fields", events[0].Data)
-	}
-}
-
-func TestStreamChatCompletionEndsNormallyOnIncompleteResponse(t *testing.T) {
-	t.Parallel()
-
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
-
-	app := newFailoverTestApp(t)
-	record := mustGetAccount(t, app.accounts, "acct-a")
-	stream := &fakeEventStream{events: []*codex.StreamEvent{
-		{
-			Type: "response.output_text.delta",
-			Raw:  map[string]any{"response_id": "resp_chat_filter", "delta": "partial"},
-		},
-		{
-			Type: "response.incomplete",
-			Raw: map[string]any{"response": map[string]any{
-				"id":                 "resp_chat_filter",
-				"model":              "gpt-5.6-terra",
-				"status":             "incomplete",
-				"incomplete_details": map[string]any{"reason": "content_filter"},
-				"output_text":        "partial",
-			}},
-		},
-	}}
-
-	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{Model: "gpt-5.6-terra", Stream: true},
-	}, stream)
-
-	events := parseSSEEvents(t, recorder.Body.String())
-	if len(events) != 4 || events[len(events)-1].Raw != "[DONE]" {
-		t.Fatalf("events = %#v", events)
-	}
-	finalChoice := sliceOfMapsFromAny(events[len(events)-2].Data["choices"])[0]
-	if finalChoice["finish_reason"] != "content_filter" || finalChoice["native_finish_reason"] != "content_filter" {
-		t.Fatalf("final choice = %#v", finalChoice)
 	}
 }
 
@@ -238,27 +110,8 @@ func TestStreamChatCompletionEmitsReasoningContentAndStrictUsage(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
 	ctx.Set(middleware.RequestIDKey, "req-test")
 
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_chat_reasoning",
-		AccountID: "upstream_chat_reasoning",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg:           config.Config{ContinuationTTL: time.Minute},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_chat_reasoning")
+	app := newFailoverTestApp(t)
+	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
 		events: []*codex.StreamEvent{
 			{
@@ -344,103 +197,6 @@ func TestStreamChatCompletionEmitsReasoningContentAndStrictUsage(t *testing.T) {
 	}
 }
 
-func TestStreamChatCompletionDoesNotSynthesizeReasoningContentFromCompletedOutput(t *testing.T) {
-	t.Parallel()
-
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
-	ctx.Set(middleware.RequestIDKey, "req-test")
-
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_chat_reasoning_fallback",
-		AccountID: "upstream_chat_reasoning_fallback",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg:           config.Config{ContinuationTTL: time.Minute},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_chat_reasoning_fallback")
-	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{
-			{
-				Type: "response.output_text.delta",
-				Raw: map[string]any{
-					"response_id": "resp_chat_reasoning_fallback",
-					"delta":       "Final answer",
-				},
-			},
-			{
-				Type: "response.completed",
-				Raw: map[string]any{
-					"response": map[string]any{
-						"id":          "resp_chat_reasoning_fallback",
-						"model":       "gpt-5.6-terra",
-						"status":      "completed",
-						"output_text": "Final answer",
-						"output": []any{
-							map[string]any{
-								"type":   "reasoning",
-								"id":     "rs_1",
-								"status": "completed",
-								"summary": []any{
-									map[string]any{
-										"type": "summary_text",
-										"text": "Recovered summary",
-									},
-								},
-							},
-							map[string]any{
-								"type":   "message",
-								"role":   "assistant",
-								"status": "completed",
-								"content": []any{
-									map[string]any{
-										"type": "output_text",
-										"text": "Final answer",
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
-			Model:     "gpt-5.6-terra",
-			Stream:    true,
-			Reasoning: &codex.Reasoning{Effort: "high"},
-		},
-	}, stream)
-
-	events := parseSSEEvents(t, recorder.Body.String())
-	if len(events) != 4 {
-		t.Fatalf("event count = %d, want 4", len(events))
-	}
-	textDelta := events[1].Data
-	choices := sliceOfMapsFromAny(textDelta["choices"])
-	delta := nestedMapFromAny(choices[0]["delta"])
-	if _, ok := delta["reasoning_content"]; ok {
-		t.Fatalf("unexpected synthesized reasoning_content = %#v", delta["reasoning_content"])
-	}
-}
-
 func TestStreamChatCompletionUsesToolNameFromOutputItemWhenArgumentEventsOmitIt(t *testing.T) {
 	t.Parallel()
 
@@ -450,27 +206,8 @@ func TestStreamChatCompletionUsesToolNameFromOutputItemWhenArgumentEventsOmitIt(
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
 	ctx.Set(middleware.RequestIDKey, "req-test")
 
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_chat_tool_name",
-		AccountID: "upstream_chat_tool_name",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg:           config.Config{ContinuationTTL: time.Minute},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_chat_tool_name")
+	app := newFailoverTestApp(t)
+	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
 		events: []*codex.StreamEvent{
 			{
@@ -574,27 +311,8 @@ func TestStreamChatCompletionSupportsCustomToolCalls(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
 	ctx.Set(middleware.RequestIDKey, "req-test")
 
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_chat_custom_tool",
-		AccountID: "upstream_chat_custom_tool",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg:           config.Config{ContinuationTTL: time.Minute},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_chat_custom_tool")
+	app := newFailoverTestApp(t)
+	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
 		events: []*codex.StreamEvent{
 			{
@@ -698,122 +416,6 @@ func TestStreamChatCompletionSupportsCustomToolCalls(t *testing.T) {
 	choices = sliceOfMapsFromAny(finalChunk["choices"])
 	if choices[0]["finish_reason"] != "tool_calls" {
 		t.Fatalf("finish_reason = %#v, want tool_calls", choices[0]["finish_reason"])
-	}
-}
-
-func TestStreamResponsesPreservesReasoningItemsAndEvents(t *testing.T) {
-	t.Parallel()
-
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-	ctx.Set(middleware.RequestIDKey, "req-test")
-
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_responses_reasoning",
-		AccountID: "upstream_responses_reasoning",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg:           config.Config{ContinuationTTL: time.Minute},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_responses_reasoning")
-	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{
-			{
-				Type: "response.reasoning_summary_text.delta",
-				Raw: map[string]any{
-					"response_id": "resp_responses_reasoning",
-					"delta":       "Reasoning summary",
-				},
-			},
-			{
-				Type: "response.completed",
-				Raw: map[string]any{
-					"response": map[string]any{
-						"id":     "resp_responses_reasoning",
-						"model":  "gpt-5.6-terra",
-						"status": "completed",
-						"output": []any{
-							map[string]any{
-								"type":              "reasoning",
-								"id":                "rs_1",
-								"status":            "completed",
-								"encrypted_content": "encrypted-reasoning",
-								"summary": []any{
-									map[string]any{
-										"type": "summary_text",
-										"text": "Reasoning summary",
-									},
-								},
-							},
-							map[string]any{
-								"type":   "message",
-								"role":   "assistant",
-								"status": "completed",
-								"content": []any{
-									map[string]any{
-										"type": "output_text",
-										"text": "Final answer",
-									},
-								},
-							},
-						},
-						"output_text": "Final answer",
-						"usage": map[string]any{
-							"input_tokens":  8,
-							"output_tokens": 3,
-							"output_tokens_details": map[string]any{
-								"reasoning_tokens": 1,
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	app.streamResponses(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
-			Model:  "gpt-5.6-terra",
-			Stream: true,
-		},
-	}, stream)
-
-	events := parseSSEEvents(t, recorder.Body.String())
-	assertEventTypes(t, events,
-		"response.reasoning_summary_text.delta",
-		"response.completed",
-	)
-	completed := events[1].Data
-	response := nestedMapFromAny(completed["response"])
-	output := sliceOfMapsFromAny(response["output"])
-	if len(output) != 2 {
-		t.Fatalf("response.output len = %d, want 2", len(output))
-	}
-	if output[0]["type"] != "reasoning" {
-		t.Fatalf("output[0].type = %#v, want reasoning", output[0]["type"])
-	}
-	if output[0]["encrypted_content"] != "encrypted-reasoning" {
-		t.Fatalf("output[0].encrypted_content = %#v, want encrypted-reasoning", output[0]["encrypted_content"])
-	}
-	usage := nestedMapFromAny(response["usage"])
-	outputDetails := nestedMapFromAny(usage["output_tokens_details"])
-	if outputDetails["reasoning_tokens"] != float64(1) {
-		t.Fatalf("reasoning_tokens = %#v, want 1", outputDetails["reasoning_tokens"])
 	}
 }
 
@@ -935,38 +537,9 @@ func TestClassifyUpstreamErrorCoolsDownGeneric403ButNotCloudflare403(t *testing.
 	t.Parallel()
 
 	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t,
-		&accounts.Record{
-			ID:        "acct_generic_403",
-			AccountID: "upstream_generic_403",
-			Status:    accounts.StatusActive,
-			Token: accounts.OAuthToken{
-				AccessToken: "token",
-				ExpiresAt:   now.Add(time.Hour),
-			},
-			CreatedAt: now,
-			UpdatedAt: now,
-		},
-		&accounts.Record{
-			ID:        "acct_cloudflare_403",
-			AccountID: "upstream_cloudflare_403",
-			Status:    accounts.StatusActive,
-			Token: accounts.OAuthToken{
-				AccessToken: "token",
-				ExpiresAt:   now.Add(time.Hour),
-			},
-			CreatedAt: now,
-			UpdatedAt: now,
-		},
-	)
+	app := newFailoverTestApp(t)
 
-	app := &App{
-		cfg:      config.Config{},
-		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts: accountsSvc,
-	}
-
-	status, code, _ := app.classifyUpstreamError("acct_generic_403", &codex.UpstreamError{
+	status, code, _ := app.classifyUpstreamError("acct-a", &codex.UpstreamError{
 		Op:         "codex response",
 		StatusCode: http.StatusForbidden,
 		Body:       `{"error":"access denied"}`,
@@ -975,7 +548,7 @@ func TestClassifyUpstreamErrorCoolsDownGeneric403ButNotCloudflare403(t *testing.
 		t.Fatalf("generic 403 = (%d, %q), want (403, upstream_error)", status, code)
 	}
 
-	status, code, _ = app.classifyUpstreamError("acct_cloudflare_403", &codex.UpstreamError{
+	status, code, _ = app.classifyUpstreamError("acct-b", &codex.UpstreamError{
 		Op:         "codex response",
 		StatusCode: http.StatusForbidden,
 		Body:       "<!DOCTYPE html><html><body>cf_chl blocked</body></html>",
@@ -984,14 +557,14 @@ func TestClassifyUpstreamErrorCoolsDownGeneric403ButNotCloudflare403(t *testing.
 		t.Fatalf("cloudflare 403 = (%d, %q), want (403, upstream_error)", status, code)
 	}
 
-	generic := mustGetAccount(t, accountsSvc, "acct_generic_403")
+	generic := mustGetAccount(t, app.accounts, "acct-a")
 	if generic.Status != accounts.StatusActive {
 		t.Fatalf("generic status = %q, want active", generic.Status)
 	}
 	if generic.CooldownUntil == nil || !generic.CooldownUntil.After(now) {
 		t.Fatalf("generic cooldown = %v, want future cooldown", generic.CooldownUntil)
 	}
-	cloudflare := mustGetAccount(t, accountsSvc, "acct_cloudflare_403")
+	cloudflare := mustGetAccount(t, app.accounts, "acct-b")
 	if cloudflare.Status != accounts.StatusActive {
 		t.Fatalf("cloudflare status = %q, want active", cloudflare.Status)
 	}

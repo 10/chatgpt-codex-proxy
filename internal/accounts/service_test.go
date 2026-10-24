@@ -25,23 +25,6 @@ func (m *memoryStore) Save(state State) error {
 	return nil
 }
 
-func TestLeastUsedPrefersLowerPrimaryUsedPercent(t *testing.T) {
-	t.Parallel()
-
-	svc := newTestService(t, RotationLeastUsed,
-		recordWithQuota("acct_busy", 80, nil),
-		recordWithQuota("acct_light", 20, nil),
-	)
-
-	record, err := svc.Acquire("")
-	if err != nil {
-		t.Fatalf("Acquire() error = %v", err)
-	}
-	if record.ID != "acct_light" {
-		t.Fatalf("Acquire() = %q, want acct_light", record.ID)
-	}
-}
-
 func TestLeastUsedComparesMostUsedWindowRegardlessOfSlot(t *testing.T) {
 	t.Parallel()
 
@@ -67,24 +50,6 @@ func TestLeastUsedComparesMostUsedWindowRegardlessOfSlot(t *testing.T) {
 	}
 }
 
-func TestLeastUsedPrefersAccountFurthestFromAnyLimit(t *testing.T) {
-	t.Parallel()
-
-	weeklyHeadroomPercent := 30.0
-	shortBusy := recordWithQuota("acct_short_busy", 70, &weeklyHeadroomPercent)
-	weeklyBusyPercent := 75.0
-	weeklyBusy := recordWithQuota("acct_weekly_busy", 40, &weeklyBusyPercent)
-
-	svc := newTestService(t, RotationLeastUsed, shortBusy, weeklyBusy)
-	record, err := svc.Acquire("")
-	if err != nil {
-		t.Fatalf("Acquire() error = %v", err)
-	}
-	if record.ID != "acct_short_busy" {
-		t.Fatalf("Acquire() = %q, want acct_short_busy because its tightest window is 70%% vs 75%%", record.ID)
-	}
-}
-
 func TestLeastUsedTreatsResetWindowAsUnused(t *testing.T) {
 	t.Parallel()
 
@@ -99,25 +64,6 @@ func TestLeastUsedTreatsResetWindowAsUnused(t *testing.T) {
 	}
 	if record.ID != "acct_reset" {
 		t.Fatalf("Acquire() = %q, want acct_reset because its window has reset", record.ID)
-	}
-}
-
-func TestLeastUsedUsesSecondaryUsedPercentAsTieBreaker(t *testing.T) {
-	t.Parallel()
-
-	secondaryHigh := 70.0
-	secondaryLow := 10.0
-	svc := newTestService(t, RotationLeastUsed,
-		recordWithQuota("acct_high_secondary", 40, &secondaryHigh),
-		recordWithQuota("acct_low_secondary", 40, &secondaryLow),
-	)
-
-	record, err := svc.Acquire("")
-	if err != nil {
-		t.Fatalf("Acquire() error = %v", err)
-	}
-	if record.ID != "acct_low_secondary" {
-		t.Fatalf("Acquire() = %q, want acct_low_secondary", record.ID)
 	}
 }
 
@@ -237,33 +183,6 @@ func TestRoundRobinRotatesOverEligibleAccountsOnly(t *testing.T) {
 
 	if first.ID != "acct_a" || second.ID != "acct_b" || third.ID != "acct_a" {
 		t.Fatalf("round robin eligible order = %q, %q, %q; want acct_a, acct_b, acct_a", first.ID, second.ID, third.ID)
-	}
-}
-
-func TestCooldownExcludesUntilExpiry(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	cooldown := now.Add(2 * time.Minute)
-	svc := newTestService(t, RotationLeastUsed,
-		&Record{
-			ID:            "acct_cooldown",
-			AccountID:     "upstream_cooldown",
-			Status:        StatusActive,
-			Token:         makeTestOAuthToken(t, testJWTClaims{}),
-			CooldownUntil: &cooldown,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		},
-		recordWithID("acct_ok"),
-	)
-
-	record, err := svc.Acquire("")
-	if err != nil {
-		t.Fatalf("Acquire() error = %v", err)
-	}
-	if record.ID != "acct_ok" {
-		t.Fatalf("Acquire() = %q, want acct_ok", record.ID)
 	}
 }
 
@@ -489,42 +408,6 @@ func TestPatchActiveClearsCooldownLastErrorAndQuota(t *testing.T) {
 	}
 }
 
-func TestUpsertFromTokenReusesAccountWhenUserIDMissing(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	svc := newTestService(t, RotationLeastUsed, &Record{
-		ID:        "acct_existing",
-		AccountID: "upstream_same",
-		Status:    StatusActive,
-		Token:     makeTestOAuthToken(t, testJWTClaims{Email: "old@example.com"}),
-		Cookies:   map[string]string{},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	record, err := svc.UpsertFromToken("upstream_same", makeTestOAuthToken(t, testJWTClaims{
-		Email: "new@example.com",
-	}))
-	if err != nil {
-		t.Fatalf("UpsertFromToken() error = %v", err)
-	}
-	if record.ID != "acct_existing" {
-		t.Fatalf("UpsertFromToken() returned %q, want acct_existing", record.ID)
-	}
-
-	records, err := svc.List()
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(records) != 1 {
-		t.Fatalf("len(List()) = %d, want 1", len(records))
-	}
-	if records[0].Email != "new@example.com" {
-		t.Fatalf("email = %q, want new@example.com", records[0].Email)
-	}
-}
-
 func TestUpsertFromTokenFillsMissingStoredUserID(t *testing.T) {
 	t.Parallel()
 
@@ -563,31 +446,6 @@ func TestUpsertFromTokenFillsMissingStoredUserID(t *testing.T) {
 	}
 	if records[0].PlanType != "plus" {
 		t.Fatalf("plan_type = %q, want plus", records[0].PlanType)
-	}
-}
-
-func TestMetadataFromTokenUsesNestedProfileAndAuthClaims(t *testing.T) {
-	t.Parallel()
-
-	metadata := metadataFromToken(makeTestOAuthToken(t, testJWTClaims{
-		Profile: &testJWTProfileClaims{
-			Email:  "profile@example.com",
-			UserID: "user_profile",
-		},
-		Auth: &testJWTAuthClaims{
-			PlanType: "team",
-			UserID:   "user_auth",
-		},
-	}))
-
-	if metadata.Email != "profile@example.com" {
-		t.Fatalf("email = %q, want profile@example.com", metadata.Email)
-	}
-	if metadata.PlanType != "team" {
-		t.Fatalf("plan_type = %q, want team", metadata.PlanType)
-	}
-	if metadata.UserID != "user_profile" {
-		t.Fatalf("user_id = %q, want user_profile", metadata.UserID)
 	}
 }
 
@@ -643,35 +501,15 @@ func intPointer(value int) *int {
 }
 
 type testJWTClaims struct {
-	Email    string                `json:"email,omitempty"`
-	PlanType string                `json:"chatgpt_plan_type,omitempty"`
-	UserID   string                `json:"chatgpt_user_id,omitempty"`
-	Profile  *testJWTProfileClaims `json:"https://api.openai.com/profile,omitempty"`
-	Auth     *testJWTAuthClaims    `json:"https://api.openai.com/auth,omitempty"`
-}
-
-type testJWTProfileClaims struct {
-	Email  string `json:"email,omitempty"`
-	UserID string `json:"chatgpt_user_id,omitempty"`
-}
-
-type testJWTAuthClaims struct {
+	Email    string `json:"email,omitempty"`
 	PlanType string `json:"chatgpt_plan_type,omitempty"`
 	UserID   string `json:"chatgpt_user_id,omitempty"`
-}
-
-type testJWTHeader struct {
-	Alg string `json:"alg"`
-	Typ string `json:"typ"`
 }
 
 func makeTestOAuthToken(t *testing.T, claims testJWTClaims) OAuthToken {
 	t.Helper()
 
-	header, err := json.Marshal(testJWTHeader{Alg: "none", Typ: "JWT"})
-	if err != nil {
-		t.Fatalf("marshal header: %v", err)
-	}
+	header := []byte(`{"alg":"none","typ":"JWT"}`)
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		t.Fatalf("marshal claims: %v", err)

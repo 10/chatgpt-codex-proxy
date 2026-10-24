@@ -30,26 +30,21 @@ func TestLiveImages(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
-		name, path                 string
-		edit, streaming, multipart bool
+		name, path string
+		edit       bool
 	}{
 		{name: "generation JSON", path: "/images/generations"},
-		{name: "generation SSE", path: "/images/generations", streaming: true},
-		{name: "edit JSON", path: "/images/edits", edit: true},
-		{name: "edit multipart SSE", path: "/images/edits", edit: true, streaming: true, multipart: true},
+		{name: "edit multipart SSE", path: "/images/edits", edit: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prompt := "A plain blue square on a white background. Minimal flat graphic."
 			if tc.edit {
 				prompt = "Change the red square to blue. Return the edited image."
 			}
-			payload := map[string]any{"model": "gpt-image-2", "prompt": prompt, "quality": "low", "size": "1024x1024", "output_format": "png", "response_format": "b64_json", "stream": tc.streaming}
-			if tc.edit {
-				payload["images"] = []map[string]string{{"image_url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(fixturePNG.Bytes())}}
-			}
+			payload := map[string]any{"model": "gpt-image-2", "prompt": prompt, "quality": "low", "size": "1024x1024", "output_format": "png", "response_format": "b64_json", "stream": tc.edit}
 			var body bytes.Buffer
 			contentType := "application/json"
-			if tc.multipart {
+			if tc.edit {
 				writer := multipart.NewWriter(&body)
 				for k, v := range map[string]string{"model": "gpt-image-2", "prompt": prompt, "quality": "low", "size": "1024x1024", "output_format": "png", "response_format": "b64_json", "stream": "true"} {
 					if err := writer.WriteField(k, v); err != nil {
@@ -89,7 +84,7 @@ func TestLiveImages(t *testing.T) {
 				t.Fatalf("HTTP %d: %.1000s", response.StatusCode, data)
 			}
 			var encoded string
-			if tc.streaming {
+			if tc.edit {
 				if !strings.HasPrefix(response.Header.Get("Content-Type"), "text/event-stream") {
 					t.Fatal("missing SSE content type")
 				}

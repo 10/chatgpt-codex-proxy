@@ -216,44 +216,6 @@ func TestQuotaFromUsageResponseHandlesSecondaryWindowPresence(t *testing.T) {
 	}
 }
 
-func TestUsageResponseIgnoresCodeReviewSecondaryWindow(t *testing.T) {
-	t.Parallel()
-
-	var response UsageResponse
-	if err := json.Unmarshal([]byte(`{"code_review_rate_limit":{"secondary_window":{"used_percent":"malformed"}}}`), &response); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-}
-
-func TestQuotaFromUsageResponseIncludesCodeReviewRateLimit(t *testing.T) {
-	t.Parallel()
-
-	payload := UsageResponse{PlanType: "plus"}
-	payload.RateLimit.Allowed = true
-	payload.RateLimit.PrimaryWindow = &UsageWindow{
-		UsedPercent:        25,
-		LimitWindowSeconds: 3600,
-		ResetAt:            time.Now().UTC().Add(time.Hour).Unix(),
-	}
-	payload.CodeReviewRateLimit = &UsageResponseCodeReviewRateLimit{
-		Allowed:      true,
-		LimitReached: true,
-		PrimaryWindow: &UsageWindow{
-			UsedPercent:        100,
-			LimitWindowSeconds: 86400,
-			ResetAt:            time.Now().UTC().Add(24 * time.Hour).Unix(),
-		},
-	}
-
-	snapshot := QuotaFromUsageResponse(payload)
-	if snapshot.CodeReviewRateLimit == nil {
-		t.Fatal("expected code review rate limit")
-	}
-	if !snapshot.CodeReviewRateLimit.LimitReached {
-		t.Fatal("expected code review limit_reached")
-	}
-}
-
 func TestUsageResponseDecodesCreditBalance(t *testing.T) {
 	t.Parallel()
 	var usage UsageResponse

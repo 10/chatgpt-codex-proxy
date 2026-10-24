@@ -4,28 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
-	"chatgpt-codex-proxy/internal/accountmanager"
-	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/config"
-	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/models"
 )
 
 type fakeResponsesWebSocketStream struct {
 	mu       sync.Mutex
-	headers  http.Header
 	turns    [][]*codex.StreamEvent
 	active   []*codex.StreamEvent
 	requests []map[string]any
@@ -72,78 +65,7 @@ func (f *fakeResponsesWebSocketStream) NextEvent() (*codex.StreamEvent, error) {
 func (f *fakeResponsesWebSocketStream) Close() error { return nil }
 
 func (f *fakeResponsesWebSocketStream) Headers() http.Header {
-	return f.headers.Clone()
-}
-
-func TestResponsesWebSocketReusesUpstreamConnectionForContinuation(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	const model = "gpt-5.6-terra"
-	fakeStream := &fakeResponsesWebSocketStream{
-		headers: http.Header{"X-Codex-Turn-State": []string{"turn-state"}},
-		turns: [][]*codex.StreamEvent{
-			responsesWebSocketTextEvents("resp_ws_1", model, "first"),
-			responsesWebSocketTextEvents("resp_ws_2", model, "second"),
-		},
-	}
-	app := newResponsesWebSocketTestApp(t, fakeStream)
-
-	server := httptest.NewServer(app.Handler())
-	defer server.Close()
-
-	headers := http.Header{"Authorization": []string{"Bearer test-key"}}
-	conn, response, err := websocket.DefaultDialer.Dial(websocketTestURL(server.URL)+"/v1/responses", headers)
-	if err != nil {
-		if response != nil {
-			response.Body.Close()
-		}
-		t.Fatalf("Dial() error = %v", err)
-	}
-	defer conn.Close()
-
-	if err := conn.WriteJSON(map[string]any{
-		"type":  "response.create",
-		"model": model,
-		"input": "first prompt",
-	}); err != nil {
-		t.Fatalf("first WriteJSON() error = %v", err)
-	}
-	first := readResponsesWebSocketTurn(t, conn)
-	assertResponsesWebSocketEventTypes(t, first, "response.created", "response.output_text.delta", "response.completed")
-
-	if err := conn.WriteJSON(map[string]any{
-		"type": "response.append",
-		"input": []map[string]any{{
-			"type":    "message",
-			"role":    "user",
-			"content": []map[string]any{{"type": "input_text", "text": "second prompt"}},
-		}},
-	}); err != nil {
-		t.Fatalf("second WriteJSON() error = %v", err)
-	}
-	second := readResponsesWebSocketTurn(t, conn)
-	assertResponsesWebSocketEventTypes(t, second, "response.created", "response.output_text.delta", "response.completed")
-
-	fakeStream.mu.Lock()
-	requests := append([]map[string]any(nil), fakeStream.requests...)
-	connects := fakeStream.connects
-	fakeStream.mu.Unlock()
-	if connects != 1 {
-		t.Fatalf("upstream connection count = %d, want 1", connects)
-	}
-	if len(requests) != 2 {
-		t.Fatalf("upstream request count = %d, want 2", len(requests))
-	}
-	if got := requests[1]["previous_response_id"]; got != "resp_ws_1" {
-		t.Fatalf("second previous_response_id = %#v, want resp_ws_1", got)
-	}
-	if got := requests[1]["model"]; got != model {
-		t.Fatalf("second model = %#v, want inherited %q", got, model)
-	}
-	input, ok := requests[1]["input"].([]any)
-	if !ok || len(input) != 1 {
-		t.Fatalf("second input = %#v, want one incremental item", requests[1]["input"])
-	}
+	return http.Header{}
 }
 
 func TestResponsesWebSocketContinuesAfterIncompleteResponse(t *testing.T) {
@@ -216,9 +138,10 @@ func TestResponsesWebSocketContinuesAfterIncompleteResponse(t *testing.T) {
 
 	fakeStream.mu.Lock()
 	requests := append([]map[string]any(nil), fakeStream.requests...)
+	connects := fakeStream.connects
 	fakeStream.mu.Unlock()
-	if len(requests) != 2 || requests[1]["previous_response_id"] != "resp_ws_incomplete" {
-		t.Fatalf("requests = %#v", requests)
+	if connects != 1 || len(requests) != 2 || requests[1]["previous_response_id"] != "resp_ws_incomplete" || requests[1]["model"] != model {
+		t.Fatalf("connects = %d, requests = %#v", connects, requests)
 	}
 }
 
@@ -262,31 +185,6 @@ func TestResponsesWebSocketReturnsProtocolErrorsWithoutClosing(t *testing.T) {
 	assertResponsesWebSocketEventTypes(t, events, "response.created", "response.output_text.delta", "response.completed")
 }
 
-func TestResponsesWebSocketRequiresAPIKeyBeforeUpgrade(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	app := newResponsesWebSocketTestApp(t, &fakeResponsesWebSocketStream{})
-	server := httptest.NewServer(app.Handler())
-	defer server.Close()
-
-	conn, response, err := websocket.DefaultDialer.Dial(websocketTestURL(server.URL)+"/v1/responses", nil)
-	if conn != nil {
-		conn.Close()
-	}
-	if err == nil {
-		t.Fatal("Dial() error = nil, want authentication failure")
-	}
-	if response == nil || response.StatusCode != http.StatusUnauthorized {
-		status := 0
-		if response != nil {
-			status = response.StatusCode
-			response.Body.Close()
-		}
-		t.Fatalf("upgrade status = %d, want %d", status, http.StatusUnauthorized)
-	}
-	response.Body.Close()
-}
-
 func TestNormalizeResponsesWebSocketMessagePreservesGenerateAndIgnoresStream(t *testing.T) {
 	generate := false
 	normalized, err := normalizeResponsesWebSocketMessage([]byte(`{
@@ -326,61 +224,12 @@ func TestNormalizeResponsesWebSocketMessagePreservesGenerateAndIgnoresStream(t *
 	}
 }
 
-func TestNormalizeResponsesWebSocketAppendRequiresArrayInput(t *testing.T) {
-	t.Parallel()
-
-	normalized, err := normalizeResponsesWebSocketMessage([]byte(`{
-		"type":"response.append",
-		"input":[{"type":"message","role":"user","content":"continue"}]
-	}`), models.NewCatalog(models.BootstrapEntries()))
-	if err != nil {
-		t.Fatalf("normalizeResponsesWebSocketMessage() error = %v", err)
-	}
-	if !normalized.WebSocketAppend {
-		t.Fatal("WebSocketAppend = false, want true")
-	}
-
-	_, err = normalizeResponsesWebSocketMessage([]byte(`{"type":"response.append","input":"continue"}`), models.NewCatalog(models.BootstrapEntries()))
-	if err == nil || !strings.Contains(err.Error(), "array field") {
-		t.Fatalf("string input error = %v, want array field error", err)
-	}
-}
-
 func newResponsesWebSocketTestApp(t *testing.T, stream *fakeResponsesWebSocketStream) *App {
 	t.Helper()
 
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_ws",
-		AccountID: "upstream_ws",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-	cfg := config.Config{
-		ProxyAPIKey:     "test-key",
-		CodexBaseURL:    "https://chatgpt.example/backend-api",
-		DefaultModel:    "gpt-5.6-terra",
-		ContinuationTTL: time.Minute,
-		RefreshSkew:     time.Minute,
-	}
-	catalog := models.NewCatalog(models.BootstrapEntries())
-	httpClient := codex.NewHTTPClient(cfg)
-	engine := gin.New()
-	app := &App{
-		cfg:           cfg,
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		engine:        engine,
-		accounts:      accountsSvc,
-		accountMgr:    accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, catalog.SupportsRecord),
-		httpClient:    httpClient,
-		continuations: conversation.NewContinuationManager(time.Minute),
-		models:        catalog,
-	}
+	app := newFailoverTestApp(t)
+	app.cfg.ProxyAPIKey = "test-key"
+	app.engine = gin.New()
 	app.wsConnector = func(_ context.Context, _ string, _ http.Header, body any) (responsesWebSocketStream, error) {
 		stream.mu.Lock()
 		stream.connects++

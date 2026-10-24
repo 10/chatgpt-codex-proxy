@@ -13,7 +13,6 @@ import (
 )
 
 type fakeEventStream struct {
-	headers       http.Header
 	events        []*codex.StreamEvent
 	index         int
 	beforeTailErr func()
@@ -54,10 +53,7 @@ func (f *fakeEventStream) NextEvent() (*codex.StreamEvent, error) {
 func (f *fakeEventStream) Close() error { return nil }
 
 func (f *fakeEventStream) Headers() http.Header {
-	if f.headers == nil {
-		return http.Header{}
-	}
-	return f.headers
+	return http.Header{}
 }
 
 func newServerAccounts(t *testing.T, records ...*accounts.Record) *accounts.Service {

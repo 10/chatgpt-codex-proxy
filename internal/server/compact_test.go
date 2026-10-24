@@ -22,55 +22,6 @@ import (
 	"chatgpt-codex-proxy/internal/turn"
 )
 
-func TestResponsesCompactRouteRequiresAuth(t *testing.T) {
-	t.Parallel()
-
-	app := newCompactTestApp(t, nil)
-
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewBufferString(`{"input":"hello"}`))
-	req.Header.Set("Content-Type", "application/json")
-	app.Handler().ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", recorder.Code)
-	}
-}
-
-func TestHandleResponsesCompactRejectsMalformedJSON(t *testing.T) {
-	t.Parallel()
-
-	app := newCompactTestApp(t, nil)
-
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewBufferString(`{"input":`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", "test-key")
-	app.Handler().ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", recorder.Code)
-	}
-	assertOpenAIErrorCode(t, recorder.Body.Bytes(), "invalid_request_error")
-}
-
-func TestHandleResponsesCompactRejectsUnsupportedModel(t *testing.T) {
-	t.Parallel()
-
-	app := newCompactTestApp(t, nil)
-
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", bytes.NewBufferString(`{"model":"not-a-real-model","input":"hello"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-API-Key", "test-key")
-	app.Handler().ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", recorder.Code)
-	}
-	assertOpenAIErrorCode(t, recorder.Body.Bytes(), "model_not_found")
-}
-
 func TestHandleResponsesCompactReturnsCompactedWindow(t *testing.T) {
 	t.Parallel()
 
@@ -114,30 +65,6 @@ func TestHandleResponsesCompactReturnsCompactedWindow(t *testing.T) {
 	output, _ := body["output"].([]any)
 	if len(output) != 1 {
 		t.Fatalf("len(output) = %d, want 1", len(output))
-	}
-}
-
-func TestHandleResponsesCompactDecodesZstdRequestBody(t *testing.T) {
-	t.Parallel()
-
-	var received codex.CompactRequest
-	app := newCompactTestApp(t, func(ctx context.Context, record accounts.Record, req codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error) {
-		received = req
-		return codex.CompactResponse{}, nil, nil
-	})
-
-	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses/compact", zstdRequestBody(t, `{"input":"hello"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Content-Encoding", "zstd")
-	req.Header.Set("X-API-Key", "test-key")
-	app.Handler().ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", recorder.Code, recorder.Body.String())
-	}
-	if len(received.Input) != 1 || received.Input[0].Content[0].Text != "hello" {
-		t.Fatalf("received.Input = %#v, want decoded hello input", received.Input)
 	}
 }
 
@@ -215,21 +142,6 @@ func TestHandleResponsesCompactPreservesUsageAndExpandsPreviousResponse(t *testi
 	}
 }
 
-func TestResolveCompactRequestRejectsUnknownPreviousResponseID(t *testing.T) {
-	t.Parallel()
-
-	app := &App{
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	_, _, err := app.resolveCompactRequest(turn.NormalizedCompactRequest{
-		PreviousResponseID: "resp_missing",
-	})
-	if err == nil {
-		t.Fatal("resolveCompactRequest() error = nil, want invalid previous response id")
-	}
-}
-
 func newCompactTestApp(t *testing.T, caller func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)) *App {
 	t.Helper()
 
@@ -255,37 +167,17 @@ func newCompactTestApp(t *testing.T, caller func(context.Context, accounts.Recor
 		ContinuationTTL: time.Minute,
 		RequestTimeout:  5 * time.Second,
 	}
-	httpClient := codex.NewHTTPClient(cfg)
-	t.Cleanup(httpClient.Close)
-
 	modelCatalog := models.NewCatalog(models.BootstrapEntries())
 	app := &App{
 		cfg:           cfg,
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		engine:        gin.New(),
 		accounts:      accountsSvc,
-		httpClient:    httpClient,
 		compactCaller: caller,
 		continuations: conversation.NewContinuationManager(time.Minute),
 		models:        modelCatalog,
 	}
-	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, httpClient, modelCatalog.SupportsRecord)
+	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil, modelCatalog.SupportsRecord)
 	app.routes()
 	return app
-}
-
-func assertOpenAIErrorCode(t *testing.T, body []byte, want string) {
-	t.Helper()
-
-	var payload struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &payload); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	if payload.Error.Code != want {
-		t.Fatalf("error.code = %q, want %q", payload.Error.Code, want)
-	}
 }

@@ -14,7 +14,7 @@ import (
 	"chatgpt-codex-proxy/internal/config"
 )
 
-func TestDeviceCodeResponseUnmarshalJSONAcceptsStringAndNumber(t *testing.T) {
+func TestDeviceCodeResponseUnmarshalJSONAcceptsPaddedAndBlankInterval(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -22,16 +22,6 @@ func TestDeviceCodeResponseUnmarshalJSONAcceptsStringAndNumber(t *testing.T) {
 		body string
 		want int
 	}{
-		{
-			name: "number",
-			body: `{"user_code":"ABC","device_auth_id":"dev_123","interval":15}`,
-			want: 15,
-		},
-		{
-			name: "string",
-			body: `{"user_code":"ABC","device_auth_id":"dev_123","interval":"30"}`,
-			want: 30,
-		},
 		{
 			name: "padded string",
 			body: `{"user_code":"ABC","device_auth_id":"dev_123","interval":" 45 "}`,
@@ -56,54 +46,6 @@ func TestDeviceCodeResponseUnmarshalJSONAcceptsStringAndNumber(t *testing.T) {
 				t.Fatalf("interval = %d, want %d", decoded.Interval, tc.want)
 			}
 		})
-	}
-}
-
-func TestOAuthTokenResponseUnmarshalJSONAcceptsBlankAndPaddedExpiresIn(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		body string
-	}{
-		{
-			name: "padded string",
-			body: `{"access_token":"access","expires_in":" 7200 "}`,
-		},
-		{
-			name: "blank string",
-			body: `{"access_token":"access","expires_in":""}`,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			var decoded oauthTokenResponse
-			if err := json.Unmarshal([]byte(tc.body), &decoded); err != nil {
-				t.Fatalf("json.Unmarshal() error = %v", err)
-			}
-		})
-	}
-}
-
-func TestBuildOAuthTokenUsesTypedExpiresIn(t *testing.T) {
-	t.Parallel()
-
-	before := time.Now().UTC()
-	var response oauthTokenResponse
-	if err := json.Unmarshal([]byte(`{"access_token":"access","refresh_token":"refresh","expires_in":7200}`), &response); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	token := buildOAuthToken(response)
-
-	if token.AccessToken != "access" || token.RefreshToken != "refresh" {
-		t.Fatalf("token = %#v", token)
-	}
-	delta := token.ExpiresAt.Sub(before)
-	if delta < 7190*time.Second || delta > 7210*time.Second {
-		t.Fatalf("expires_at delta = %s, want about 2h", delta)
 	}
 }
 

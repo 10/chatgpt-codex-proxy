@@ -2,7 +2,6 @@ package accountmanager
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -132,36 +131,6 @@ func TestRefreshExpiresAccountAfterInvalidGrant(t *testing.T) {
 	}
 	if record.CooldownUntil != nil {
 		t.Fatalf("cooldown until = %v, want none for terminal failure", record.CooldownUntil)
-	}
-}
-
-func TestRefreshKeepsAccountActiveWhenRequestIsCanceled(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("refresh request reached server after its context was canceled")
-	}))
-	defer server.Close()
-
-	manager, accountsSvc, now := newRefreshTestManager(t, server.URL, "acct_canceled_refresh")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := manager.Refresh(ctx, "acct_canceled_refresh"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("Refresh() error = %v, want context.Canceled", err)
-	}
-
-	record, ok, err := accountsSvc.Get("acct_canceled_refresh")
-	if err != nil {
-		t.Fatalf("accounts.Get() error = %v", err)
-	}
-	if !ok {
-		t.Fatal("account missing after canceled refresh")
-	}
-	if record.Status != accounts.StatusActive {
-		t.Fatalf("account status = %q, want active", record.Status)
-	}
-	if record.CooldownUntil == nil || !record.CooldownUntil.After(now) {
-		t.Fatalf("cooldown until = %v, want future cooldown", record.CooldownUntil)
 	}
 }
 

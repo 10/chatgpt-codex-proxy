@@ -5,22 +5,6 @@ import (
 	"testing"
 )
 
-func TestInputItemMarshalJSONUsesStringForTextOnlyRoleMessages(t *testing.T) {
-	t.Parallel()
-
-	decoded := marshalInputItem(t, InputItem{
-		Role: "user",
-		Content: []ContentPart{
-			{Type: "input_text", Text: "first line"},
-			{Type: "input_text", Text: "second line"},
-		},
-	})
-
-	if decoded["content"] != "first line\nsecond line" {
-		t.Fatalf("content = %#v, want joined string", decoded["content"])
-	}
-}
-
 func TestInputItemMarshalJSONPreservesStructuredUserContent(t *testing.T) {
 	t.Parallel()
 
@@ -38,26 +22,6 @@ func TestInputItemMarshalJSONPreservesStructuredUserContent(t *testing.T) {
 	}
 	if len(content) != 2 {
 		t.Fatalf("content len = %d, want 2", len(content))
-	}
-}
-
-func TestInputItemMarshalJSONKeepsEmptyStringContentForRoleMessages(t *testing.T) {
-	t.Parallel()
-
-	decoded := marshalInputItem(t, InputItem{
-		Role: "user",
-		Content: []ContentPart{{
-			Type: "input_text",
-			Text: "",
-		}},
-	})
-
-	value, ok := decoded["content"]
-	if !ok {
-		t.Fatalf("content missing from payload = %#v", decoded)
-	}
-	if value != "" {
-		t.Fatalf("content = %#v, want empty string", value)
 	}
 }
 

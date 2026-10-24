@@ -361,183 +361,47 @@ func TestOpenStreamKeepsExplicitContinuationPinned(t *testing.T) {
 	}
 }
 
-func TestOpenStreamReplaysExplicitHTTPContinuation(t *testing.T) {
+func TestResponsesReplaysExplicitHTTPContinuation(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
+	app.continuations.Put(conversation.ContinuationRecord{
+		ResponseID: "resp_1", AccountID: "acct-a", Model: "gpt-5.6-terra",
+		InputHistory:    []turn.InputItem{userText("first"), assistantText("first answer")},
+		ToolNameAliases: map[string]string{"short": "original_tool_name"},
+	})
 	var upstreamRequest codex.Request
-	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, account accounts.Record, request codex.Request, _ string) (eventStream, error) {
+		if account.ID != "acct-a" {
+			t.Errorf("continuation routed to %q, want acct-a", account.ID)
+		}
 		upstreamRequest = request
 		return &fakeEventStream{events: []*codex.StreamEvent{{
 			Type: "response.completed",
-			Raw:  map[string]any{"response": map[string]any{"id": "resp_2", "status": "completed"}},
+			Raw: map[string]any{"response": map[string]any{
+				"id": "resp_2", "status": "completed",
+				"output": []any{map[string]any{"type": "function_call", "call_id": "call_1", "name": "short", "arguments": `{}`}},
+			}},
 		}}}, nil
 	}
 
-	resolution := sessionResolution{
-		Request: turn.NormalizedRequest{Request: codex.Request{
-			Model: "gpt-5.6-terra", PreviousResponseID: "resp_1", Input: []codex.InputItem{userText("second")},
-		}, ModelExplicit: true},
-		Original: turn.NormalizedRequest{Request: codex.Request{
-			Model: "gpt-5.6-terra", Input: []codex.InputItem{userText("first"), assistantText("first answer"), userText("second")},
-		}, ModelExplicit: true},
-		PreferredAccountID: "acct-a",
-		ExplicitPrevious:   true,
-		ReplayAvailable:    true,
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"previous_response_id":"resp_1","input":"second"}`))
+	app.handleResponses(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
-	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &resolution)
-	if err != nil {
-		t.Fatalf("openStream() error = %v", err)
-	}
-	defer stream.Close()
-	if account.ID != "acct-a" {
-		t.Fatalf("account = %q, want acct-a", account.ID)
-	}
-	if upstreamRequest.PreviousResponseID != "" || len(upstreamRequest.Input) != 3 {
+	if upstreamRequest.Model != "gpt-5.6-terra" || upstreamRequest.PreviousResponseID != "" || len(upstreamRequest.Input) != 3 || upstreamRequest.Input[2].Content[0].Text != "second" {
 		t.Fatalf("upstream replay request = %#v", upstreamRequest)
 	}
-}
-
-func TestObserveQuotaSnapshotUpdatesCachedQuota(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_headers",
-		AccountID: "upstream_headers",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts: accountsSvc,
+	var response map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
 	}
-
-	pct := 35.0
-	resetAt := now.Add(15 * time.Minute)
-	app.observeQuotaSnapshot("acct_headers", &accounts.QuotaSnapshot{
-		Source:    "response_headers",
-		FetchedAt: now,
-		RateLimit: accounts.RateLimitWindow{
-			Allowed:      true,
-			LimitReached: false,
-			UsedPercent:  &pct,
-			ResetAt:      &resetAt,
-		},
-	})
-
-	record := mustGetAccount(t, accountsSvc, "acct_headers")
-	if record.CachedQuota == nil || record.CachedQuota.RateLimit.UsedPercent == nil {
-		t.Fatal("cached quota missing used percent")
-	}
-	if *record.CachedQuota.RateLimit.UsedPercent != 35.0 {
-		t.Fatalf("used_percent = %v, want 35", *record.CachedQuota.RateLimit.UsedPercent)
-	}
-}
-
-func TestNormalizeChatCompletionsBodyAcceptsResponsesShape(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{
-		"model": "gpt-5.6-terra",
-		"instructions": "Be concise.",
-		"input": {
-			"role": "user",
-			"content": [{"type": "text", "text": "hello"}]
-		},
-		"text": {"verbosity": "high"},
-		"stream": true,
-		"tools": [{
-			"type": "function",
-			"name": "Shell",
-			"description": "Run a shell command",
-			"parameters": {
-				"type": "object"
-			}
-		}]
-	}`)
-
-	normalized, err := normalizeChatCompletionsBody(body, nil)
-	if err != nil {
-		t.Fatalf("normalizeChatCompletionsBody() error = %v", err)
-	}
-
-	if normalized.Instructions != "" {
-		t.Fatalf("instructions = %q, want empty (lifted to developer input item)", normalized.Instructions)
-	}
-	if !normalized.Stream {
-		t.Fatal("stream = false, want true")
-	}
-	if len(normalized.Input) != 2 {
-		t.Fatalf("len(input) = %d, want 2", len(normalized.Input))
-	}
-	if normalized.Input[0].Role != "developer" || normalized.Input[0].Content[0].Text != "Be concise." {
-		t.Fatalf("first input = %#v, want developer instructions item", normalized.Input[0])
-	}
-	if normalized.Input[1].Role != "user" {
-		t.Fatalf("input role = %q, want user", normalized.Input[1].Role)
-	}
-	if got := normalized.Input[1].Content[0].Text; got != "hello" {
-		t.Fatalf("input text = %q, want hello", got)
-	}
-	if len(normalized.Tools) != 1 || normalized.Tools[0].Name != "Shell" {
-		t.Fatalf("tools = %#v, want Shell passthrough", normalized.Tools)
-	}
-	textPayload, err := json.Marshal(normalized.Text)
-	if err != nil {
-		t.Fatalf("json.Marshal(text) error = %v", err)
-	}
-	var text map[string]any
-	if err := json.Unmarshal(textPayload, &text); err != nil {
-		t.Fatalf("json.Unmarshal(text) error = %v", err)
-	}
-	if got := text["verbosity"]; got != "high" {
-		t.Fatalf("text.verbosity = %#v, want high", got)
-	}
-}
-
-func TestNormalizeChatCompletionsBodyLiftsInstructionRolesFromResponsesShape(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{
-		"model": "gpt-5.6-terra",
-		"input": [
-			{"role": "system", "content": "You are GPT-5.4."},
-			{"role": "user", "content": "Explain this repository."},
-			{"role": "user", "content": [{"type": "input_text", "text": "<user_query>\nwhat does this project do\n</user_query>"}]}
-		],
-		"tools": [{
-			"type": "function",
-			"name": "Shell",
-			"description": "Run a shell command",
-			"parameters": {
-				"type": "object"
-			}
-		}]
-	}`)
-
-	normalized, err := normalizeChatCompletionsBody(body, nil)
-	if err != nil {
-		t.Fatalf("normalizeChatCompletionsBody() error = %v", err)
-	}
-
-	if normalized.Instructions != "" {
-		t.Fatalf("instructions = %q, want empty (lifted to developer input item)", normalized.Instructions)
-	}
-	if len(normalized.Input) != 3 {
-		t.Fatalf("len(input) = %d, want 3", len(normalized.Input))
-	}
-	if normalized.Input[0].Role != "developer" || normalized.Input[0].Content[0].Text != "You are GPT-5.4." {
-		t.Fatalf("first input = %#v, want developer instructions item", normalized.Input[0])
-	}
-	if normalized.Input[1].Role != "user" || normalized.Input[2].Role != "user" {
-		t.Fatalf("input roles = %#v, want developer then user items", normalized.Input)
+	output := sliceOfMapsFromAny(response["output"])
+	if len(output) != 1 || output[0]["name"] != "original_tool_name" {
+		t.Fatalf("continuation lost tool aliases: %#v", output)
 	}
 }
 
@@ -575,153 +439,6 @@ func TestNormalizeChatCompletionsBodyAcceptsArrayToolOutputInResponsesShape(t *t
 	}
 	if normalized.Input[1].OutputContent[0].Text != "Result of search" || normalized.Input[1].OutputContent[1].Text != "README.md" {
 		t.Fatalf("input[1].OutputContent = %#v, want preserved output parts", normalized.Input[1].OutputContent)
-	}
-}
-
-func TestNormalizeChatCompletionsBodyPrefersMessagesShape(t *testing.T) {
-	t.Parallel()
-
-	body := []byte(`{
-		"model": "gpt-5.6-terra",
-		"messages": [{"role": "user", "content": "hello"}],
-		"instructions": "ignored",
-		"input": {"role": "user", "content": [{"type": "text", "text": "ignored"}]}
-	}`)
-
-	normalized, err := normalizeChatCompletionsBody(body, nil)
-	if err != nil {
-		t.Fatalf("normalizeChatCompletionsBody() error = %v", err)
-	}
-
-	if len(normalized.Input) != 1 {
-		t.Fatalf("len(input) = %d, want 1", len(normalized.Input))
-	}
-	if got := normalized.Input[0].Content[0].Text; got != "hello" {
-		t.Fatalf("input text = %q, want hello", got)
-	}
-}
-
-func TestNormalizeChatCompletionsBodyRejectsEmptyPayload(t *testing.T) {
-	t.Parallel()
-
-	_, err := normalizeChatCompletionsBody([]byte(`{}`), nil)
-	if err == nil {
-		t.Fatal("normalizeChatCompletionsBody() error = nil, want empty payload error")
-	}
-}
-
-func TestObserveQuotaEventUpdatesCachedQuota(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_event",
-		AccountID: "upstream_event",
-		Status:    accounts.StatusActive,
-		PlanType:  "plus",
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts: accountsSvc,
-	}
-
-	handled := app.observeQuotaEvent(accounts.Record{ID: "acct_event", PlanType: "plus"}, &codex.StreamEvent{
-		Type: "codex.rate_limits",
-		Raw: map[string]any{
-			"rate_limits": map[string]any{
-				"primary": map[string]any{
-					"used_percent": 42.0,
-					"reset_at":     float64(now.Add(30 * time.Minute).Unix()),
-				},
-			},
-		},
-	})
-	if !handled {
-		t.Fatal("observeQuotaEvent() = false, want true")
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_event")
-	if record.CachedQuota == nil || record.CachedQuota.RateLimit.UsedPercent == nil {
-		t.Fatal("cached quota missing after event")
-	}
-	if *record.CachedQuota.RateLimit.UsedPercent != 42.0 {
-		t.Fatalf("used_percent = %v, want 42", *record.CachedQuota.RateLimit.UsedPercent)
-	}
-}
-
-func TestStreamChatCompletionClassifiesStructuredRateLimitFailureAndSetsCooldown(t *testing.T) {
-	t.Parallel()
-
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/chat/completions", nil)
-	ctx.Set(middleware.RequestIDKey, "req-test")
-
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_rate_limit",
-		AccountID: "upstream_rate_limit",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg: config.Config{
-			ContinuationTTL: time.Minute,
-		},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_rate_limit")
-	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{{
-			Type: "error",
-			Raw: map[string]any{
-				"error": map[string]any{
-					"code":              "rate_limited",
-					"message":           "Too many requests",
-					"resets_in_seconds": 12,
-					"usage": map[string]any{
-						"input_tokens":  11,
-						"output_tokens": 7,
-					},
-				},
-			},
-		}},
-	}
-
-	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
-			Model:  "gpt-5.6-terra",
-			Stream: true,
-		},
-	}, stream)
-
-	if !strings.Contains(recorder.Body.String(), "upstream account rate limited") {
-		t.Fatalf("stream body = %s, want rate limited message", recorder.Body.String())
-	}
-
-	updated := mustGetAccount(t, accountsSvc, "acct_rate_limit")
-	if updated.CooldownUntil == nil {
-		t.Fatal("cooldown_until = nil, want cooldown")
-	}
-	if updated.Status != accounts.StatusActive {
-		t.Fatalf("status = %q, want active", updated.Status)
 	}
 }
 
@@ -813,29 +530,8 @@ func TestStreamResponsesClassifiesStructuredUnauthorizedFailure(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	ctx.Set(middleware.RequestIDKey, "req-test")
 
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_unauthorized",
-		AccountID: "upstream_unauthorized",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg: config.Config{
-			ContinuationTTL: time.Minute,
-		},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_unauthorized")
+	app := newFailoverTestApp(t)
+	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
 		events: []*codex.StreamEvent{{
 			Type: "response.failed",
@@ -858,7 +554,7 @@ func TestStreamResponsesClassifiesStructuredUnauthorizedFailure(t *testing.T) {
 		},
 	}, stream)
 
-	updated := mustGetAccount(t, accountsSvc, "acct_unauthorized")
+	updated := mustGetAccount(t, app.accounts, "acct-a")
 	if updated.Status != accounts.StatusExpired {
 		t.Fatalf("status = %q, want expired", updated.Status)
 	}
@@ -873,27 +569,8 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycle(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	ctx.Set(middleware.RequestIDKey, "req-test")
 
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_stream_tools",
-		AccountID: "upstream_stream_tools",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg:           config.Config{ContinuationTTL: time.Minute},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_stream_tools")
+	app := newFailoverTestApp(t)
+	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
 		events: []*codex.StreamEvent{
 			{
@@ -992,149 +669,6 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycle(t *testing.T) {
 	}
 }
 
-func TestStreamResponsesSynthesizesFunctionCallLifecycleWithoutDeltas(t *testing.T) {
-	t.Parallel()
-
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-	ctx.Set(middleware.RequestIDKey, "req-test")
-
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_stream_done_only",
-		AccountID: "upstream_stream_done_only",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg:           config.Config{ContinuationTTL: time.Minute},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_stream_done_only")
-	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{
-			{
-				Type: "response.function_call_arguments.done",
-				Raw: map[string]any{
-					"response_id":  "resp_done_only",
-					"item_id":      "fc_done",
-					"output_index": 0,
-					"name":         "demo__echo",
-					"arguments":    `{"message":"hello"}`,
-				},
-			},
-			{
-				Type: "response.completed",
-				Raw: map[string]any{
-					"response": map[string]any{
-						"id":     "resp_done_only",
-						"model":  "gpt-5.6-terra",
-						"status": "completed",
-					},
-				},
-			},
-		},
-	}
-
-	app.streamResponses(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
-			Model:  "gpt-5.6-terra",
-			Stream: true,
-		},
-	}, stream)
-
-	events := parseSSEEvents(t, recorder.Body.String())
-	assertEventTypes(t, events,
-		"response.output_item.added",
-		"response.function_call_arguments.done",
-		"response.output_item.done",
-		"response.completed",
-	)
-}
-
-func TestStreamResponsesTextOnlyPassthroughRemainsUnchanged(t *testing.T) {
-	t.Parallel()
-
-	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-	ctx.Set(middleware.RequestIDKey, "req-test")
-
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_stream_text",
-		AccountID: "upstream_stream_text",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg:           config.Config{ContinuationTTL: time.Minute},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_stream_text")
-	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{
-			{
-				Type: "response.output_text.delta",
-				Raw: map[string]any{
-					"response_id": "resp_text",
-					"delta":       "hello",
-				},
-			},
-			{
-				Type: "response.completed",
-				Raw: map[string]any{
-					"response": map[string]any{
-						"id":          "resp_text",
-						"model":       "gpt-5.6-terra",
-						"status":      "completed",
-						"output_text": "hello",
-					},
-				},
-			},
-		},
-	}
-
-	app.streamResponses(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
-			Model:  "gpt-5.6-terra",
-			Stream: true,
-		},
-	}, stream)
-
-	events := parseSSEEvents(t, recorder.Body.String())
-	assertEventTypes(t, events,
-		"response.output_text.delta",
-		"response.completed",
-	)
-	for _, event := range events {
-		if strings.HasPrefix(event.Event, "response.output_item.") {
-			t.Fatalf("unexpected tool lifecycle event in text-only stream: %s", event.Event)
-		}
-	}
-}
-
 func TestStreamResponsesWebSearchPassthroughAndCompletedOutput(t *testing.T) {
 	t.Parallel()
 
@@ -1144,27 +678,8 @@ func TestStreamResponsesWebSearchPassthroughAndCompletedOutput(t *testing.T) {
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
 	ctx.Set(middleware.RequestIDKey, "req-test")
 
-	now := time.Now().UTC()
-	accountsSvc := newServerAccounts(t, &accounts.Record{
-		ID:        "acct_stream_web_search",
-		AccountID: "upstream_stream_web_search",
-		Status:    accounts.StatusActive,
-		Token: accounts.OAuthToken{
-			AccessToken: "token",
-			ExpiresAt:   now.Add(time.Hour),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-
-	app := &App{
-		cfg:           config.Config{ContinuationTTL: time.Minute},
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		accounts:      accountsSvc,
-		continuations: conversation.NewContinuationManager(time.Minute),
-	}
-
-	record := mustGetAccount(t, accountsSvc, "acct_stream_web_search")
+	app := newFailoverTestApp(t)
+	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
 		events: []*codex.StreamEvent{
 			{

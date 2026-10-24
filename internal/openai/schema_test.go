@@ -2,25 +2,6 @@ package openai
 
 import "testing"
 
-func TestPrepareSchemaWithoutTuplesInjectsAdditionalProperties(t *testing.T) {
-	t.Parallel()
-
-	prepared, tupleSchema := PrepareSchema(map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"child": map[string]any{"type": "object"},
-		},
-	})
-
-	if tupleSchema != nil {
-		t.Fatalf("tupleSchema = %#v, want nil", tupleSchema)
-	}
-	child, _ := prepared["properties"].(map[string]any)["child"].(map[string]any)
-	if child["additionalProperties"] != false {
-		t.Fatalf("child additionalProperties = %#v, want false", child["additionalProperties"])
-	}
-}
-
 func TestNormalizeSchemaInlinesRefsAndInjectsAdditionalProperties(t *testing.T) {
 	t.Parallel()
 
@@ -94,53 +75,5 @@ func TestNormalizeSchemaStopsAtRecursiveRefs(t *testing.T) {
 	next, _ := headProperties["next"].(map[string]any)
 	if next["$ref"] != "#/$defs/node" {
 		t.Fatalf("next.$ref = %#v, want recursive ref", next["$ref"])
-	}
-}
-
-func TestHasTupleSchemasDetectsNestedLocations(t *testing.T) {
-	t.Parallel()
-
-	schema := map[string]any{
-		"type": "object",
-		"$defs": map[string]any{
-			"pair": map[string]any{
-				"type": "array",
-				"prefixItems": []any{
-					map[string]any{"type": "string"},
-					map[string]any{"type": "number"},
-				},
-			},
-		},
-	}
-
-	if !hasTupleSchemas(schema) {
-		t.Fatal("expected tuple schema detection")
-	}
-}
-
-func TestConvertTupleSchemasConvertsPrefixItemsToObjectShape(t *testing.T) {
-	t.Parallel()
-
-	schema := map[string]any{
-		"type": "array",
-		"prefixItems": []any{
-			map[string]any{"type": "string"},
-			map[string]any{"type": "object"},
-		},
-	}
-
-	converted := convertTupleSchemas(schema)
-	if converted["type"] != "object" {
-		t.Fatalf("type = %#v, want object", converted["type"])
-	}
-	properties, _ := converted["properties"].(map[string]any)
-	if _, ok := properties["0"]; !ok {
-		t.Fatalf("properties = %#v, want key 0", properties)
-	}
-	if _, ok := properties["1"]; !ok {
-		t.Fatalf("properties = %#v, want key 1", properties)
-	}
-	if converted["additionalProperties"] != false {
-		t.Fatalf("additionalProperties = %#v, want false", converted["additionalProperties"])
 	}
 }

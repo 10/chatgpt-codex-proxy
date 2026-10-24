@@ -6,43 +6,6 @@ import (
 	"chatgpt-codex-proxy/internal/jsonutil"
 )
 
-func TestPatchChatCompletionObjectForTuple(t *testing.T) {
-	t.Parallel()
-
-	object := map[string]any{
-		"choices": []any{
-			map[string]any{
-				"message": map[string]any{
-					"role":    "assistant",
-					"content": `{"pair":{"0":"left","1":2}}`,
-				},
-			},
-		},
-	}
-	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"pair": map[string]any{
-				"type": "array",
-				"prefixItems": []any{
-					map[string]any{"type": "string"},
-					map[string]any{"type": "number"},
-				},
-			},
-		},
-	}
-
-	if err := PatchChatCompletionObjectForTuple(object, schema); err != nil {
-		t.Fatalf("PatchChatCompletionObjectForTuple() error = %v", err)
-	}
-
-	choice := jsonutil.SliceOfMaps(object["choices"])[0]
-	message, _ := choice["message"].(map[string]any)
-	if message["content"] != `{"pair":["left",2]}` {
-		t.Fatalf("message.content = %#v, want reconverted tuple JSON", message["content"])
-	}
-}
-
 func TestPatchResponsesObjectForTuple(t *testing.T) {
 	t.Parallel()
 

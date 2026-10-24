@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,7 +28,17 @@ func TestHandleResponsesDecodesZstdRequestBody(t *testing.T) {
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404; body=%s", recorder.Code, recorder.Body.String())
 	}
-	assertOpenAIErrorCode(t, recorder.Body.Bytes(), "model_not_found")
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Code != "model_not_found" {
+		t.Fatalf("error code = %q, want model_not_found", body.Error.Code)
+	}
 }
 
 func zstdRequestBody(t *testing.T, payload string) *bytes.Buffer {
