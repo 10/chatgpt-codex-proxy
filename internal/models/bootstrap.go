@@ -7,46 +7,50 @@ var bootstrapReasoningEfforts = []ReasoningEffort{
 	{ReasoningEffort: "xhigh", Description: "Extra high reasoning depth"},
 }
 
-// Codex limits differ from the public API. Source: openai/codex rust-v0.162.1,
+// Codex limits differ from the public API. Source: openai/codex rust-v0.166.0,
 // codex-rs/models-manager/models.json, without gpt-5.5, which Codex retired on
 // 2026-10-14. Fetched account metadata takes precedence.
 var bootstrapEntries = []Entry{
-	bootstrapEntry("gpt-6.1-sol", true, "low", 872000,
+	bootstrapEntry("gpt-6.1-sol", true, "low", 272000, 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
 		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
 	),
-	bootstrapEntry("gpt-6-astra", false, "low", 872000,
+	bootstrapEntry("gpt-6.1-terra", false, "low", 500000, 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
 		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
 	),
-	bootstrapEntry("gpt-6-sol", false, "medium", 872000,
+	bootstrapEntry("gpt-6-astra", false, "low", 272000, 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
 		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
 	),
-	bootstrapEntry("gpt-6-luna", false, "medium", 872000,
-		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
-	),
-	bootstrapEntry("gpt-5.6-sol", false, "low", 872000,
+	bootstrapEntry("gpt-6-sol", false, "medium", 272000, 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
 		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
 	),
-	bootstrapEntry("gpt-5.6-terra", false, "medium", 872000,
+	bootstrapEntry("gpt-6-luna", false, "medium", 272000, 872000,
+		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
+	),
+	bootstrapEntry("gpt-5.6-sol", false, "low", 272000, 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
 		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
 	),
-	bootstrapEntry("gpt-5.6-luna", false, "medium", 872000,
+	bootstrapEntry("gpt-5.6-terra", false, "medium", 272000, 872000,
+		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
+		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
+	),
+	bootstrapEntry("gpt-5.6-luna", false, "medium", 272000, 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
 	),
 }
 
-func bootstrapEntry(id string, isDefault bool, defaultReasoningEffort string, maxContextWindow int, additionalEfforts ...ReasoningEffort) Entry {
+func bootstrapEntry(id string, isDefault bool, defaultReasoningEffort string, contextWindow, maxContextWindow int, additionalEfforts ...ReasoningEffort) Entry {
 	efforts := append([]ReasoningEffort(nil), bootstrapReasoningEfforts...)
 	efforts = append(efforts, additionalEfforts...)
 	return Entry{
 		ID:                        id,
 		DisplayName:               id,
 		Description:               "Bootstrap fallback model catalog entry",
-		ContextWindow:             min(272000, maxContextWindow),
+		ContextWindow:             contextWindow,
 		MaxContextWindow:          maxContextWindow,
 		IsDefault:                 isDefault,
 		DefaultReasoningEffort:    defaultReasoningEffort,

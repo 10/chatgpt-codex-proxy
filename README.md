@@ -76,6 +76,8 @@ export ANTHROPIC_MODEL=gpt-6.1-sol
 ```
 
 Use a model ID from `GET /v1/models`; the default is `gpt-6.1-sol`.
+The fallback catalog also includes `gpt-6.1-terra`, `gpt-6-astra`, and `gpt-6-luna`.
+Available models and their limits refresh from each account's upstream catalog.
 
 Every route except `GET /health/live` needs the key, as either
 `Authorization: Bearer <key>` or `X-API-Key: <key>`.

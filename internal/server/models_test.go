@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -16,12 +17,15 @@ func TestHandleModelsReturnsCodexClientMetadata(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
+	app := &App{cfg: config.Config{ProxyAPIKey: "test-key", DefaultModel: "gpt-6.1-sol"}, engine: gin.New()}
+	app.routes()
 	recorder := httptest.NewRecorder()
-	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models?client_version=0.98.0", nil)
-
-	app := &App{cfg: config.Config{DefaultModel: "gpt-5.6-terra"}}
-	app.handleModels(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/v1/models?client_version=0.166.0", nil)
+	req.Header.Set("Authorization", "Bearer test-key")
+	app.Handler().ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
 
 	var body struct {
 		Models []map[string]any `json:"models"`
@@ -38,6 +42,21 @@ func TestHandleModelsReturnsCodexClientMetadata(t *testing.T) {
 	}
 	if _, hasOpenAIList := model["object"]; hasOpenAIList {
 		t.Fatalf("Codex client model metadata unexpectedly uses OpenAI list shape: %#v", model)
+	}
+	index := slices.IndexFunc(body.Models, func(model map[string]any) bool { return model["slug"] == "gpt-6.1-terra" })
+	if index < 0 {
+		t.Fatal("Codex model catalog is missing GPT-6.1 Terra")
+	}
+	terra := body.Models[index]
+	if terra["context_window"] != float64(500000) || terra["max_context_window"] != float64(872000) || terra["default_reasoning_level"] != "low" {
+		t.Fatalf("GPT-6.1 Terra metadata = %#v", terra)
+	}
+	var efforts []string
+	for _, level := range terra["supported_reasoning_levels"].([]any) {
+		efforts = append(efforts, level.(map[string]any)["effort"].(string))
+	}
+	if !slices.Equal(efforts, []string{"low", "medium", "high", "xhigh", "max", "ultra"}) {
+		t.Fatalf("GPT-6.1 Terra reasoning levels = %v", efforts)
 	}
 }
 
