@@ -1,4 +1,3 @@
-// Package jsonutil provides helpers for decoded JSON trees shared across packages.
 package jsonutil
 
 import (
@@ -8,7 +7,6 @@ import (
 	"strings"
 )
 
-// FlexibleInt64 decodes integer or floating-point JSON numbers and numeric strings.
 type FlexibleInt64 struct {
 	value int64
 	set   bool
@@ -47,18 +45,15 @@ func (f *FlexibleInt64) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Int64 returns the decoded value and whether one was set.
 func (f FlexibleInt64) Int64() (int64, bool) {
 	return f.value, f.set
 }
 
-// StringValue returns value as a string, or "" if it is not a string.
 func StringValue(value any) string {
 	str, _ := value.(string)
 	return str
 }
 
-// FirstNonEmpty returns the first string that is not all whitespace.
 func FirstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -68,13 +63,11 @@ func FirstNonEmpty(values ...string) string {
 	return ""
 }
 
-// MapValue returns the nested map for key, or nil if the value is not a map.
 func MapValue(raw map[string]any, key string) map[string]any {
 	value, _ := raw[key].(map[string]any)
 	return value
 }
 
-// FirstMap returns the first non-empty map.
 func FirstMap(values ...map[string]any) map[string]any {
 	for _, value := range values {
 		if len(value) > 0 {
@@ -84,7 +77,6 @@ func FirstMap(values ...map[string]any) map[string]any {
 	return nil
 }
 
-// CloneMap recursively clones decoded JSON map trees.
 func CloneMap(src map[string]any) map[string]any {
 	if src == nil {
 		return nil
@@ -96,7 +88,6 @@ func CloneMap(src map[string]any) map[string]any {
 	return dst
 }
 
-// CloneValue recursively clones decoded JSON map and slice values.
 func CloneValue(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -118,8 +109,6 @@ func CloneValue(value any) any {
 	}
 }
 
-// SliceOfMaps coerces a JSON-decoded value into []map[string]any, copying the
-// outer slice.
 func SliceOfMaps(value any) []map[string]any {
 	switch items := value.(type) {
 	case []map[string]any:
@@ -138,7 +127,6 @@ func SliceOfMaps(value any) []map[string]any {
 	}
 }
 
-// IntValue converts a decoded JSON number or numeric string to an integer.
 func IntValue(value any) (int, bool) {
 	switch typed := value.(type) {
 	case int:

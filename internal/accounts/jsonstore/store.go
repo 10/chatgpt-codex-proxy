@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"chatgpt-codex-proxy/internal/accounts"
+	"chatgpt-codex-proxy/internal/jsonfile"
 )
 
 type JSONAccountsStore struct {
@@ -36,22 +37,8 @@ func (s *JSONAccountsStore) Load() (accounts.State, error) {
 }
 
 func (s *JSONAccountsStore) Save(state accounts.State) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("create store dir: %w", err)
-	}
-
-	payload, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode accounts store: %w", err)
-	}
-	payload = append(payload, '\n')
-
-	tmpPath := s.path + ".tmp"
-	if err := os.WriteFile(tmpPath, payload, 0o600); err != nil {
-		return fmt.Errorf("write tmp accounts store: %w", err)
-	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
-		return fmt.Errorf("rename accounts store: %w", err)
+	if err := jsonfile.Write(s.path, state); err != nil {
+		return fmt.Errorf("save accounts store: %w", err)
 	}
 	return nil
 }

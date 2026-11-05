@@ -56,7 +56,7 @@ func TestGetUsageCachedBypassesEnsureReady(t *testing.T) {
 		t.Fatalf("accounts.NewService() error = %v", err)
 	}
 
-	manager := NewAccountManager(config.Config{}, accountsSvc, nil, nil, nil)
+	manager := NewAccountManager(config.Config{}, accountsSvc, nil, nil)
 
 	record, quota, err := manager.GetUsage(context.Background(), "acct_disabled", true)
 	if err != nil {
@@ -157,5 +157,5 @@ func newRefreshTestManager(t *testing.T, authIssuer, accountID string) (*Account
 	}
 
 	cfg := config.Config{AuthIssuer: authIssuer}
-	return NewAccountManager(cfg, accountsSvc, codexauth.NewOAuthService(cfg), nil, nil), accountsSvc, now
+	return NewAccountManager(cfg, accountsSvc, codexauth.NewOAuthService(cfg), nil), accountsSvc, now
 }

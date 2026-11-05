@@ -8,12 +8,12 @@ import (
 	"testing"
 
 	"chatgpt-codex-proxy/internal/accounts"
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 type fakeEventStream struct {
-	events        []*codex.StreamEvent
+	events        []*turn.StreamEvent
 	index         int
 	beforeTailErr func()
 	tailErr       error
@@ -32,7 +32,7 @@ func (m *memoryAccountsStore) Save(state accounts.State) error {
 	return nil
 }
 
-func (f *fakeEventStream) NextEvent() (*codex.StreamEvent, error) {
+func (f *fakeEventStream) NextEvent() (*turn.StreamEvent, error) {
 	if f.index >= len(f.events) {
 		if f.tailErr != nil {
 			if f.beforeTailErr != nil {

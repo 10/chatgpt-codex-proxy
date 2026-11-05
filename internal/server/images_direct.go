@@ -16,7 +16,6 @@ import (
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
-	"chatgpt-codex-proxy/internal/turn"
 )
 
 func prepareDirectImagePayload(body []byte, model string, stream bool) ([]byte, error) {
@@ -74,7 +73,7 @@ func (a *App) handleDirectImageResponse(c *gin.Context, endpoint, path string, p
 			payload := jsonutil.CloneMap(body)
 			maps.Copy(payload, result)
 			payload["type"] = prefix + ".completed"
-			writeSSE(c.Writer, prefix+".completed", turn.MustJSON(payload))
+			writeSSE(c.Writer, prefix+".completed", mustJSON(payload))
 			c.Writer.Flush()
 		}
 	} else if stream {
@@ -117,20 +116,12 @@ func (a *App) openDirectImageWithFailover(ctx context.Context, c *gin.Context, e
 	var lastAccount accounts.Record
 	var lastErr error
 	for {
-		account, err := a.accounts.AcquireMatching("", func(record accounts.Record) bool {
-			_, alreadyAttempted := attempted[record.ID]
-			return !alreadyAttempted
-		})
-		if err != nil {
-			if lastErr != nil && strings.Contains(strings.ToLower(err.Error()), "no active accounts") {
+		account, err := a.selectReadyAccount(ctx, "", "", attempted)
+		if account.ID == "" {
+			if lastErr != nil && errors.Is(err, accounts.ErrNoAvailableAccounts) {
 				return lastAccount, nil, lastErr
 			}
 			return account, nil, err
-		}
-		selected := account
-		account, err = a.accountMgr.EnsureReady(ctx, selected.ID)
-		if err != nil {
-			account = selected
 		}
 		if err == nil {
 			a.logUpstreamPayload(c, endpoint, "http", account.ID, json.RawMessage(payload))

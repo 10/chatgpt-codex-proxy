@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"chatgpt-codex-proxy/internal/accounts"
+	"chatgpt-codex-proxy/internal/clientidentity"
 	"chatgpt-codex-proxy/internal/config"
 	"chatgpt-codex-proxy/internal/httpbody"
 	"chatgpt-codex-proxy/internal/jsonutil"
@@ -20,7 +21,6 @@ import (
 )
 
 const (
-	desktopUserAgent   = "Codex Desktop/26.1007.71326 (Windows NT 10.0; x64)"
 	deviceUserCodePath = "/api/accounts/deviceauth/usercode"
 	deviceTokenPath    = "/api/accounts/deviceauth/token"
 	oauthTokenPath     = "/oauth/token"
@@ -115,7 +115,7 @@ func (s *OAuthService) DeviceAuthURL() string {
 func (s *OAuthService) RequestDeviceCode(ctx context.Context) (DeviceCodeResponse, error) {
 	endpoint := strings.TrimRight(s.cfg.AuthIssuer, "/") + deviceUserCodePath
 	body := map[string]string{"client_id": s.cfg.OAuthClientID}
-	result, _, err := doDeviceAuthJSON[DeviceCodeResponse](ctx, s.client, endpoint, body, s.defaultHeaders(), false)
+	result, err := doDeviceAuthJSON[DeviceCodeResponse](ctx, s.client, endpoint, body, s.defaultHeaders())
 	return result, err
 }
 
@@ -125,12 +125,13 @@ func (s *OAuthService) PollDeviceCode(ctx context.Context, deviceAuthID, userCod
 		"device_auth_id": deviceAuthID,
 		"user_code":      userCode,
 	}
-	result, pending, err := doDeviceAuthJSON[DevicePollResponse](ctx, s.client, endpoint, body, s.defaultHeaders(), true)
+	result, err := doDeviceAuthJSON[DevicePollResponse](ctx, s.client, endpoint, body, s.defaultHeaders())
 	if err != nil {
+		var responseErr *deviceAuthError
+		if errors.As(err, &responseErr) && responseErr.pending() {
+			return nil, nil
+		}
 		return nil, err
-	}
-	if pending {
-		return nil, nil
 	}
 	return &result, nil
 }
@@ -205,41 +206,53 @@ func extractAccountID(raw oauthTokenResponse) string {
 func (s *OAuthService) defaultHeaders() http.Header {
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
-	headers.Set("User-Agent", desktopUserAgent)
+	headers.Set("User-Agent", clientidentity.UserAgent)
 	return headers
 }
 
-func doDeviceAuthJSON[T any](ctx context.Context, client *http.Client, endpoint string, body any, headers http.Header, allowPending bool) (T, bool, error) {
+type deviceAuthError struct {
+	status int
+	body   string
+}
+
+func (e *deviceAuthError) Error() string {
+	return "oauth request failed: " + e.body
+}
+
+func (e *deviceAuthError) pending() bool {
+	text := strings.ToLower(e.body)
+	return e.status == http.StatusForbidden || e.status == http.StatusNotFound ||
+		strings.Contains(text, "authorization_pending") || strings.Contains(text, "not found")
+}
+
+func doDeviceAuthJSON[T any](ctx context.Context, client *http.Client, endpoint string, body any, headers http.Header) (T, error) {
 	var zero T
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return zero, false, err
+		return zero, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
-		return zero, false, err
+		return zero, err
 	}
 	req.Header = headers.Clone()
 	resp, err := client.Do(req)
 	if err != nil {
-		return zero, false, err
+		return zero, err
 	}
 	defer resp.Body.Close()
-	if allowPending && (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound) {
-		if _, err := io.Copy(io.Discard, io.LimitReader(resp.Body, httpbody.Limit)); err != nil {
-			return zero, false, fmt.Errorf("drain pending oauth response: %w", err)
-		}
-		return zero, true, nil
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyText := strings.TrimSpace(httpbody.ReadLimitedErrorBody(resp.Body))
-		return zero, false, fmt.Errorf("oauth request failed: %s", bodyText)
+		payload, err := io.ReadAll(io.LimitReader(resp.Body, httpbody.Limit))
+		if err != nil {
+			return zero, fmt.Errorf("read oauth response: %w", err)
+		}
+		return zero, &deviceAuthError{status: resp.StatusCode, body: strings.TrimSpace(string(payload))}
 	}
 	var decoded T
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return zero, false, err
+		return zero, err
 	}
-	return decoded, false, nil
+	return decoded, nil
 }
 
 func doForm(ctx context.Context, client *http.Client, endpoint string, values url.Values, headers http.Header) (oauthTokenResponse, error) {

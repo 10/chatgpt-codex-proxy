@@ -4,7 +4,6 @@ import (
 	"io"
 	"strings"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/turn"
 )
@@ -17,7 +16,7 @@ type chatToolCallStreamer struct {
 	createdAt     int64
 }
 
-func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *turn.Accumulator, normalized turn.NormalizedRequest, event *codex.StreamEvent) bool {
+func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *turn.Accumulator, normalized turn.NormalizedRequest, event *turn.StreamEvent) bool {
 	if event == nil {
 		return false
 	}
@@ -48,7 +47,7 @@ func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *turn.Accumul
 			"name":      state.Name,
 			"arguments": "",
 		}
-		writeSSE(w, "", turn.MustJSON(turn.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{
+		writeSSE(w, "", mustJSON(turn.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{
 			"tool_calls": []map[string]any{chunkToolCall},
 		}, "", s.createdAt)))
 		s.initialized[callID] = true
@@ -68,7 +67,7 @@ func (s *chatToolCallStreamer) writeChunk(w io.Writer, accumulator *turn.Accumul
 		return emitted
 	}
 
-	writeSSE(w, "", turn.MustJSON(turn.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{
+	writeSSE(w, "", mustJSON(turn.ChatChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), map[string]any{
 		"tool_calls": []map[string]any{{
 			"index": idx,
 			"function": map[string]any{

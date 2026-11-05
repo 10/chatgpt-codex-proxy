@@ -1,4 +1,3 @@
-// Package jwtutil provides small helpers for decoding JWT payloads.
 package jwtutil
 
 import (
@@ -7,7 +6,6 @@ import (
 	"strings"
 )
 
-// DecodePayload decodes the middle JWT segment into a typed value.
 func DecodePayload[T any](token string) (T, bool) {
 	var zero T
 	parts := strings.Split(token, ".")

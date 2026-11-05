@@ -60,6 +60,10 @@ func TestRequestLoggerDoesNotLogBodyContents(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	engine.ServeHTTP(recorder, request)
 
+	entries := decodeLogEntries(t, logs)
+	if len(entries) != 1 || entries[0]["msg"] != "http request completed" || entries[0]["status"] != float64(http.StatusAccepted) {
+		t.Fatalf("completed request was not logged: %#v", entries)
+	}
 	if strings.Contains(logs.String(), "do-not-log-me") {
 		t.Fatal("request body appeared in logs")
 	}

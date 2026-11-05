@@ -3,15 +3,16 @@ package openai
 import (
 	"fmt"
 
-	"chatgpt-codex-proxy/internal/codex"
+	"chatgpt-codex-proxy/internal/schema"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
-func normalizeResponsesText(text *ResponsesText) (*codex.TextConfig, map[string]any) {
+func normalizeResponsesText(text *ResponsesText) (*turn.TextConfig, map[string]any) {
 	if text == nil {
 		return nil, nil
 	}
 
-	config := &codex.TextConfig{Verbosity: text.Verbosity}
+	config := &turn.TextConfig{Verbosity: text.Verbosity}
 	if text.Format == nil {
 		if text.Verbosity == "" {
 			return nil, nil
@@ -20,20 +21,20 @@ func normalizeResponsesText(text *ResponsesText) (*codex.TextConfig, map[string]
 	}
 
 	var tupleSchema map[string]any
-	format := codex.TextFormat{
+	format := turn.TextFormat{
 		Type:   text.Format.Type,
 		Name:   text.Format.Name,
 		Schema: text.Format.Schema,
 		Strict: text.Format.Strict,
 	}
 	if text.Format.Type == "json_schema" {
-		format.Schema, tupleSchema = PrepareSchema(text.Format.Schema)
+		format.Schema, tupleSchema = schema.Prepare(text.Format.Schema)
 	}
 	config.Format = format
 	return config, tupleSchema
 }
 
-func normalizeChatResponseFormat(format *ResponseFormat) (*codex.TextConfig, map[string]any, error) {
+func normalizeChatResponseFormat(format *ResponseFormat) (*turn.TextConfig, map[string]any, error) {
 	if format == nil {
 		return nil, nil, nil
 	}
@@ -41,16 +42,16 @@ func normalizeChatResponseFormat(format *ResponseFormat) (*codex.TextConfig, map
 	case "", "text":
 		return nil, nil, nil
 	case "json_object":
-		return &codex.TextConfig{
-			Format: codex.TextFormat{Type: "json_object"},
+		return &turn.TextConfig{
+			Format: turn.TextFormat{Type: "json_object"},
 		}, nil, nil
 	case "json_schema":
 		if format.JSONSchema == nil {
 			return nil, nil, fmt.Errorf("response_format.json_schema is required")
 		}
-		prepared, tupleSchema := PrepareSchema(format.JSONSchema.Schema)
-		return &codex.TextConfig{
-			Format: codex.TextFormat{
+		prepared, tupleSchema := schema.Prepare(format.JSONSchema.Schema)
+		return &turn.TextConfig{
+			Format: turn.TextFormat{
 				Type:   "json_schema",
 				Name:   format.JSONSchema.Name,
 				Schema: prepared,
@@ -62,7 +63,7 @@ func normalizeChatResponseFormat(format *ResponseFormat) (*codex.TextConfig, map
 	}
 }
 
-func reasoningInclude(reasoning *codex.Reasoning) []string {
+func reasoningInclude(reasoning *turn.Reasoning) []string {
 	if reasoning == nil {
 		return nil
 	}

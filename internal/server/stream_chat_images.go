@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"strings"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/turn"
 )
@@ -22,7 +21,7 @@ func newChatImageStreamer() *chatImageStreamer {
 	}
 }
 
-func (s *chatImageStreamer) imagesForEvent(event *codex.StreamEvent) []map[string]any {
+func (s *chatImageStreamer) imagesForEvent(event *turn.StreamEvent) []map[string]any {
 	if event == nil {
 		return nil
 	}

@@ -16,17 +16,18 @@ import (
 
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/config"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestCompactResponseStreamsCompactionTrigger(t *testing.T) {
 	t.Parallel()
-	input := make([]InputItem, 2, 3)
-	input[0] = InputItem{Role: "user", Content: []ContentPart{{Type: "input_text", Text: "Remember the launch code."}}}
-	input[1] = InputItem{Role: "assistant", Content: []ContentPart{{Type: "output_text", Text: "MARIGOLD_742"}}}
-	input[:cap(input)][2] = InputItem{Type: "must_not_overwrite"}
-	request := CompactRequest{
+	input := make([]turn.InputItem, 2, 3)
+	input[0] = turn.InputItem{Role: "user", Content: []turn.ContentPart{{Type: "input_text", Text: "Remember the launch code."}}}
+	input[1] = turn.InputItem{Role: "assistant", Content: []turn.ContentPart{{Type: "output_text", Text: "MARIGOLD_742"}}}
+	input[:cap(input)][2] = turn.InputItem{Type: "must_not_overwrite"}
+	request := turn.CompactRequest{
 		Model: "gpt-6-astra", Instructions: "Preserve the launch code.", Input: input,
-		Reasoning: &Reasoning{Effort: "low"}, Text: &TextConfig{Verbosity: "low"},
+		Reasoning: &turn.Reasoning{Effort: "low"}, Text: &turn.TextConfig{Verbosity: "low"},
 	}
 	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/codex/responses" {
@@ -120,7 +121,7 @@ func TestCompactResponseRejectsUnusableStreams(t *testing.T) {
 			client := NewHTTPClient(config.Config{CodexBaseURL: upstream.URL, RequestTimeout: 5 * time.Second})
 			defer client.Close()
 			client.sessions["test"] = httpcloak.NewSession(chromiumPreset, httpcloak.WithTimeout(5*time.Second), httpcloak.WithDisableHTTP3(), httpcloak.WithoutRetry(), httpcloak.WithInsecureSkipVerify())
-			_, _, err := client.CompactResponse(context.Background(), accounts.Record{ID: "test"}, CompactRequest{Model: "gpt-6-astra"})
+			_, _, err := client.CompactResponse(context.Background(), accounts.Record{ID: "test"}, turn.CompactRequest{Model: "gpt-6-astra"})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error=%v, want %q", err, tc.want)
 			}

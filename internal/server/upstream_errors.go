@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -10,7 +11,10 @@ import (
 
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
+	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/middleware"
+	"chatgpt-codex-proxy/internal/models"
+	"chatgpt-codex-proxy/internal/openai"
 )
 
 func (a *App) writeOpenAIError(c *gin.Context, status int, code, message, errType string) {
@@ -118,4 +122,102 @@ func looksLikeCloudflareBlock(text string) bool {
 func fallbackUntil(now time.Time, duration time.Duration) *time.Time {
 	until := now.Add(duration).UTC()
 	return &until
+}
+
+func (a *App) respondOpenAIInvalidRequest(c *gin.Context, err error) {
+	a.writeOpenAIError(c, http.StatusBadRequest, "invalid_request_error", err.Error(), "invalid_request_error")
+}
+
+func (a *App) respondOpenAINormalizeError(c *gin.Context, err error) {
+	var modelErr *models.NotFoundError
+	if errors.As(err, &modelErr) {
+		message := "Model '" + strings.TrimSpace(modelErr.Model) + "' not found"
+		a.writeOpenAIError(c, http.StatusNotFound, "model_not_found", message, "invalid_request_error")
+		return
+	}
+	var contentErr *openai.UnsupportedContentPartError
+	if errors.As(err, &contentErr) {
+		a.writeOpenAIError(c, http.StatusBadRequest, "unsupported_content_part", contentErr.Error(), "invalid_request_error")
+		return
+	}
+	a.respondOpenAIInvalidRequest(c, err)
+}
+
+func (a *App) handleOpenStreamError(c *gin.Context, endpoint, actualAccountID, reportedAccountID string, err error) {
+	if a.recordRequestCancellation(c, actualAccountID, "", err) {
+		return
+	}
+	if errors.Is(err, errContinuationAccountUnavailable) {
+		a.writeOpenAIError(c, http.StatusServiceUnavailable, "continuation_account_unavailable", "continuation account unavailable", "api_error")
+		return
+	}
+	if errors.Is(err, accounts.ErrNoAvailableAccounts) {
+		a.writeOpenAIError(c, http.StatusServiceUnavailable, "no_available_accounts", "no available accounts", "api_error")
+		return
+	}
+	status, code, message := a.classifyUpstreamError(strings.TrimSpace(actualAccountID), err)
+	logAccountID := jsonutil.FirstNonEmpty(actualAccountID, reportedAccountID)
+	a.logUpstreamRequestFailure(c, endpoint, logAccountID, status, code, err)
+	middleware.SetRequestOutcome(c, "upstream_error")
+	a.writeOpenAIError(c, status, code, message, "api_error")
+}
+
+func (a *App) respondOpenAIUpstreamStreamError(c *gin.Context, endpoint, accountID, responseID string, err error) {
+	if a.recordRequestCancellation(c, accountID, responseID, err) {
+		return
+	}
+	status, code, message := a.classifyUpstreamError(accountID, err)
+	a.logUpstreamStreamFailure(c, endpoint, accountID, responseID, err)
+	middleware.SetRequestOutcome(c, "upstream_error")
+	middleware.SetRequestResponseID(c, responseID)
+	a.writeOpenAIError(c, status, code, message, "api_error")
+}
+
+func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID, eventName string, err error, classify bool) {
+	if a.recordRequestCancellation(c, accountID, responseID, err) {
+		return
+	}
+	status, code, message := http.StatusInternalServerError, "api_error", err.Error()
+	if classify {
+		status, code, message = a.classifyUpstreamError(accountID, err)
+	}
+	a.logUpstreamStreamFailure(c, endpoint, accountID, responseID, err)
+	middleware.SetRequestOutcome(c, "upstream_error")
+	middleware.SetRequestError(c, code, message)
+	middleware.SetRequestResponseID(c, responseID)
+	if endpoint == "responses" {
+		writeResponsesStreamError(c.Writer, status, message)
+		c.Writer.Flush()
+		return
+	}
+	writeSSE(c.Writer, eventName, mustJSON(middleware.OpenAIErrorPayload(message, "api_error", code, "")))
+	c.Writer.Flush()
+}
+
+func writeResponsesStreamError(writer io.Writer, status int, message string) {
+	code := "unknown_error"
+	switch status {
+	case http.StatusUnauthorized:
+		code = "invalid_api_key"
+	case http.StatusForbidden:
+		code = "insufficient_quota"
+	case http.StatusTooManyRequests:
+		code = "rate_limit_exceeded"
+	case http.StatusNotFound:
+		code = "model_not_found"
+	case http.StatusRequestTimeout:
+		code = "request_timeout"
+	default:
+		if status >= http.StatusInternalServerError {
+			code = "internal_server_error"
+		} else if status >= http.StatusBadRequest {
+			code = "invalid_request_error"
+		}
+	}
+	writeSSE(writer, "error", mustJSON(map[string]any{
+		"type":            "error",
+		"code":            code,
+		"message":         strings.TrimSpace(message),
+		"sequence_number": 0,
+	}))
 }

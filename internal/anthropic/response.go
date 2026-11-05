@@ -4,17 +4,12 @@ import (
 	"bytes"
 	"cmp"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"maps"
-	"reflect"
 	"slices"
 	"strings"
 
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/turn"
-	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 type MessageResponse struct {
@@ -209,168 +204,6 @@ func webSearchResultContent(item map[string]any) []map[string]any {
 		})
 	}
 	return content
-}
-
-func normalizedOutputText(accumulator *turn.Accumulator, text string) string {
-	if accumulator == nil || len(accumulator.Normalized.ResponseSchema) == 0 || strings.TrimSpace(text) == "" {
-		return text
-	}
-	decoder := json.NewDecoder(strings.NewReader(text))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return text
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return text
-	}
-	strictSchema := accumulator.Normalized.ResponseSchema
-	if accumulator.Normalized.Text != nil {
-		strictSchema = accumulator.Normalized.Text.Format.Schema
-	}
-	matcher := newSchemaMatcher()
-	cleaned, changed := removeOptionalNullProperties(value, accumulator.Normalized.ResponseSchema, strictSchema, matcher)
-	if !changed || !matcher.matches(accumulator.Normalized.ResponseSchema, cleaned) {
-		return text
-	}
-	encoded, err := json.Marshal(cleaned)
-	if err != nil {
-		return text
-	}
-	return string(encoded)
-}
-
-func removeOptionalNullProperties(value any, schema, strictSchema map[string]any, matcher *schemaMatcher) (any, bool) {
-	if matcher.matches(schema, value) {
-		return value, false
-	}
-	strictSchema = unwrapSyntheticNullableSchema(schema, strictSchema, value, matcher)
-
-	for _, key := range []string{"anyOf", "oneOf"} {
-		children, _ := schema[key].([]any)
-		strictChildren, _ := strictSchema[key].([]any)
-		for index, raw := range children {
-			child, ok := raw.(map[string]any)
-			if !ok || index >= len(strictChildren) {
-				continue
-			}
-			strictChild, ok := strictChildren[index].(map[string]any)
-			if !ok || !matcher.matches(strictChild, value) {
-				continue
-			}
-			if cleaned, changed := removeOptionalNullProperties(value, child, strictChild, matcher); changed && matcher.matches(child, cleaned) {
-				return cleaned, true
-			}
-		}
-	}
-
-	if object, ok := value.(map[string]any); ok {
-		properties, _ := schema["properties"].(map[string]any)
-		strictProperties, _ := strictSchema["properties"].(map[string]any)
-		required := schemaRequiredNames(schema["required"])
-		cleaned := maps.Clone(object)
-		changed := false
-		for name, raw := range properties {
-			child, ok := raw.(map[string]any)
-			strictChild, strictOK := strictProperties[name].(map[string]any)
-			if !ok || !strictOK {
-				continue
-			}
-			propertyValue, exists := cleaned[name]
-			if !exists {
-				continue
-			}
-			if propertyValue == nil && !required[name] && !matcher.matches(child, nil) && matcher.matches(strictChild, nil) {
-				delete(cleaned, name)
-				changed = true
-				continue
-			}
-			if childValue, childChanged := removeOptionalNullProperties(propertyValue, child, strictChild, matcher); childChanged {
-				cleaned[name] = childValue
-				changed = true
-			}
-		}
-		if changed && matcher.matches(schema, cleaned) {
-			return cleaned, true
-		}
-	}
-
-	if array, ok := value.([]any); ok {
-		items, itemsOK := schema["items"].(map[string]any)
-		strictItems, strictOK := strictSchema["items"].(map[string]any)
-		if itemsOK && strictOK {
-			cleaned := slices.Clone(array)
-			changed := false
-			for index, item := range cleaned {
-				if childValue, childChanged := removeOptionalNullProperties(item, items, strictItems, matcher); childChanged {
-					cleaned[index] = childValue
-					changed = true
-				}
-			}
-			if changed && matcher.matches(schema, cleaned) {
-				return cleaned, true
-			}
-		}
-	}
-
-	return value, false
-}
-
-func unwrapSyntheticNullableSchema(schema, strictSchema map[string]any, value any, matcher *schemaMatcher) map[string]any {
-	if matcher.matches(schema, nil) || !matcher.matches(strictSchema, nil) {
-		return strictSchema
-	}
-	children, _ := strictSchema["anyOf"].([]any)
-	if len(children) != 2 {
-		return strictSchema
-	}
-	nullable, nullableOK := children[1].(map[string]any)
-	candidate, candidateOK := children[0].(map[string]any)
-	if !nullableOK || len(nullable) != 1 || nullable["type"] != "null" || !candidateOK || !matcher.matches(candidate, value) {
-		return strictSchema
-	}
-	return candidate
-}
-
-type schemaMatcher struct {
-	compiled map[uintptr]*jsonschema.Schema
-}
-
-func newSchemaMatcher() *schemaMatcher {
-	return &schemaMatcher{compiled: make(map[uintptr]*jsonschema.Schema)}
-}
-
-func (m *schemaMatcher) matches(schema map[string]any, value any) bool {
-	key := reflect.ValueOf(schema).Pointer()
-	compiled, cached := m.compiled[key]
-	if !cached {
-		compiled = compileSchema(schema)
-		m.compiled[key] = compiled
-	}
-	return compiled != nil && compiled.Validate(value) == nil
-}
-
-func compileSchema(schema map[string]any) *jsonschema.Schema {
-	encoded, err := json.Marshal(schema)
-	if err != nil {
-		return nil
-	}
-	document, err := jsonschema.UnmarshalJSON(bytes.NewReader(encoded))
-	if err != nil {
-		return nil
-	}
-	compiler := jsonschema.NewCompiler()
-	compiler.DefaultDraft(jsonschema.Draft2020)
-	compiler.AssertFormat()
-	if err := compiler.AddResource("schema.json", document); err != nil {
-		return nil
-	}
-	compiled, err := compiler.Compile("schema.json")
-	if err != nil {
-		return nil
-	}
-	return compiled
 }
 
 func shouldExposeThinking(accumulator *turn.Accumulator) bool {

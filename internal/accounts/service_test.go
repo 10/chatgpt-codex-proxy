@@ -229,36 +229,21 @@ func TestRecoveredQuotaClearsCooldown(t *testing.T) {
 
 func TestListReturnsPersistErrorAfterRefreshingExpiredCooldown(t *testing.T) {
 	t.Parallel()
-
-	now := time.Now().UTC()
-	cooldown := now.Add(10 * time.Millisecond)
-	store := &memoryStore{
-		saveErr: errors.New("persist failed"),
-		state: State{
-			Records: []*Record{
-				{
-					ID:            "acct_refresh_error",
-					AccountID:     "upstream_refresh_error",
-					Status:        StatusActive,
-					Token:         makeTestOAuthToken(t, testJWTClaims{}),
-					CooldownUntil: &cooldown,
-					CreatedAt:     now,
-					UpdatedAt:     now,
-				},
-			},
-			RotationStrategy: RotationLeastUsed,
-		},
-	}
+	store := &memoryStore{state: State{
+		Records:          []*Record{recordWithID("acct_refresh_error")},
+		RotationStrategy: RotationLeastUsed,
+	}}
 	svc, err := NewService(store, RotationLeastUsed)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
-
-	time.Sleep(20 * time.Millisecond)
-
-	_, err = svc.List()
-	if err == nil {
-		t.Fatal("List() error = nil, want persist failure")
+	cooldown := time.Now().UTC().Add(-time.Minute)
+	if err := svc.SetCooldown("acct_refresh_error", &cooldown, ""); err != nil {
+		t.Fatal(err)
+	}
+	store.saveErr = errors.New("persist failed")
+	if _, err := svc.List(); !errors.Is(err, store.saveErr) {
+		t.Fatalf("List() error = %v, want %v", err, store.saveErr)
 	}
 }
 

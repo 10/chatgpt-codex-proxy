@@ -8,7 +8,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
 )
 
@@ -52,27 +51,18 @@ func (a *App) handleAdminAccounts(c *gin.Context) {
 	}
 	items := make([]adminAccountResponse, 0, len(records))
 	for _, record := range records {
-		item, err := a.adminAccountView(record)
-		if err != nil {
-			a.writeAdminError(c, http.StatusInternalServerError, "accounts_list_failed", err.Error())
-			return
-		}
-		items = append(items, item)
+		items = append(items, adminAccountView(record))
 	}
 	c.JSON(http.StatusOK, gin.H{"accounts": items})
 }
 
-func (a *App) adminAccountView(record accounts.Record) (adminAccountResponse, error) {
-	eligible, err := a.accounts.EligibleNow(record.ID)
-	if err != nil {
-		return adminAccountResponse{}, err
-	}
+func adminAccountView(record accounts.Record) adminAccountResponse {
 	return adminAccountResponse{
 		ID: record.ID, UpstreamID: record.AccountID, UserID: record.UserID, Email: record.Email,
-		PlanType: record.PlanType, Label: record.Label, Status: record.Status, EligibleNow: eligible,
+		PlanType: record.PlanType, Label: record.Label, Status: record.Status, EligibleNow: record.Eligible(time.Now().UTC()),
 		CooldownUntil: record.CooldownUntil, LastError: record.LastError, CachedQuota: record.CachedQuota,
 		OauthExpires: record.Token.ExpiresAt, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
-	}, nil
+	}
 }
 
 func (a *App) handleAdminDeviceLoginStart(c *gin.Context) {
@@ -128,27 +118,17 @@ func (a *App) handleAdminAccountPatch(c *gin.Context) {
 		a.writeAdminError(c, http.StatusNotFound, "account_not_found", err.Error())
 		return
 	}
-	view, err := a.adminAccountView(record)
-	if err != nil {
-		a.writeAdminError(c, http.StatusInternalServerError, "account_lookup_failed", err.Error())
-		return
-	}
-	c.JSON(http.StatusOK, view)
+	c.JSON(http.StatusOK, adminAccountView(record))
 }
 
 func (a *App) handleAdminAccountUsage(c *gin.Context) {
 	record, quota, err := a.accountMgr.GetUsage(c.Request.Context(), c.Param("account_id"), c.Query("cached") == "true")
 	if err != nil {
-		if errors.Is(err, accountmanager.ErrAccountNotFound) {
+		if errors.Is(err, accounts.ErrNotFound) {
 			a.writeAdminError(c, http.StatusNotFound, "account_not_found", err.Error())
 			return
 		}
 		a.writeAdminError(c, http.StatusBadGateway, "usage_lookup_failed", err.Error())
-		return
-	}
-	eligibleNow, err := a.accounts.EligibleNow(record.ID)
-	if err != nil {
-		a.writeAdminError(c, http.StatusInternalServerError, "usage_lookup_failed", err.Error())
 		return
 	}
 	effectiveQuota := quota
@@ -169,7 +149,7 @@ func (a *App) handleAdminAccountUsage(c *gin.Context) {
 		UpstreamID:     record.AccountID,
 		UserID:         record.UserID,
 		Status:         record.Status,
-		EligibleNow:    eligibleNow,
+		EligibleNow:    record.Eligible(time.Now().UTC()),
 		CooldownUntil:  record.CooldownUntil,
 		LastError:      record.LastError,
 		CachedQuota:    record.CachedQuota,
@@ -183,19 +163,14 @@ func (a *App) handleAdminAccountUsage(c *gin.Context) {
 func (a *App) handleAdminAccountRefresh(c *gin.Context) {
 	record, err := a.accountMgr.Refresh(c.Request.Context(), c.Param("account_id"))
 	if err != nil {
-		if errors.Is(err, accountmanager.ErrAccountNotFound) {
+		if errors.Is(err, accounts.ErrNotFound) {
 			a.writeAdminError(c, http.StatusNotFound, "account_not_found", err.Error())
 			return
 		}
 		a.writeAdminError(c, http.StatusBadGateway, "refresh_failed", err.Error())
 		return
 	}
-	view, err := a.adminAccountView(record)
-	if err != nil {
-		a.writeAdminError(c, http.StatusInternalServerError, "account_lookup_failed", err.Error())
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"account": view})
+	c.JSON(http.StatusOK, gin.H{"account": adminAccountView(record)})
 }
 
 func (a *App) handleAdminRotationGet(c *gin.Context) {

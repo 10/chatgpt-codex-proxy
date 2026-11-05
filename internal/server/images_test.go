@@ -172,10 +172,10 @@ func TestImagesEditsConvertsMultipartForDirectCodexEndpoint(t *testing.T) {
 func TestImagesGenerationsReturnsOpenAIImageResponse(t *testing.T) {
 	t.Parallel()
 
-	var upstreamRequest codex.Request
+	var upstreamRequest turn.Request
 	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
 		upstreamRequest = normalized.Request
-		return &fakeEventStream{events: []*codex.StreamEvent{
+		return &fakeEventStream{events: []*turn.StreamEvent{
 			{
 				Type: "response.output_item.done",
 				Raw: map[string]any{
@@ -268,7 +268,7 @@ func TestImagesGenerationsReturnsOpenAIImageResponse(t *testing.T) {
 func TestImagesEditsAcceptsJSONImageReferences(t *testing.T) {
 	t.Parallel()
 
-	var upstreamRequest codex.Request
+	var upstreamRequest turn.Request
 	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
 		upstreamRequest = normalized.Request
 		return completedImageStream("edited")
@@ -323,7 +323,7 @@ func TestImagesEditsAcceptsJSONImageReferences(t *testing.T) {
 func TestImagesEditsAcceptsMultipartUploads(t *testing.T) {
 	t.Parallel()
 
-	var upstreamRequest codex.Request
+	var upstreamRequest turn.Request
 	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
 		upstreamRequest = normalized.Request
 		return completedImageStream("edited-upload")
@@ -384,10 +384,10 @@ func TestImagesEditsAcceptsMultipartUploads(t *testing.T) {
 func TestImagesGenerationsStreamsPartialAndCompletedEvents(t *testing.T) {
 	t.Parallel()
 
-	var upstreamRequest codex.Request
+	var upstreamRequest turn.Request
 	app := newImagesTestApp(t, func(normalized turn.NormalizedRequest) eventStream {
 		upstreamRequest = normalized.Request
-		return &fakeEventStream{events: []*codex.StreamEvent{
+		return &fakeEventStream{events: []*turn.StreamEvent{
 			{
 				Type: "response.image_generation_call.partial_image",
 				Raw: map[string]any{
@@ -442,7 +442,7 @@ func TestImagesGenerationsStreamsPartialAndCompletedEvents(t *testing.T) {
 }
 
 func completedImageStream(result string) eventStream {
-	return &fakeEventStream{events: []*codex.StreamEvent{
+	return &fakeEventStream{events: []*turn.StreamEvent{
 		{
 			Type: "response.output_item.done",
 			Raw: map[string]any{"output_index": 0, "item": map[string]any{
@@ -503,7 +503,7 @@ func newImagesTestApp(t *testing.T, opener func(turn.NormalizedRequest) eventStr
 			}, true
 		}
 	}
-	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil, catalog.SupportsRecord)
+	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil)
 	app.routes()
 	return app
 }

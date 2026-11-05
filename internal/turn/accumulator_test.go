@@ -12,38 +12,22 @@ func TestResponsesObjectMergesFunctionCallsWithExistingOutputInOrder(t *testing.
 			Model: "gpt-5.4",
 		},
 	})
-	accumulator.ResponseID = "resp_merge"
-	accumulator.ToolCalls = []*ToolCallState{
-		{
-			ItemID:      "fc_late",
-			CallID:      "call_late",
-			Name:        "late_tool",
-			Arguments:   `{"value":2}`,
-			OutputIndex: 1,
-			Status:      "completed",
-		},
-		{
-			ItemID:      "fc_early",
-			CallID:      "call_early",
-			Name:        "early_tool",
-			Arguments:   `{"value":1}`,
-			OutputIndex: 0,
-			Status:      "completed",
-		},
+	for _, event := range []*StreamEvent{
+		{Type: "response.output_item.done", Raw: map[string]any{
+			"output_index": 1,
+			"item":         map[string]any{"type": "function_call", "id": "fc_late", "call_id": "call_late", "name": "late_tool", "arguments": `{"value":2}`, "status": "completed"},
+		}},
+		{Type: "response.output_item.done", Raw: map[string]any{
+			"output_index": 0,
+			"item":         map[string]any{"type": "function_call", "id": "fc_early", "call_id": "call_early", "name": "early_tool", "arguments": `{"value":1}`, "status": "completed"},
+		}},
+		{Type: "response.output_item.done", Raw: map[string]any{
+			"output_index": 2,
+			"item":         map[string]any{"id": "msg_123", "type": "message", "role": "assistant", "status": "completed", "content": []map[string]any{{"type": "output_text", "text": "done"}}},
+		}},
+	} {
+		accumulator.Apply(event)
 	}
-	accumulator.OutputItems = []*outputItemState{{
-		OutputIndex: 2,
-		Item: map[string]any{
-			"id":     "msg_123",
-			"type":   "message",
-			"role":   "assistant",
-			"status": "completed",
-			"content": []map[string]any{{
-				"type": "output_text",
-				"text": "done",
-			}},
-		},
-	}}
 
 	response := accumulator.ResponsesObject()
 	output := response["output"].([]map[string]any)
@@ -85,6 +69,8 @@ func TestResponsesObjectPreservesNativeResponseFields(t *testing.T) {
 	accumulator.Apply(&StreamEvent{
 		Type: "response.completed",
 		Raw: map[string]any{
+			"usage":  map[string]any{"input_tokens": 999, "output_tokens": 999},
+			"output": []any{map[string]any{"type": "message", "id": "msg_stale"}},
 			"response": map[string]any{
 				"id":         "resp_native",
 				"object":     "response",
@@ -96,6 +82,7 @@ func TestResponsesObjectPreservesNativeResponseFields(t *testing.T) {
 					"enabled": true,
 				},
 				"output_text": "done",
+				"output":      []any{map[string]any{"type": "message", "id": "msg_final"}},
 				"usage": map[string]any{
 					"input_tokens":  3,
 					"output_tokens": 2,
@@ -118,6 +105,13 @@ func TestResponsesObjectPreservesNativeResponseFields(t *testing.T) {
 		t.Fatalf("future_field = %#v, want preserved unknown field", futureField)
 	}
 	usage, _ := response["usage"].(map[string]any)
+	if usage["input_tokens"] != int64(3) || usage["output_tokens"] != int64(2) {
+		t.Fatalf("usage = %#v, want authoritative terminal response usage", usage)
+	}
+	output, _ := response["output"].([]map[string]any)
+	if len(output) != 1 || output[0]["id"] != "msg_final" {
+		t.Fatalf("output = %#v, want authoritative terminal response output", output)
+	}
 	if usage["future_detail"] != "preserve-me" {
 		t.Fatalf("usage.future_detail = %#v, want preserved unknown usage field", usage["future_detail"])
 	}

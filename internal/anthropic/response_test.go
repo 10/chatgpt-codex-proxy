@@ -5,18 +5,15 @@ import (
 	"strings"
 	"testing"
 
-	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/jsonutil"
-	"chatgpt-codex-proxy/internal/openai"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestBuildMessageMapsTextThinkingToolsAndUsage(t *testing.T) {
 	t.Parallel()
 
-	normalized := turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}, ToolNameAliases: map[string]string{"short": "original_long_name"}}
+	normalized := turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}, ToolNameAliases: map[string]string{"short": "original_long_name"}}
 	accumulator := turn.NewAccumulator(normalized)
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id":     "resp_123",
 			"model":  "gpt-5.4",
@@ -57,8 +54,8 @@ func TestBuildMessageMapsTextThinkingToolsAndUsage(t *testing.T) {
 func TestBuildMessageDoesNotExposeIncompleteToolCallAsToolUse(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id":                 "resp_partial_tool",
 			"status":             "incomplete",
@@ -81,8 +78,8 @@ func TestBuildMessageDoesNotExposeIncompleteToolCallAsToolUse(t *testing.T) {
 func TestBuildMessagePreservesLargeToolArgumentNumbers(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_large_id", "status": "completed",
 			"output": []any{map[string]any{
@@ -103,10 +100,10 @@ func TestBuildMessagePreservesLargeToolArgumentNumbers(t *testing.T) {
 func TestBuildMessageSerializesSignatureOnlyThinkingWithEmptyText(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{
 		Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"},
 	}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_omitted_thinking", "status": "completed",
 			"output": []any{map[string]any{"type": "reasoning", "encrypted_content": "signed"}},
@@ -125,8 +122,8 @@ func TestBuildMessageSerializesSignatureOnlyThinkingWithEmptyText(t *testing.T) 
 func TestBuildMessageMapsHostedWebSearch(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_search", "model": "gpt-5.4", "status": "completed",
 			"output": []any{
@@ -175,8 +172,8 @@ func TestBuildMessageMapsHostedWebSearch(t *testing.T) {
 func TestBuildMessageDoesNotReportFailedHostedWebSearchAsEmptySuccess(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_search_failed", "model": "gpt-5.4", "status": "completed",
 			"output": []any{
@@ -201,7 +198,7 @@ func TestBuildMessageDoesNotReportFailedHostedWebSearchAsEmptySuccess(t *testing
 func TestBuildMessageRemovesSyntheticNullOptionalFields(t *testing.T) {
 	t.Parallel()
 
-	accumulator := structuredOutputAccumulator(map[string]any{
+	accumulator := structuredOutputAccumulator(t, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"result":        map[string]any{"type": "string"},
@@ -217,7 +214,7 @@ func TestBuildMessageRemovesSyntheticNullOptionalFields(t *testing.T) {
 		},
 		"required": []any{"result", "explicit_null", "details"},
 	})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_structured", "status": "completed",
 			"output": []any{map[string]any{
@@ -236,10 +233,10 @@ func TestBuildMessageRemovesSyntheticNullOptionalFields(t *testing.T) {
 	}
 }
 
-func TestNormalizedOutputTextRestoresNestedFieldsInOptionalObjects(t *testing.T) {
+func TestBuildMessageRestoresNestedFieldsInOptionalObjects(t *testing.T) {
 	t.Parallel()
 
-	accumulator := structuredOutputAccumulator(map[string]any{
+	accumulator := structuredOutputAccumulator(t, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"details": map[string]any{
@@ -260,12 +257,12 @@ func TestNormalizedOutputTextRestoresNestedFieldsInOptionalObjects(t *testing.T)
 		},
 	})
 
-	if got := normalizedOutputText(accumulator, `{"details":{"note":null},"entries":[{"note":null}]}`); got != `{"details":{},"entries":[{}]}` {
+	if got := structuredOutputText(t, accumulator, `{"details":{"note":null},"entries":[{"note":null}]}`); got != `{"details":{},"entries":[{}]}` {
 		t.Fatalf("normalized output = %s", got)
 	}
 }
 
-func TestNormalizedOutputTextUsesMatchingUnionBranch(t *testing.T) {
+func TestBuildMessageUsesMatchingUnionBranch(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
@@ -279,50 +276,65 @@ func TestNormalizedOutputTextUsesMatchingUnionBranch(t *testing.T) {
 		t.Run(test.constraint, func(t *testing.T) {
 			t.Parallel()
 
-			accumulator := structuredOutputAccumulator(map[string]any{
-				"anyOf": []any{
-					map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"kind":  map[string]any{"type": "string", test.constraint: test.first},
-							"value": map[string]any{"type": "string"},
+			accumulator := structuredOutputAccumulator(t, map[string]any{
+				"type": "object",
+				"properties": map[string]any{"result": map[string]any{
+					"anyOf": []any{
+						map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"kind":  map[string]any{"type": "string", test.constraint: test.first},
+								"value": map[string]any{"type": "string"},
+							},
+							"required": []any{"kind"},
 						},
-						"required": []any{"kind"},
-					},
-					map[string]any{
-						"type": "object",
-						"properties": map[string]any{
-							"kind":  map[string]any{"type": "string", test.constraint: test.second},
-							"value": map[string]any{"type": []any{"string", "null"}},
+						map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"kind":  map[string]any{"type": "string", test.constraint: test.second},
+								"value": map[string]any{"type": []any{"string", "null"}},
+							},
+							"required": []any{"kind", "value"},
 						},
-						"required": []any{"kind", "value"},
 					},
-				},
+				}},
+				"required": []any{"result"},
 			})
 
-			if got := normalizedOutputText(accumulator, `{"kind":"a","value":null}`); got != `{"kind":"a"}` {
+			if got := structuredOutputText(t, accumulator, `{"result":{"kind":"a","value":null}}`); got != `{"result":{"kind":"a"}}` {
 				t.Fatalf("optional branch = %s", got)
 			}
-			if got := normalizedOutputText(accumulator, `{"kind":"b","value":null}`); got != `{"kind":"b","value":null}` {
+			if got := structuredOutputText(t, accumulator, `{"result":{"kind":"b","value":null}}`); got != `{"result":{"kind":"b","value":null}}` {
 				t.Fatalf("nullable branch = %s", got)
 			}
 		})
 	}
 }
 
-func structuredOutputAccumulator(schema map[string]any) *turn.Accumulator {
-	responseSchema := openai.NormalizeSchema(schema)
-	strictSchema := jsonutil.CloneMap(responseSchema)
-	if err := makeOpenAIStrictSchemaNode(strictSchema, newSchemaMatcher()); err != nil {
-		panic(err)
+func structuredOutputAccumulator(t *testing.T, originalSchema map[string]any) *turn.Accumulator {
+	t.Helper()
+	maxTokens := 100
+	normalized, err := Normalize(MessagesRequest{
+		Model:        "gpt-5.4",
+		MaxTokens:    &maxTokens,
+		Messages:     []Message{{Role: "user", Content: Content{{Type: "text", Text: "answer"}}}},
+		OutputConfig: &OutputConfig{Format: &OutputFormat{Type: "json_schema", Schema: originalSchema}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
 	}
-	return turn.NewAccumulator(turn.NormalizedRequest{
-		Request: codex.Request{
-			Model: "gpt-5.4",
-			Text: &codex.TextConfig{Format: codex.TextFormat{
-				Type: "json_schema", Schema: strictSchema, Strict: true,
-			}},
-		},
-		ResponseSchema: responseSchema,
-	})
+	return turn.NewAccumulator(normalized)
+}
+
+func structuredOutputText(t *testing.T, accumulator *turn.Accumulator, text string) string {
+	t.Helper()
+	accumulator = turn.NewAccumulator(accumulator.Normalized)
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
+		"response": map[string]any{"status": "completed", "output_text": text},
+	}})
+	message := BuildMessage(accumulator)
+	if len(message.Content) != 1 || message.Content[0].Type != "text" {
+		t.Fatalf("content = %#v, want one text block", message.Content)
+	}
+	return message.Content[0].Text
 }

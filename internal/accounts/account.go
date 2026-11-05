@@ -1,6 +1,15 @@
 package accounts
 
-import "time"
+import (
+	"errors"
+	"strings"
+	"time"
+)
+
+var (
+	ErrNotFound            = errors.New("account not found")
+	ErrNoAvailableAccounts = errors.New("no active accounts")
+)
 
 type Status string
 
@@ -57,4 +66,9 @@ type Record struct {
 	CooldownUntil *time.Time        `json:"cooldown_until,omitempty"`
 	CreatedAt     time.Time         `json:"created_at"`
 	UpdatedAt     time.Time         `json:"updated_at"`
+}
+
+func (r Record) Eligible(now time.Time) bool {
+	return r.Status == StatusActive && strings.TrimSpace(r.Token.AccessToken) != "" &&
+		(r.CooldownUntil == nil || !r.CooldownUntil.After(now)) && !quotaBlocksGeneralRouting(r.CachedQuota, now)
 }

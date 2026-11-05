@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"chatgpt-codex-proxy/internal/accounts"
-	"chatgpt-codex-proxy/internal/codex"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestTextStreamsPreserveTerminalOutput(t *testing.T) {
@@ -26,10 +26,10 @@ func TestTextStreamsPreserveTerminalOutput(t *testing.T) {
 		} {
 			t.Run(endpoint+"/"+tc.name, func(t *testing.T) {
 				app := newFailoverTestApp(t)
-				app.httpStream = func(context.Context, accounts.Record, codex.Request, string) (eventStream, error) {
-					var events []*codex.StreamEvent
+				app.httpStream = func(context.Context, accounts.Record, turn.Request, string) (eventStream, error) {
+					var events []*turn.StreamEvent
 					if tc.delta {
-						events = append(events, &codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "answer"}})
+						events = append(events, &turn.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "answer"}})
 					}
 					status := "completed"
 					if tc.incomplete {
@@ -39,7 +39,7 @@ func TestTextStreamsPreserveTerminalOutput(t *testing.T) {
 					if tc.incomplete {
 						response["incomplete_details"] = map[string]any{"reason": "max_output_tokens"}
 					}
-					events = append(events, &codex.StreamEvent{Type: "response." + status, Raw: map[string]any{"response": response}})
+					events = append(events, &turn.StreamEvent{Type: "response." + status, Raw: map[string]any{"response": response}})
 					return &fakeEventStream{events: events}, nil
 				}
 				body := `{"model":"gpt-6-astra","stream":true,"prompt":"test"}`

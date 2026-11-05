@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
@@ -56,8 +55,8 @@ func TestReplayManagerKeepsClaudeCodeAgentAffinityAndDeletionIsolated(t *testing
 	t.Parallel()
 
 	manager := NewReplayManager(time.Minute)
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_tool", "model": "gpt-5.4", "status": "completed",
 			"output": []any{map[string]any{
@@ -102,11 +101,11 @@ func TestReplayManagerPreservesTextPositionBetweenStateBlocks(t *testing.T) {
 	t.Parallel()
 
 	manager := NewReplayManager(time.Minute)
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{
 		Model:   "gpt-5.4",
 		Include: []string{"reasoning.encrypted_content"},
 	}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_tool", "model": "gpt-5.4", "status": "completed",
 			"output": []any{
@@ -154,8 +153,8 @@ func TestReplayManagerExpiresRecords(t *testing.T) {
 	now := time.Now()
 	manager := NewReplayManager(time.Minute)
 	manager.now = func() time.Time { return now }
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_tool", "model": "gpt-5.4", "status": "completed",
 			"output": []any{map[string]any{"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": `{}`}},
@@ -185,8 +184,8 @@ func TestReplayManagerBoundsEntriesAndBytes(t *testing.T) {
 	manager := NewReplayManager(time.Minute)
 	manager.maxEntries = 2
 	manager.now = func() time.Time { return now }
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
-	accumulator.Apply(&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
+	accumulator.Apply(&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{
 		"response": map[string]any{
 			"id": "resp_tool", "model": "gpt-5.4", "status": "completed",
 			"output": []any{map[string]any{"type": "function_call", "call_id": "call_1", "name": "lookup", "arguments": `{}`}},

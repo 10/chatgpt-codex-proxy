@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/turn"
 )
@@ -45,7 +44,7 @@ func NewStreamEncoder(inputTokens int64) *StreamEncoder {
 	}
 }
 
-func (e *StreamEncoder) Events(event *codex.StreamEvent, accumulator *turn.Accumulator) []StreamEvent {
+func (e *StreamEncoder) Events(event *turn.StreamEvent, accumulator *turn.Accumulator) []StreamEvent {
 	result := e.ensureStarted(accumulator)
 
 	switch event.Type {

@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -16,9 +15,11 @@ import (
 	httpcloak "github.com/sardanioss/httpcloak/client"
 
 	"chatgpt-codex-proxy/internal/accounts"
+	"chatgpt-codex-proxy/internal/clientidentity"
 	"chatgpt-codex-proxy/internal/config"
 	"chatgpt-codex-proxy/internal/httpbody"
-	"chatgpt-codex-proxy/internal/jsonutil"
+	"chatgpt-codex-proxy/internal/models"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 type HTTPClient struct {
@@ -47,15 +48,15 @@ func (c *HTTPClient) Close() {
 
 func (c *HTTPClient) GetUsage(ctx context.Context, record accounts.Record) (UsageResponse, *accounts.QuotaSnapshot, error) {
 	session := c.sessionFor(record.ID)
-	headers := BuildHeaders(record.Token.AccessToken, HeaderOptions{
+	headers := buildHeaders(record.Token.AccessToken, headerOptions{
 		AccountID:      record.AccountID,
 		Cookies:        record.Cookies,
-		RequestID:      NewRequestID(),
+		RequestID:      newRequestID(),
 		Accept:         "application/json",
 		AcceptEncoding: "gzip, deflate",
 	})
 
-	resp, err := session.Get(ctx, JoinURL(c.cfg.CodexBaseURL, "/codex/usage"), headers)
+	resp, err := session.Get(ctx, joinURL(c.cfg.CodexBaseURL, "/codex/usage"), headers)
 	if err != nil {
 		return UsageResponse{}, nil, err
 	}
@@ -66,7 +67,7 @@ func (c *HTTPClient) GetUsage(ctx context.Context, record accounts.Record) (Usag
 		return UsageResponse{}, nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return UsageResponse{}, nil, NewUpstreamError("codex usage", resp.StatusCode, payload, CanonicalHeader(resp.Headers))
+		return UsageResponse{}, nil, NewUpstreamError("codex usage", resp.StatusCode, payload, canonicalHeader(resp.Headers))
 	}
 
 	var decoded UsageResponse
@@ -76,12 +77,12 @@ func (c *HTTPClient) GetUsage(ctx context.Context, record accounts.Record) (Usag
 	return decoded, QuotaFromUsageResponse(decoded), nil
 }
 
-func (c *HTTPClient) GetCodexModels(ctx context.Context, record accounts.Record) ([]BackendModelEntry, error) {
+func (c *HTTPClient) GetCodexModels(ctx context.Context, record accounts.Record) ([]models.Entry, error) {
 	session := c.sessionFor(record.ID)
-	headers := BuildHeaders(record.Token.AccessToken, HeaderOptions{
+	headers := buildHeaders(record.Token.AccessToken, headerOptions{
 		AccountID:      record.AccountID,
 		Cookies:        record.Cookies,
-		RequestID:      NewRequestID(),
+		RequestID:      newRequestID(),
 		Accept:         "application/json",
 		AcceptEncoding: "gzip, deflate",
 	})
@@ -97,24 +98,24 @@ func (c *HTTPClient) GetCodexModels(ctx context.Context, record accounts.Record)
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, NewUpstreamError("codex models", resp.StatusCode, payload, CanonicalHeader(resp.Headers))
+		return nil, NewUpstreamError("codex models", resp.StatusCode, payload, canonicalHeader(resp.Headers))
 	}
 
-	models, err := parseCodexModelsResponse(payload)
+	entries, err := parseCodexModelsResponse(payload)
 	if err != nil {
 		return nil, fmt.Errorf("codex models returned an unusable body: %w", err)
 	}
-	return models, nil
+	return entries, nil
 }
 
-func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record, req Request, turnState string) (*StreamReader, error) {
+func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record, req turn.Request, turnState string) (*StreamReader, error) {
 	session := c.sessionFor(record.ID)
-	headers := BuildHeaders(record.Token.AccessToken, HeaderOptions{
+	headers := buildHeaders(record.Token.AccessToken, headerOptions{
 		AccountID:   record.AccountID,
 		Cookies:     record.Cookies,
 		ContentType: "application/json",
 		TurnState:   turnState,
-		RequestID:   NewRequestID(),
+		RequestID:   newRequestID(),
 		IncludeBeta: true,
 		Accept:      "text/event-stream",
 	})
@@ -127,7 +128,7 @@ func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record,
 
 	streamResp, err := session.DoStream(ctx, &httpcloak.Request{
 		Method:  http.MethodPost,
-		URL:     JoinURL(c.cfg.CodexBaseURL, "/codex/responses"),
+		URL:     joinURL(c.cfg.CodexBaseURL, "/codex/responses"),
 		Headers: headers,
 		Body:    bytes.NewReader(payload),
 	})
@@ -136,7 +137,7 @@ func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record,
 	}
 	if streamResp.StatusCode < 200 || streamResp.StatusCode >= 300 {
 		data := httpbody.ReadLimitedErrorBody(streamResp)
-		headers := CanonicalHeader(streamResp.Headers)
+		headers := canonicalHeader(streamResp.Headers)
 		streamResp.Close()
 		return nil, NewUpstreamError("codex response", streamResp.StatusCode, data, headers)
 	}
@@ -144,7 +145,7 @@ func (c *HTTPClient) StreamResponse(ctx context.Context, record accounts.Record,
 	return &StreamReader{
 		reader:  bufio.NewReader(streamResp),
 		Closer:  streamResp,
-		headers: CanonicalHeader(streamResp.Headers),
+		headers: canonicalHeader(streamResp.Headers),
 	}, nil
 }
 
@@ -164,68 +165,7 @@ func (c *HTTPClient) sessionFor(accountID string) *httpcloak.Client {
 	return session
 }
 
-type StreamReader struct {
-	reader *bufio.Reader
-	io.Closer
-	headers http.Header
-}
-
-func (r *StreamReader) Headers() http.Header {
-	return r.headers.Clone()
-}
-
-func (r *StreamReader) NextEvent() (*StreamEvent, error) {
-	var eventName string
-	var dataLines []string
-	for {
-		line, err := r.reader.ReadString('\n')
-		if err != nil {
-			if err == io.EOF && len(dataLines) > 0 {
-				return parseStreamEvent(eventName, strings.Join(dataLines, "\n"))
-			}
-			return nil, err
-		}
-
-		line = strings.TrimRight(line, "\r\n")
-		if line == "" {
-			if len(dataLines) == 0 {
-				continue
-			}
-			return parseStreamEvent(eventName, strings.Join(dataLines, "\n"))
-		}
-		lowerLine := strings.ToLower(line)
-		if strings.HasPrefix(lowerLine, "event:") {
-			eventName = strings.TrimSpace(line[6:])
-			continue
-		}
-		if strings.HasPrefix(lowerLine, "data:") {
-			dataLines = append(dataLines, strings.TrimSpace(line[5:]))
-		}
-	}
-}
-
-func parseStreamEvent(eventName, data string) (*StreamEvent, error) {
-	if data == "" || data == "[DONE]" {
-		return nil, io.EOF
-	}
-	var raw map[string]any
-	decoder := json.NewDecoder(strings.NewReader(data))
-	decoder.UseNumber()
-	if err := decoder.Decode(&raw); err != nil {
-		return nil, err
-	}
-	eventType := strings.TrimSpace(eventName)
-	if eventType == "" {
-		eventType = jsonutil.StringValue(raw["type"])
-	}
-	return &StreamEvent{
-		Type: eventType,
-		Raw:  raw,
-	}, nil
-}
-
-// CanonicalHeader copies headers into an http.Header, canonicalizing keys.
-func CanonicalHeader(headers map[string][]string) http.Header {
+func canonicalHeader(headers map[string][]string) http.Header {
 	out := make(http.Header, len(headers))
 	for key, values := range headers {
 		canonical := http.CanonicalHeaderKey(key)
@@ -234,16 +174,15 @@ func CanonicalHeader(headers map[string][]string) http.Header {
 	return out
 }
 
-// JoinURL trims trailing slashes from base and appends path.
-func JoinURL(base, path string) string {
+func joinURL(base, path string) string {
 	return strings.TrimRight(base, "/") + path
 }
 
-func NewRequestID() string {
+func newRequestID() string {
 	return fmt.Sprintf("req_%d_%08x", time.Now().UTC().UnixNano(), atomic.AddUint64(&requestSequence, 1))
 }
 
-func StreamRequestPayload(req Request) Request {
+func StreamRequestPayload(req turn.Request) turn.Request {
 	bodyReq := req
 	bodyReq.Stream = true
 	bodyReq.Store = false
@@ -252,31 +191,5 @@ func StreamRequestPayload(req Request) Request {
 }
 
 func (c *HTTPClient) codexModelsURL() string {
-	return JoinURL(c.cfg.CodexBaseURL, "/codex/models?client_version="+desktopClientVersion)
-}
-
-func parseCodexModelsResponse(payload string) ([]BackendModelEntry, error) {
-	var decoded struct {
-		Models json.RawMessage `json:"models"`
-	}
-	decoder := json.NewDecoder(strings.NewReader(payload))
-	if err := decoder.Decode(&decoded); err != nil {
-		return nil, err
-	}
-	if len(decoded.Models) == 0 {
-		return nil, fmt.Errorf("missing models field")
-	}
-	var models []BackendModelEntry
-	if err := json.Unmarshal(decoded.Models, &models); err != nil {
-		return nil, fmt.Errorf("models field is not a model array: %w", err)
-	}
-	if len(models) == 0 {
-		return nil, fmt.Errorf("models array is empty")
-	}
-	for idx, model := range models {
-		if strings.TrimSpace(model.Slug) == "" && strings.TrimSpace(model.ID) == "" && strings.TrimSpace(model.Name) == "" {
-			return nil, fmt.Errorf("models[%d] is missing slug, id, and name", idx)
-		}
-	}
-	return models, nil
+	return joinURL(c.cfg.CodexBaseURL, "/codex/models?client_version="+clientidentity.DesktopVersion)
 }

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"chatgpt-codex-proxy/internal/accounts"
-	"chatgpt-codex-proxy/internal/codex"
 )
 
 func TestAstraCatalogPreservesAccountAccessAndMetadataAcrossCache(t *testing.T) {
@@ -14,11 +13,11 @@ func TestAstraCatalogPreservesAccountAccessAndMetadataAcrossCache(t *testing.T) 
 	other := accounts.Record{ID: "other", PlanType: "team"}
 	catalog := NewCatalog(BootstrapEntries())
 	catalog.RegisterRoute(RoutingKeyForRecord(other))
-	entries := NormalizeBackendEntries([]codex.BackendModelEntry{{
-		Slug: "gpt-6-astra", ContextWindow: 300000, MaxContextWindow: 900000,
-		DefaultReasoningLevel:    "high",
-		SupportedReasoningLevels: []codex.BackendReasoningEffort{{Effort: "high"}, {Effort: "max"}},
-	}})
+	entries := []Entry{{
+		ID: "gpt-6-astra", ContextWindow: 300000, MaxContextWindow: 900000,
+		DefaultReasoningEffort:    "high",
+		SupportedReasoningEfforts: []ReasoningEffort{{ReasoningEffort: "high"}, {ReasoningEffort: "max"}},
+	}}
 	catalog.ApplyRouteModels(RoutingKeyForRecord(allowed), entries)
 	if entry, _ := catalog.Get("gpt-6-astra"); entry.DefaultReasoningEffort != "high" || entry.ContextWindow != 300000 {
 		t.Fatalf("unrefreshed account overwrote fetched metadata: %#v", entry)

@@ -14,7 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/openai"
 	"chatgpt-codex-proxy/internal/turn"
@@ -278,9 +277,9 @@ func normalizedImageEditRequest(req imageEditRequest) turn.NormalizedRequest {
 		}
 	}
 
-	images := make([]codex.ContentPart, 0, len(req.Images))
+	images := make([]turn.ContentPart, 0, len(req.Images))
 	for _, reference := range req.Images {
-		part := codex.ContentPart{Type: "input_image"}
+		part := turn.ContentPart{Type: "input_image"}
 		part.ImageURL = strings.TrimSpace(reference.ImageURL)
 		part.FileID = strings.TrimSpace(reference.FileID)
 		if part.ImageURL != "" || part.FileID != "" {
@@ -300,17 +299,17 @@ func newImageTool(model, action string) openai.ToolDefinition {
 	}
 }
 
-func normalizedImageToolRequest(prompt string, images []codex.ContentPart, tool openai.ToolDefinition, stream bool) turn.NormalizedRequest {
-	content := make([]codex.ContentPart, 0, 1+len(images))
-	content = append(content, codex.ContentPart{Type: "input_text", Text: strings.TrimSpace(prompt)})
+func normalizedImageToolRequest(prompt string, images []turn.ContentPart, tool openai.ToolDefinition, stream bool) turn.NormalizedRequest {
+	content := make([]turn.ContentPart, 0, 1+len(images))
+	content = append(content, turn.ContentPart{Type: "input_text", Text: strings.TrimSpace(prompt)})
 	content = append(content, images...)
-	return turn.NormalizedRequest{Request: codex.Request{
+	return turn.NormalizedRequest{Request: turn.Request{
 		Stream: stream,
-		Input: []codex.InputItem{{
+		Input: []turn.InputItem{{
 			Role:    "user",
 			Content: content,
 		}},
-		Tools:      []codex.Tool{tool},
+		Tools:      []turn.ToolDefinition{tool},
 		ToolChoice: json.RawMessage(`{"type":"image_generation"}`),
 	}}
 }
@@ -425,7 +424,7 @@ func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, respon
 		if event.Type == "response.image_generation_call.partial_image" {
 			payload := imagePartialEventPayload(event, streamPrefix, responseFormat)
 			if payload != nil {
-				writeSSE(c.Writer, streamPrefix+".partial_image", turn.MustJSON(payload))
+				writeSSE(c.Writer, streamPrefix+".partial_image", mustJSON(payload))
 				c.Writer.Flush()
 			}
 		}
@@ -448,7 +447,7 @@ func (a *App) streamImageResponse(c *gin.Context, endpoint, streamPrefix, respon
 			if usage := imageUsage(accumulator); len(usage) > 0 {
 				payload["usage"] = usage
 			}
-			writeSSE(c.Writer, streamPrefix+".completed", turn.MustJSON(payload))
+			writeSSE(c.Writer, streamPrefix+".completed", mustJSON(payload))
 			c.Writer.Flush()
 		}
 		a.accounts.NoteSuccess(opened.Account.ID)
@@ -488,7 +487,7 @@ func imageResultsFromAccumulator(accumulator *turn.Accumulator, responseFormat s
 	return results
 }
 
-func imagePartialEventPayload(event *codex.StreamEvent, streamPrefix, responseFormat string) map[string]any {
+func imagePartialEventPayload(event *turn.StreamEvent, streamPrefix, responseFormat string) map[string]any {
 	result := strings.TrimSpace(jsonutil.StringValue(event.Raw["partial_image_b64"]))
 	if result == "" {
 		return nil

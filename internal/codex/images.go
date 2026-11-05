@@ -16,24 +16,24 @@ func (c *HTTPClient) OpenImage(ctx context.Context, record accounts.Record, path
 	if stream {
 		accept = "text/event-stream"
 	}
-	headers := BuildHeaders(record.Token.AccessToken, HeaderOptions{
+	headers := buildHeaders(record.Token.AccessToken, headerOptions{
 		AccountID:   record.AccountID,
 		Cookies:     record.Cookies,
 		ContentType: "application/json",
-		RequestID:   NewRequestID(),
+		RequestID:   newRequestID(),
 		Accept:      accept,
 	})
 
 	resp, err := c.sessionFor(record.ID).DoStream(ctx, &httpcloak.Request{
 		Method:  http.MethodPost,
-		URL:     JoinURL(c.cfg.CodexBaseURL, path),
+		URL:     joinURL(c.cfg.CodexBaseURL, path),
 		Headers: headers,
 		Body:    bytes.NewReader(payload),
 	})
 	if err != nil {
 		return nil, err
 	}
-	responseHeaders := CanonicalHeader(resp.Headers)
+	responseHeaders := canonicalHeader(resp.Headers)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body := httpbody.ReadLimitedErrorBody(resp)
 		resp.Close()

@@ -4,27 +4,27 @@ import (
 	"slices"
 	"strings"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/models"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
-func normalizeModel(rawModel, reasoningEffort, serviceTier string, catalog *models.Catalog) (string, bool, *codex.Reasoning, string, error) {
+func normalizeModel(rawModel, reasoningEffort, serviceTier string, catalog *models.Catalog) (string, bool, *turn.Reasoning, string, error) {
 	model := strings.TrimSpace(rawModel)
 	modelExplicit := model != ""
 	if modelExplicit {
 		if catalog != nil {
 			if !catalog.Has(model) {
-				return "", false, nil, "", &ModelNotFoundError{Model: model}
+				return "", false, nil, "", &models.NotFoundError{Model: model}
 			}
 		} else if !slices.ContainsFunc(models.BootstrapEntries(), func(entry models.Entry) bool { return entry.ID == model }) {
-			return "", false, nil, "", &ModelNotFoundError{Model: model}
+			return "", false, nil, "", &models.NotFoundError{Model: model}
 		}
 	}
 
 	effort := strings.TrimSpace(reasoningEffort)
-	var reasoning *codex.Reasoning
+	var reasoning *turn.Reasoning
 	if effort != "" {
-		reasoning = &codex.Reasoning{Effort: effort, Summary: "auto"}
+		reasoning = &turn.Reasoning{Effort: effort, Summary: "auto"}
 	}
 	serviceTier = strings.TrimSpace(serviceTier)
 	if strings.EqualFold(serviceTier, "auto") {

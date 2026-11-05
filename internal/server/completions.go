@@ -84,7 +84,7 @@ func (a *App) streamCompletion(c *gin.Context, account accounts.Record, normaliz
 		if event.Type == "response.output_text.delta" {
 			if delta := jsonutil.StringValue(event.Raw["delta"]); delta != "" {
 				textSent = true
-				writeSSE(c.Writer, "", turn.MustJSON(completionChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), delta, "", createdAt)))
+				writeSSE(c.Writer, "", mustJSON(completionChunk(accumulator.ResponseID, jsonutil.FirstNonEmpty(accumulator.Model, normalized.Model), delta, "", createdAt)))
 				c.Writer.Flush()
 			}
 		}
@@ -102,7 +102,7 @@ func (a *App) streamCompletion(c *gin.Context, account accounts.Record, normaliz
 	if usage := accumulator.ChatUsageObject(); usage != nil {
 		final["usage"] = usage
 	}
-	writeSSE(c.Writer, "", turn.MustJSON(final))
+	writeSSE(c.Writer, "", mustJSON(final))
 	_, _ = io.WriteString(c.Writer, "data: [DONE]\n\n")
 	c.Writer.Flush()
 }

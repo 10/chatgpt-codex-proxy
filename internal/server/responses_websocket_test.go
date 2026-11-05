@@ -13,14 +13,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
+	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/models"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 type fakeResponsesWebSocketStream struct {
 	mu       sync.Mutex
-	turns    [][]*codex.StreamEvent
-	active   []*codex.StreamEvent
+	turns    [][]*turn.StreamEvent
+	active   []*turn.StreamEvent
 	requests []map[string]any
 	connects int
 }
@@ -38,9 +40,9 @@ func (f *fakeResponsesWebSocketStream) begin(body any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.requests = append(f.requests, request)
-	turn := len(f.requests) - 1
-	if turn < len(f.turns) {
-		f.active = append([]*codex.StreamEvent(nil), f.turns[turn]...)
+	turnIndex := len(f.requests) - 1
+	if turnIndex < len(f.turns) {
+		f.active = append([]*turn.StreamEvent(nil), f.turns[turnIndex]...)
 	} else {
 		f.active = nil
 	}
@@ -51,7 +53,7 @@ func (f *fakeResponsesWebSocketStream) SendJSON(body any) error {
 	return f.begin(body)
 }
 
-func (f *fakeResponsesWebSocketStream) NextEvent() (*codex.StreamEvent, error) {
+func (f *fakeResponsesWebSocketStream) NextEvent() (*turn.StreamEvent, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.active) == 0 {
@@ -73,7 +75,7 @@ func TestResponsesWebSocketContinuesAfterIncompleteResponse(t *testing.T) {
 
 	const model = "gpt-5.6-terra"
 	fakeStream := &fakeResponsesWebSocketStream{
-		turns: [][]*codex.StreamEvent{
+		turns: [][]*turn.StreamEvent{
 			{
 				{
 					Type: "response.created",
@@ -149,7 +151,7 @@ func TestResponsesWebSocketReturnsProtocolErrorsWithoutClosing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeStream := &fakeResponsesWebSocketStream{
-		turns: [][]*codex.StreamEvent{responsesWebSocketTextEvents("resp_ws_valid", "gpt-5.6-terra", "ok")},
+		turns: [][]*turn.StreamEvent{responsesWebSocketTextEvents("resp_ws_valid", "gpt-5.6-terra", "ok")},
 	}
 	app := newResponsesWebSocketTestApp(t, fakeStream)
 	server := httptest.NewServer(app.Handler())
@@ -204,7 +206,7 @@ func TestNormalizeResponsesWebSocketMessagePreservesGenerateAndIgnoresStream(t *
 	if normalized.Generate == nil || *normalized.Generate != generate {
 		t.Fatalf("Generate = %#v, want pointer to false", normalized.Generate)
 	}
-	payload := normalized.ToCodexWSCreatePayload()
+	payload := codex.WSCreatePayload(normalized)
 	if _, ok := payload["stream"]; ok {
 		t.Fatalf("upstream payload stream = %#v, want omitted", payload["stream"])
 	}
@@ -230,11 +232,11 @@ func newResponsesWebSocketTestApp(t *testing.T, stream *fakeResponsesWebSocketSt
 	app := newFailoverTestApp(t)
 	app.cfg.ProxyAPIKey = "test-key"
 	app.engine = gin.New()
-	app.wsConnector = func(_ context.Context, _ string, _ http.Header, body any) (responsesWebSocketStream, error) {
+	app.wsConnector = func(_ context.Context, _ accounts.Record, request turn.NormalizedRequest, _ string) (responsesWebSocketStream, error) {
 		stream.mu.Lock()
 		stream.connects++
 		stream.mu.Unlock()
-		if err := stream.begin(body); err != nil {
+		if err := stream.begin(codex.WSCreatePayload(request)); err != nil {
 			return nil, err
 		}
 		return stream, nil
@@ -243,8 +245,8 @@ func newResponsesWebSocketTestApp(t *testing.T, stream *fakeResponsesWebSocketSt
 	return app
 }
 
-func responsesWebSocketTextEvents(responseID, model, text string) []*codex.StreamEvent {
-	return []*codex.StreamEvent{
+func responsesWebSocketTextEvents(responseID, model, text string) []*turn.StreamEvent {
+	return []*turn.StreamEvent{
 		{
 			Type: "response.created",
 			Raw: map[string]any{

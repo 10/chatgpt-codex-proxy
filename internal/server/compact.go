@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/middleware"
@@ -41,11 +39,12 @@ func (a *App) handleResponsesCompact(c *gin.Context) {
 		return
 	}
 
-	account, err := a.acquireAccountForCompact(c.Request.Context(), preferredAccountID, &normalized)
+	account, modelID, err := a.acquireModelAccount(c.Request.Context(), preferredAccountID, normalized.Model, nil)
 	if err != nil {
 		a.handleOpenStreamError(c, "responses_compact", "", preferredAccountID, err)
 		return
 	}
+	normalized.Model = modelID
 	a.setRequestAccount(c, account)
 
 	payload := normalized.CompactRequest
@@ -104,22 +103,6 @@ func (a *App) resolveCompactRequest(normalized turn.NormalizedCompactRequest) (t
 	}
 
 	return normalized, strings.TrimSpace(record.AccountID), nil
-}
-
-func (a *App) acquireAccountForCompact(ctx context.Context, preferredAccountID string, normalized *turn.NormalizedCompactRequest) (accounts.Record, error) {
-	if !normalized.ModelExplicit && strings.TrimSpace(normalized.Model) == "" {
-		account, err := a.accountMgr.AcquireReady(ctx, preferredAccountID)
-		if err != nil {
-			return accounts.Record{}, err
-		}
-		modelID := a.modelCatalog().ResolveDefaultForRecord(account, a.cfg.DefaultModel)
-		if strings.TrimSpace(modelID) == "" {
-			return accounts.Record{}, errContinuationAccountUnavailable
-		}
-		normalized.Model = modelID
-		return account, nil
-	}
-	return a.accountMgr.AcquireReadyForModel(ctx, preferredAccountID, normalized.Model)
 }
 
 func compactResponseObject(upstream codex.CompactResponse) map[string]any {

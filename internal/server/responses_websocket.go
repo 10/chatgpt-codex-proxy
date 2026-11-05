@@ -19,6 +19,7 @@ import (
 	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/openai"
+	"chatgpt-codex-proxy/internal/schema"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
@@ -31,7 +32,7 @@ type responsesWebSocketStream interface {
 	SendJSON(any) error
 }
 
-type responsesWebSocketConnector func(context.Context, string, http.Header, any) (responsesWebSocketStream, error)
+type responsesWebSocketConnector func(context.Context, accounts.Record, turn.NormalizedRequest, string) (responsesWebSocketStream, error)
 
 type responsesWebSocketSession struct {
 	stream         responsesWebSocketStream
@@ -39,11 +40,11 @@ type responsesWebSocketSession struct {
 	lastResponseID string
 }
 
-func (a *App) connectResponsesWebSocket(ctx context.Context, endpoint string, headers http.Header, body any) (responsesWebSocketStream, error) {
+func (a *App) connectResponsesWebSocket(ctx context.Context, account accounts.Record, request turn.NormalizedRequest, turnState string) (responsesWebSocketStream, error) {
 	if a.wsConnector != nil {
-		return a.wsConnector(ctx, endpoint, headers, body)
+		return a.wsConnector(ctx, account, request, turnState)
 	}
-	return codex.ConnectWS(ctx, endpoint, headers, body)
+	return a.httpClient.ConnectResponsesWS(ctx, account, request, turnState)
 }
 
 func (a *App) handleResponsesWebSocket(c *gin.Context) {
@@ -110,9 +111,6 @@ func normalizeResponsesWebSocketMessage(body []byte, catalog *models.Catalog) (t
 		return turn.NormalizedRequest{}, errResponsesWebSocketBackground
 	}
 
-	// The regular Responses normalizer intentionally ignores transport-only
-	// fields. WebSocket streaming is implicit, while generate belongs only to
-	// the upstream WebSocket payload.
 	normalized, err := normalizeResponsesBody(body, catalog)
 	if err != nil {
 		return turn.NormalizedRequest{}, err
@@ -157,20 +155,13 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 	}
 	a.setRequestAccount(c, account)
 
-	body := resolution.Request.ToCodexWSCreatePayload()
+	body := codex.WSCreatePayload(resolution.Request)
 	if session.stream == nil || session.account.ID != account.ID {
 		if session.stream != nil {
 			_ = session.stream.Close()
 		}
-		headers := codex.BuildHeaders(account.Token.AccessToken, codex.HeaderOptions{
-			AccountID:   account.AccountID,
-			Cookies:     account.Cookies,
-			TurnState:   resolution.TurnState,
-			RequestID:   codex.NewRequestID(),
-			IncludeBeta: true,
-		})
 		a.logUpstreamPayload(c, "responses_websocket", "websocket", account.ID, body)
-		stream, connectErr := a.connectResponsesWebSocket(c.Request.Context(), websocketEndpoint(a.cfg.CodexBaseURL), headers, body)
+		stream, connectErr := a.connectResponsesWebSocket(c.Request.Context(), account, resolution.Request, resolution.TurnState)
 		if connectErr != nil {
 			session.stream = nil
 			session.account = accounts.Record{}
@@ -216,7 +207,7 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 		}
 
 		for _, outgoing := range a.responsesStreamEvents(c, accumulator, resolution.Request, &tupleTextBuffer, event) {
-			payload := turn.ResponseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload)
+			payload := responseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload)
 			if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 				return false
 			}
@@ -231,7 +222,7 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 	return true
 }
 
-func (a *App) responsesStreamEvents(c *gin.Context, accumulator *turn.Accumulator, normalized turn.NormalizedRequest, tupleTextBuffer *strings.Builder, event *codex.StreamEvent) []turn.ResponseStreamEvent {
+func (a *App) responsesStreamEvents(c *gin.Context, accumulator *turn.Accumulator, normalized turn.NormalizedRequest, tupleTextBuffer *strings.Builder, event *turn.StreamEvent) []turn.ResponseStreamEvent {
 	if normalized.TupleSchema != nil {
 		switch event.Type {
 		case "response.output_text.delta":
@@ -254,7 +245,7 @@ func (a *App) responsesStreamEvents(c *gin.Context, accumulator *turn.Accumulato
 	if event.IsTerminalResponse() {
 		if normalized.TupleSchema != nil && strings.TrimSpace(tupleTextBuffer.String()) != "" {
 			reconverted := tupleTextBuffer.String()
-			if patched, err := openai.ReconvertJSONText(reconverted, normalized.TupleSchema); err != nil {
+			if patched, err := schema.ReconvertJSONText(reconverted, normalized.TupleSchema); err != nil {
 				a.logTupleReconversionWarning(c, "responses", accumulator.ResponseID, err)
 			} else {
 				reconverted = patched
@@ -277,7 +268,7 @@ func (a *App) responsesStreamEvents(c *gin.Context, accumulator *turn.Accumulato
 }
 
 func responsesWebSocketRequestError(err error) (int, string, string, string) {
-	var modelErr *openai.ModelNotFoundError
+	var modelErr *models.NotFoundError
 	if errors.As(err, &modelErr) {
 		return http.StatusNotFound, "model_not_found", "Model '" + strings.TrimSpace(modelErr.Model) + "' not found", "model"
 	}
@@ -295,7 +286,7 @@ func (a *App) responsesWebSocketOpenError(c *gin.Context, accountID string, err 
 	if errors.Is(err, errContinuationAccountUnavailable) {
 		return http.StatusServiceUnavailable, "continuation_account_unavailable", "continuation account unavailable"
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "no active accounts") {
+	if errors.Is(err, accounts.ErrNoAvailableAccounts) {
 		return http.StatusServiceUnavailable, "no_available_accounts", "no available accounts"
 	}
 	status, code, message := a.classifyUpstreamError(accountID, err)

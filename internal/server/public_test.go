@@ -38,7 +38,7 @@ func newFailoverTestApp(t *testing.T) *App {
 		cfg:           cfg,
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		accounts:      accountsSvc,
-		accountMgr:    accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil, catalog.SupportsRecord),
+		accountMgr:    accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil),
 		continuations: conversation.NewContinuationManager(time.Minute),
 		claudeReplays: anthropic.NewReplayManager(time.Minute),
 		models:        catalog,
@@ -50,15 +50,15 @@ func TestOpenStreamFailsOverToAnotherAccount(t *testing.T) {
 
 	var attempts []string
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, account accounts.Record, _ turn.Request, _ string) (eventStream, error) {
 		attempts = append(attempts, account.ID)
 		if account.ID == "acct-a" {
 			return nil, &codex.UpstreamError{Op: "codex response", StatusCode: http.StatusTooManyRequests, RetryAfter: 30}
 		}
-		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed"}}}, nil
+		return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed"}}}, nil
 	}
 
-	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.6-terra", Stream: true}, ModelExplicit: true}})
+	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.6-terra", Stream: true}, ModelExplicit: true}})
 	if err != nil {
 		t.Fatalf("openStream() error = %v", err)
 	}
@@ -75,19 +75,19 @@ func TestOpenStreamFailsOverWhenFirstEventIsRetryableFailure(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, account accounts.Record, _ turn.Request, _ string) (eventStream, error) {
 		if account.ID == "acct-a" {
-			return &fakeEventStream{events: []*codex.StreamEvent{{
+			return &fakeEventStream{events: []*turn.StreamEvent{{
 				Type: "response.failed",
 				Raw: map[string]any{"response": map[string]any{"error": map[string]any{
 					"code": "rate_limited", "message": "try another account",
 				}}},
 			}}}, nil
 		}
-		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.created", Raw: map[string]any{"type": "response.created"}}}}, nil
+		return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.created", Raw: map[string]any{"type": "response.created"}}}}, nil
 	}
 
-	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.6-terra", Stream: true}, ModelExplicit: true}})
+	account, stream, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.6-terra", Stream: true}, ModelExplicit: true}})
 	if err != nil {
 		t.Fatalf("openStream() error = %v", err)
 	}
@@ -109,15 +109,15 @@ func TestResponsesFailsOverWhenNonStreamingResponseFailsAfterFirstEvent(t *testi
 
 	app := newFailoverTestApp(t)
 	var attempts []string
-	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, account accounts.Record, _ turn.Request, _ string) (eventStream, error) {
 		attempts = append(attempts, account.ID)
 		if account.ID == "acct-a" {
-			return &fakeEventStream{events: []*codex.StreamEvent{
+			return &fakeEventStream{events: []*turn.StreamEvent{
 				{Type: "response.created", Raw: map[string]any{"type": "response.created"}},
 				{Type: "response.failed", Raw: map[string]any{"response": map[string]any{"error": map[string]any{"code": "rate_limited", "message": "try another account"}}}},
 			}}, nil
 		}
-		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_1", "status": "completed"}}}}}, nil
+		return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_1", "status": "completed"}}}}}, nil
 	}
 
 	recorder := httptest.NewRecorder()
@@ -147,7 +147,7 @@ func TestResponsesRecoversFromInvalidReasoningSignature(t *testing.T) {
 	app := newFailoverTestApp(t)
 	var attempts int
 	var sawEncryptedReasoning []bool
-	app.httpStream = func(_ context.Context, _ accounts.Record, req codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, _ accounts.Record, req turn.Request, _ string) (eventStream, error) {
 		attempts++
 		hasEncryptedReasoning := false
 		for _, item := range req.Input {
@@ -159,7 +159,7 @@ func TestResponsesRecoversFromInvalidReasoningSignature(t *testing.T) {
 		if hasEncryptedReasoning {
 			return nil, &codex.UpstreamError{Op: "codex response", StatusCode: http.StatusBadRequest, Code: "invalid_encrypted_content"}
 		}
-		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_recovered", "status": "completed"}}}}}, nil
+		return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_recovered", "status": "completed"}}}}}, nil
 	}
 
 	body := `{"model":"gpt-5.6-terra","stream":false,"input":[` +
@@ -193,8 +193,8 @@ func TestChatCompletionsNonStreamingAcceptsIncompleteResponse(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
-		return &fakeEventStream{events: []*codex.StreamEvent{{
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ turn.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*turn.StreamEvent{{
 			Type: "response.incomplete",
 			Raw: map[string]any{"response": map[string]any{
 				"id":                 "resp_chat_incomplete",
@@ -238,8 +238,8 @@ func TestResponsesNonStreamingPreservesIncompleteResponse(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
-		return &fakeEventStream{events: []*codex.StreamEvent{{
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ turn.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*turn.StreamEvent{{
 			Type: "response.incomplete",
 			Raw: map[string]any{"response": map[string]any{
 				"id":                 "resp_responses_incomplete",
@@ -279,12 +279,12 @@ func TestOpenStreamAttemptsEachAccountOnlyOnce(t *testing.T) {
 
 	app := newFailoverTestApp(t)
 	var attempts []string
-	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, account accounts.Record, _ turn.Request, _ string) (eventStream, error) {
 		attempts = append(attempts, account.ID)
 		return nil, &codex.UpstreamError{Op: "codex response", StatusCode: http.StatusServiceUnavailable}
 	}
 
-	account, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.6-terra"}, ModelExplicit: true}})
+	account, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.6-terra"}, ModelExplicit: true}})
 	if err == nil {
 		t.Fatal("openStream() error = nil, want upstream error")
 	}
@@ -301,12 +301,12 @@ func TestOpenStreamDoesNotFailOverNonRetryableRequestError(t *testing.T) {
 
 	app := newFailoverTestApp(t)
 	var attempts []string
-	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, account accounts.Record, _ turn.Request, _ string) (eventStream, error) {
 		attempts = append(attempts, account.ID)
 		return nil, &codex.UpstreamError{Op: "codex response", StatusCode: http.StatusBadRequest}
 	}
 
-	_, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.6-terra"}, ModelExplicit: true}})
+	_, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.6-terra"}, ModelExplicit: true}})
 	if err == nil {
 		t.Fatal("openStream() error = nil, want upstream error")
 	}
@@ -321,7 +321,7 @@ func TestOpenStreamDoesNotFailOverAfterRequestCancellation(t *testing.T) {
 	app := newFailoverTestApp(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	var attempts []string
-	app.httpStream = func(_ context.Context, account accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, account accounts.Record, _ turn.Request, _ string) (eventStream, error) {
 		attempts = append(attempts, account.ID)
 		return &fakeEventStream{
 			beforeTailErr: cancel,
@@ -329,7 +329,7 @@ func TestOpenStreamDoesNotFailOverAfterRequestCancellation(t *testing.T) {
 		}, nil
 	}
 
-	_, _, _, err := app.openStream(nil, ctx, "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.6-terra", Stream: true}, ModelExplicit: true}})
+	_, _, _, err := app.openStream(nil, ctx, "responses", &sessionResolution{Request: turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.6-terra", Stream: true}, ModelExplicit: true}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("openStream() error = %v, want context.Canceled", err)
 	}
@@ -343,13 +343,13 @@ func TestOpenStreamKeepsExplicitContinuationPinned(t *testing.T) {
 
 	app := newFailoverTestApp(t)
 	connects := 0
-	app.wsConnector = func(_ context.Context, _ string, _ http.Header, _ any) (responsesWebSocketStream, error) {
+	app.wsConnector = func(_ context.Context, _ accounts.Record, _ turn.NormalizedRequest, _ string) (responsesWebSocketStream, error) {
 		connects++
 		return nil, &codex.UpstreamError{Op: "codex websocket", StatusCode: http.StatusServiceUnavailable}
 	}
 
 	account, _, _, err := app.openStream(nil, context.Background(), "responses", &sessionResolution{
-		Request:            turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.6-terra", PreviousResponseID: "resp_1"}, ModelExplicit: true},
+		Request:            turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.6-terra", PreviousResponseID: "resp_1"}, ModelExplicit: true},
 		PreferredAccountID: "acct-a",
 		ExplicitPrevious:   true,
 	})
@@ -370,13 +370,13 @@ func TestResponsesReplaysExplicitHTTPContinuation(t *testing.T) {
 		InputHistory:    []turn.InputItem{userText("first"), assistantText("first answer")},
 		ToolNameAliases: map[string]string{"short": "original_tool_name"},
 	})
-	var upstreamRequest codex.Request
-	app.httpStream = func(_ context.Context, account accounts.Record, request codex.Request, _ string) (eventStream, error) {
+	var upstreamRequest turn.Request
+	app.httpStream = func(_ context.Context, account accounts.Record, request turn.Request, _ string) (eventStream, error) {
 		if account.ID != "acct-a" {
 			t.Errorf("continuation routed to %q, want acct-a", account.ID)
 		}
 		upstreamRequest = request
-		return &fakeEventStream{events: []*codex.StreamEvent{{
+		return &fakeEventStream{events: []*turn.StreamEvent{{
 			Type: "response.completed",
 			Raw: map[string]any{"response": map[string]any{
 				"id": "resp_2", "status": "completed",
@@ -483,7 +483,7 @@ func TestStreamResponsesClassifiesStructuredQuotaFailureAndSetsCooldown(t *testi
 
 	record := mustGetAccount(t, accountsSvc, "acct_quota")
 	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{{
+		events: []*turn.StreamEvent{{
 			Type: "response.failed",
 			Raw: map[string]any{
 				"response": map[string]any{
@@ -502,7 +502,7 @@ func TestStreamResponsesClassifiesStructuredQuotaFailureAndSetsCooldown(t *testi
 	}
 
 	app.streamResponses(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:  "gpt-5.6-terra",
 			Stream: true,
 		},
@@ -533,7 +533,7 @@ func TestStreamResponsesClassifiesStructuredUnauthorizedFailure(t *testing.T) {
 	app := newFailoverTestApp(t)
 	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{{
+		events: []*turn.StreamEvent{{
 			Type: "response.failed",
 			Raw: map[string]any{
 				"response": map[string]any{
@@ -548,7 +548,7 @@ func TestStreamResponsesClassifiesStructuredUnauthorizedFailure(t *testing.T) {
 	}
 
 	app.streamResponses(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:  "gpt-5.6-terra",
 			Stream: true,
 		},
@@ -572,7 +572,7 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycle(t *testing.T) {
 	app := newFailoverTestApp(t)
 	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{
+		events: []*turn.StreamEvent{
 			{
 				Type: "response.function_call_arguments.delta",
 				Raw: map[string]any{
@@ -622,7 +622,7 @@ func TestStreamResponsesSynthesizesFunctionCallLifecycle(t *testing.T) {
 	}
 
 	app.streamResponses(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:  "gpt-5.6-terra",
 			Stream: true,
 		},
@@ -681,7 +681,7 @@ func TestStreamResponsesWebSearchPassthroughAndCompletedOutput(t *testing.T) {
 	app := newFailoverTestApp(t)
 	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{
+		events: []*turn.StreamEvent{
 			{
 				Type: "response.output_item.added",
 				Raw: map[string]any{
@@ -768,7 +768,7 @@ func TestStreamResponsesWebSearchPassthroughAndCompletedOutput(t *testing.T) {
 	}
 
 	app.streamResponses(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:  "gpt-5.5",
 			Stream: true,
 		},

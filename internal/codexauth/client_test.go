@@ -49,61 +49,72 @@ func TestDeviceCodeResponseUnmarshalJSONAcceptsPaddedAndBlankInterval(t *testing
 	}
 }
 
-func TestRefreshPreservesExistingRefreshTokenWhenResponseOmitsOne(t *testing.T) {
+func TestRefreshPreservesCredentialsAndReadsAccountClaims(t *testing.T) {
 	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"access_token":"next-access","expires_in":3600}`))
-	}))
-	defer server.Close()
-
-	service := NewOAuthService(config.Config{AuthIssuer: server.URL})
-	existing := accounts.OAuthToken{
-		AccessToken:  "old-access",
-		RefreshToken: "existing-refresh",
-		ExpiresAt:    time.Now().UTC().Add(-time.Minute),
-	}
-
-	refreshed, _, err := service.Refresh(context.Background(), existing, "acct_123")
-	if err != nil {
-		t.Fatalf("Refresh() error = %v", err)
-	}
-	if refreshed.RefreshToken != existing.RefreshToken {
-		t.Fatalf("refresh token = %q, want existing token %q", refreshed.RefreshToken, existing.RefreshToken)
-	}
-}
-
-func TestExtractAccountIDReadsJWTClaims(t *testing.T) {
-	t.Parallel()
-
 	tests := []struct {
-		name string
-		raw  oauthTokenResponse
-		want string
+		name, body, wantAccountID string
 	}{
-		{
-			name: "top-level claim",
-			raw: oauthTokenResponse{
-				IDToken: makeJWT(`{"chatgpt_account_id":"acct_123"}`),
-			},
-			want: "acct_123",
-		},
-		{
-			name: "nested claim",
-			raw: oauthTokenResponse{
-				AccessToken: makeJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_456"}}`),
-			},
-			want: "acct_456",
-		},
+		{name: "top-level ID token claim", body: `{"access_token":"next-access","id_token":"` + makeJWT(`{"chatgpt_account_id":"acct_123"}`) + `","expires_in":3600}`, wantAccountID: "acct_123"},
+		{name: "nested access token claim", body: `{"access_token":"` + makeJWT(`{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_456"}}`) + `","expires_in":3600}`, wantAccountID: "acct_456"},
+		{name: "missing claims retain account", body: `{"access_token":"next-access","expires_in":3600}`, wantAccountID: "existing-account"},
 	}
-
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				if r.Method != http.MethodPost || r.URL.Path != "/oauth/token" || r.Form.Get("refresh_token") != "existing-refresh" || r.Form.Get("grant_type") != "refresh_token" {
+					t.Errorf("incorrect refresh request: %s %s %#v", r.Method, r.URL.Path, r.Form)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			service := NewOAuthService(config.Config{AuthIssuer: server.URL})
+			existing := accounts.OAuthToken{AccessToken: "old-access", RefreshToken: "existing-refresh", ExpiresAt: time.Now().UTC().Add(-time.Minute)}
+			refreshed, accountID, err := service.Refresh(context.Background(), existing, "existing-account")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if accountID != tc.wantAccountID || refreshed.RefreshToken != existing.RefreshToken || refreshed.AccessToken == existing.AccessToken || !refreshed.ExpiresAt.After(time.Now()) {
+				t.Fatalf("refreshed token = %#v, accountID = %q, want account %q and retained refresh token", refreshed, accountID, tc.wantAccountID)
+			}
+		})
+	}
+}
 
-			if got := extractAccountID(tc.raw); got != tc.want {
-				t.Fatalf("extractAccountID() = %q, want %q", got, tc.want)
+func TestPollDeviceCodeDistinguishesPendingAuthorizationAndFailure(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                 string
+		status               int
+		body                 string
+		wantReady, wantError bool
+	}{
+		{name: "forbidden pending", status: http.StatusForbidden},
+		{name: "not found pending", status: http.StatusNotFound},
+		{name: "pending error code", status: http.StatusBadRequest, body: `{"error":"authorization_pending"}`},
+		{name: "pending error text", status: http.StatusBadRequest, body: `{"error":"device not found"}`},
+		{name: "upstream failure", status: http.StatusServiceUnavailable, body: `{"error":"temporarily_unavailable"}`, wantError: true},
+		{name: "authorized", status: http.StatusOK, body: `{"authorization_code":"code","code_verifier":"verifier"}`, wantReady: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			service := NewOAuthService(config.Config{AuthIssuer: server.URL})
+			result, err := service.PollDeviceCode(context.Background(), "device", "ABC")
+			if (err != nil) != tc.wantError || (result != nil) != tc.wantReady {
+				t.Fatalf("PollDeviceCode() = %#v, %v", result, err)
+			}
+			if result != nil && (result.AuthorizationCode != "code" || result.CodeVerifier != "verifier") {
+				t.Fatalf("lost authorization result: %#v", result)
 			}
 		})
 	}

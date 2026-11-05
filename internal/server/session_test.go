@@ -7,7 +7,6 @@ import (
 
 	"chatgpt-codex-proxy/internal/accountmanager"
 	"chatgpt-codex-proxy/internal/accounts"
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/config"
 	"chatgpt-codex-proxy/internal/conversation"
 	"chatgpt-codex-proxy/internal/models"
@@ -21,10 +20,10 @@ func TestResolveSessionImplicitResumeTrimsHistoryAndSetsContinuationState(t *tes
 		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 	normalized := turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:        "gpt-5.6-terra",
 			Instructions: "Be concise.",
-			Input: []codex.InputItem{
+			Input: []turn.InputItem{
 				userText("hello"),
 				assistantText("I will call a tool."),
 				{Type: "function_call", CallID: "call_1", Name: "Search", Arguments: `{"q":"hello"}`},
@@ -81,10 +80,10 @@ func TestResolveSessionSkipsImplicitResumeForUnknownToolOutputCallID(t *testing.
 		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 	normalized := turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:        "gpt-5.6-terra",
 			Instructions: "Be concise.",
-			Input: []codex.InputItem{
+			Input: []turn.InputItem{
 				userText("hello"),
 				{Type: "function_call", CallID: "call_1", Name: "Search", Arguments: `{"q":"hello"}`},
 				{Type: "function_call_output", CallID: "call_other", OutputText: "tool result"},
@@ -125,10 +124,10 @@ func TestResolveSessionChoosesMatchingHistoryWithinConversationBucket(t *testing
 		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 	normalized := turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:        "gpt-5.6-terra",
 			Instructions: "Be concise.",
-			Input: []codex.InputItem{
+			Input: []turn.InputItem{
 				userText("hello"),
 				assistantText("assistant one"),
 				userText("follow up"),
@@ -144,7 +143,7 @@ func TestResolveSessionChoosesMatchingHistoryWithinConversationBucket(t *testing
 		TurnState:       "turn_other",
 		Instructions:    normalized.Instructions,
 		Model:           normalized.Model,
-		InputHistory: continuationHistoryPrefix([]codex.InputItem{
+		InputHistory: continuationHistoryPrefix([]turn.InputItem{
 			userText("hello"),
 			assistantText("different assistant"),
 		}),
@@ -156,7 +155,7 @@ func TestResolveSessionChoosesMatchingHistoryWithinConversationBucket(t *testing
 		TurnState:       "turn_match",
 		Instructions:    normalized.Instructions,
 		Model:           normalized.Model,
-		InputHistory: continuationHistoryPrefix([]codex.InputItem{
+		InputHistory: continuationHistoryPrefix([]turn.InputItem{
 			userText("hello"),
 			assistantText("assistant one"),
 		}),
@@ -187,10 +186,10 @@ func TestResolveSessionImplicitResumeFallsBackForHostedToolReplayWithoutConversa
 		continuations: conversation.NewContinuationManager(time.Minute),
 	}
 	firstTurn := turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:        "gpt-5.6-terra",
 			Instructions: "Be concise.",
-			Input: []codex.InputItem{
+			Input: []turn.InputItem{
 				userText("hello"),
 			},
 		},
@@ -202,7 +201,7 @@ func TestResolveSessionImplicitResumeFallsBackForHostedToolReplayWithoutConversa
 		TurnState:       "turn_hosted",
 		Instructions:    firstTurn.Instructions,
 		Model:           firstTurn.Model,
-		InputHistory: continuationHistoryPrefix([]codex.InputItem{
+		InputHistory: continuationHistoryPrefix([]turn.InputItem{
 			userText("hello"),
 			{
 				Type:             "reasoning",
@@ -227,10 +226,10 @@ func TestResolveSessionImplicitResumeFallsBackForHostedToolReplayWithoutConversa
 	})
 
 	secondTurn := turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:        "gpt-5.6-terra",
 			Instructions: "Be concise.",
-			Input: []codex.InputItem{
+			Input: []turn.InputItem{
 				userText("hello"),
 				{
 					Type:             "reasoning",
@@ -314,21 +313,21 @@ func TestAcquireAccountForResolutionOmittedModelUsesRouteScopedDefault(t *testin
 	app := &App{
 		cfg:        config.Config{DefaultModel: "gpt-premium-default"},
 		accounts:   accountsSvc,
-		accountMgr: accountmanager.NewAccountManager(config.Config{}, accountsSvc, nil, nil, catalog.SupportsRecord),
+		accountMgr: accountmanager.NewAccountManager(config.Config{}, accountsSvc, nil, nil),
 		models:     catalog,
 	}
 	resolution := sessionResolution{
 		Request: turn.NormalizedRequest{
-			Request: codex.Request{
+			Request: turn.Request{
 				Instructions: "Be concise.",
-				Input:        []codex.InputItem{userText("hello")},
+				Input:        []turn.InputItem{userText("hello")},
 			},
 			ModelExplicit: false,
 		},
 		Original: turn.NormalizedRequest{
-			Request: codex.Request{
+			Request: turn.Request{
 				Instructions: "Be concise.",
-				Input:        []codex.InputItem{userText("hello")},
+				Input:        []turn.InputItem{userText("hello")},
 			},
 			ModelExplicit: false,
 		},
@@ -349,27 +348,27 @@ func TestAcquireAccountForResolutionOmittedModelUsesRouteScopedDefault(t *testin
 	}
 }
 
-func userText(text string) codex.InputItem {
-	return codex.InputItem{
+func userText(text string) turn.InputItem {
+	return turn.InputItem{
 		Role: "user",
-		Content: []codex.ContentPart{{
+		Content: []turn.ContentPart{{
 			Type: "input_text",
 			Text: text,
 		}},
 	}
 }
 
-func assistantText(text string) codex.InputItem {
-	return codex.InputItem{
+func assistantText(text string) turn.InputItem {
+	return turn.InputItem{
 		Role: "assistant",
-		Content: []codex.ContentPart{{
+		Content: []turn.ContentPart{{
 			Type: "output_text",
 			Text: text,
 		}},
 	}
 }
 
-func continuationHistoryPrefix(items []codex.InputItem) []turn.InputItem {
+func continuationHistoryPrefix(items []turn.InputItem) []turn.InputItem {
 	history := make([]turn.InputItem, 0, len(items))
 	for _, item := range items {
 		history = append(history, cloneContinuationInputItem(item))

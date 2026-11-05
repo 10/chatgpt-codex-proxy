@@ -86,10 +86,6 @@ func (s *DeviceLoginService) poll(login *pendingLogin) {
 		case <-ticks:
 			result, err := s.oauth.PollDeviceCode(ctx, login.DeviceAuthID, login.UserCode)
 			if err != nil {
-				text := strings.ToLower(err.Error())
-				if strings.Contains(text, "authorization_pending") || strings.Contains(text, "not found") {
-					continue
-				}
 				s.setStatus(login.LoginID, "", DeviceLoginError, err.Error())
 				return
 			}

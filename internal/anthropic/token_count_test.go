@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
@@ -12,9 +11,9 @@ func TestCountInputTokensDoesNotTokenizeBase64ImagePayloads(t *testing.T) {
 	t.Parallel()
 
 	count := func(payload string) int64 {
-		value, err := CountInputTokens(turn.NormalizedRequest{Request: codex.Request{
+		value, err := CountInputTokens(turn.NormalizedRequest{Request: turn.Request{
 			Model: "gpt-5.4",
-			Input: []codex.InputItem{{Role: "user", Content: []codex.ContentPart{{
+			Input: []turn.InputItem{{Role: "user", Content: []turn.ContentPart{{
 				Type: "input_image", ImageURL: "data:image/png;base64," + payload,
 			}}}},
 		}})
