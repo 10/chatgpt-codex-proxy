@@ -97,19 +97,6 @@ func (s *Service) Get(id string) (Record, bool, error) {
 	return cloneRecord(record), true, nil
 }
 
-func (s *Service) EligibleNow(id string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	now := time.Now().UTC()
-	if err := s.refreshAllLocked(now); err != nil {
-		return false, err
-	}
-
-	record, ok := s.records[id]
-	return ok && isEligible(record, now), nil
-}
-
 func (s *Service) UpsertFromToken(accountID string, token OAuthToken) (Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -169,7 +156,7 @@ func (s *Service) Remove(id string) error {
 	defer s.mu.Unlock()
 
 	if _, ok := s.records[id]; !ok {
-		return fmt.Errorf("account not found")
+		return ErrNotFound
 	}
 	delete(s.records, id)
 	if s.stickyAccountID == id {
@@ -184,7 +171,7 @@ func (s *Service) Patch(id string, label *string, status *Status) (Record, error
 
 	record, ok := s.records[id]
 	if !ok {
-		return Record{}, fmt.Errorf("account not found")
+		return Record{}, ErrNotFound
 	}
 	if label != nil {
 		record.Label = strings.TrimSpace(*label)
@@ -214,7 +201,7 @@ func (s *Service) ObserveQuota(id string, quota *QuotaSnapshot) error {
 
 	record, ok := s.records[id]
 	if !ok {
-		return fmt.Errorf("account not found")
+		return ErrNotFound
 	}
 
 	now := time.Now().UTC()
@@ -243,7 +230,7 @@ func (s *Service) UpdateAuth(id, accountID string, token OAuthToken) error {
 
 	record, ok := s.records[id]
 	if !ok {
-		return fmt.Errorf("account not found")
+		return ErrNotFound
 	}
 
 	metadata := metadataFromToken(token)
@@ -274,7 +261,7 @@ func (s *Service) MarkError(id string, status Status, message string) error {
 
 	record, ok := s.records[id]
 	if !ok {
-		return fmt.Errorf("account not found")
+		return ErrNotFound
 	}
 	record.Status = status
 	record.LastError = strings.TrimSpace(message)
@@ -291,7 +278,7 @@ func (s *Service) SetCooldown(id string, until *time.Time, message string) error
 
 	record, ok := s.records[id]
 	if !ok {
-		return fmt.Errorf("account not found")
+		return ErrNotFound
 	}
 	if until != nil {
 		value := until.UTC()
@@ -327,7 +314,7 @@ func (s *Service) AcquireMatching(preferredID string, allow func(Record) bool) (
 	}
 
 	if preferredID != "" {
-		if record, ok := s.records[preferredID]; ok && isEligible(record, now) {
+		if record, ok := s.records[preferredID]; ok && record.Eligible(now) {
 			candidate := cloneRecord(record)
 			if allow == nil || allow(candidate) {
 				return candidate, nil
@@ -337,7 +324,7 @@ func (s *Service) AcquireMatching(preferredID string, allow func(Record) bool) (
 
 	candidates := make([]*Record, 0, len(s.records))
 	for _, record := range s.records {
-		if isEligible(record, now) {
+		if record.Eligible(now) {
 			candidate := cloneRecord(record)
 			if allow != nil && !allow(candidate) {
 				continue
@@ -347,7 +334,7 @@ func (s *Service) AcquireMatching(preferredID string, allow func(Record) bool) (
 		}
 	}
 	if len(candidates) == 0 {
-		return Record{}, fmt.Errorf("no active accounts")
+		return Record{}, ErrNoAvailableAccounts
 	}
 
 	switch s.rotationStrategy {

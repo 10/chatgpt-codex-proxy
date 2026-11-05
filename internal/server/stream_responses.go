@@ -7,7 +7,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"chatgpt-codex-proxy/internal/accounts"
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/turn"
 )
@@ -31,7 +30,7 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 			return
 		}
 		for _, outgoing := range a.responsesStreamEvents(c, accumulator, normalized, &tupleTextBuffer, event) {
-			writeSSE(c.Writer, outgoing.Type, turn.ResponseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload))
+			writeSSE(c.Writer, outgoing.Type, responseEventJSON(outgoing.Type, accumulator.ResponseID, outgoing.Payload))
 		}
 		c.Writer.Flush()
 		if event.IsTerminalResponse() {
@@ -43,7 +42,7 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 	c.Writer.Flush()
 }
 
-func responseStreamPayload(event *codex.StreamEvent, accumulator *turn.Accumulator) map[string]any {
+func responseStreamPayload(event *turn.StreamEvent, accumulator *turn.Accumulator) map[string]any {
 	if event == nil || event.Raw == nil {
 		return nil
 	}

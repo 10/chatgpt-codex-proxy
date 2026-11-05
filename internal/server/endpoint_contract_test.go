@@ -81,7 +81,7 @@ func TestAdminEndpointLifecycle(t *testing.T) {
 	})
 	oauth := codexauth.NewOAuthService(cfg)
 	app := &App{cfg: cfg, engine: gin.New(), logger: slog.New(slog.NewTextHandler(io.Discard, nil)), accounts: svc,
-		accountMgr: accountmanager.NewAccountManager(cfg, svc, oauth, nil, nil), deviceLogins: devicelogin.NewDeviceLoginService(oauth, svc, cfg.LoginTimeout),
+		accountMgr: accountmanager.NewAccountManager(cfg, svc, oauth, nil), deviceLogins: devicelogin.NewDeviceLoginService(oauth, svc, cfg.LoginTimeout),
 	}
 	app.routes()
 	request := func(method, path, body string, want int) map[string]any {

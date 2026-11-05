@@ -8,15 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 	"unicode"
 
-	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/models"
-	"chatgpt-codex-proxy/internal/openai"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
@@ -28,7 +24,7 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (turn.Normalize
 		return turn.NormalizedRequest{}, errors.New("model is required")
 	}
 	if catalog != nil && !catalog.Has(model) {
-		return turn.NormalizedRequest{}, &openai.ModelNotFoundError{Model: model}
+		return turn.NormalizedRequest{}, &models.NotFoundError{Model: model}
 	}
 	if request.MaxTokens == nil {
 		return turn.NormalizedRequest{}, errors.New("max_tokens is required")
@@ -74,7 +70,7 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (turn.Normalize
 		ModelExplicit:   true,
 		ResponseSchema:  responseSchema,
 		ToolNameAliases: toolNames.Aliases(),
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:             model,
 			Input:             turn.PrependDeveloperInstructions(input, instructions),
 			Stream:            request.Stream,
@@ -107,17 +103,17 @@ func normalizeSystem(content Content) (string, error) {
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.InputItem, error) {
+func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]turn.InputItem, error) {
 	knownCalls := make(map[string]struct{})
 	knownSearches := make(map[string]struct{})
-	result := make([]codex.InputItem, 0, len(messages))
+	result := make([]turn.InputItem, 0, len(messages))
 	for _, message := range messages {
 		role := strings.TrimSpace(message.Role)
 		if role == "system" {
 			if reminder := messageSystemReminderText(message.Content); reminder != "" {
-				result = append(result, codex.InputItem{
+				result = append(result, turn.InputItem{
 					Role: "user",
-					Content: []codex.ContentPart{{
+					Content: []turn.ContentPart{{
 						Type: "input_text",
 						Text: reminder,
 					}},
@@ -128,12 +124,12 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.I
 		if role != "user" && role != "assistant" {
 			return nil, errors.New("role must be user or assistant")
 		}
-		var content []codex.ContentPart
+		var content []turn.ContentPart
 		flushContent := func() {
 			if len(content) == 0 {
 				return
 			}
-			result = append(result, codex.InputItem{Role: role, Content: content})
+			result = append(result, turn.InputItem{Role: role, Content: content})
 			content = nil
 		}
 
@@ -144,7 +140,7 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.I
 				if role == "assistant" {
 					partType = "output_text"
 				}
-				content = append(content, codex.ContentPart{Type: partType, Text: block.Text})
+				content = append(content, turn.ContentPart{Type: partType, Text: block.Text})
 			case "image":
 				if role != "user" {
 					return nil, errors.New("image blocks are only supported in user messages")
@@ -153,7 +149,7 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.I
 				if err != nil {
 					return nil, err
 				}
-				content = append(content, codex.ContentPart{Type: "input_image", ImageURL: imageURL})
+				content = append(content, turn.ContentPart{Type: "input_image", ImageURL: imageURL})
 			case "tool_use":
 				if role != "assistant" {
 					return nil, errors.New("tool_use blocks require the assistant role")
@@ -168,7 +164,7 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.I
 					return nil, err
 				}
 				knownCalls[callID] = struct{}{}
-				result = append(result, codex.InputItem{Type: "function_call", CallID: shortenCallID(callID), Name: toolNames.Shorten(block.Name), Arguments: arguments})
+				result = append(result, turn.InputItem{Type: "function_call", CallID: shortenCallID(callID), Name: toolNames.Shorten(block.Name), Arguments: arguments})
 			case "tool_result":
 				if role != "user" {
 					return nil, errors.New("tool_result blocks require the user role")
@@ -189,10 +185,10 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.I
 					if text != "" {
 						text = "Tool error: " + text
 					} else {
-						output = append([]codex.ContentPart{{Type: "input_text", Text: "Tool error"}}, output...)
+						output = append([]turn.ContentPart{{Type: "input_text", Text: "Tool error"}}, output...)
 					}
 				}
-				result = append(result, codex.InputItem{Type: "function_call_output", CallID: shortenCallID(callID), OutputText: text, OutputContent: output})
+				result = append(result, turn.InputItem{Type: "function_call_output", CallID: shortenCallID(callID), OutputText: text, OutputContent: output})
 			case "server_tool_use":
 				if role != "assistant" {
 					return nil, errors.New("server_tool_use blocks require the assistant role")
@@ -206,7 +202,7 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.I
 					return nil, err
 				}
 				knownSearches[callID] = struct{}{}
-				result = append(result, codex.InputItem{Type: "web_search_call", ID: shortenCallID(callID), Status: "completed"})
+				result = append(result, turn.InputItem{Type: "web_search_call", ID: shortenCallID(callID), Status: "completed"})
 			case "web_search_tool_result":
 				if role != "assistant" {
 					return nil, errors.New("web_search_tool_result blocks require the assistant role")
@@ -227,7 +223,7 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]codex.I
 					continue
 				}
 				flushContent()
-				item := codex.InputItem{Type: "reasoning", EncryptedContent: encrypted}
+				item := turn.InputItem{Type: "reasoning", EncryptedContent: encrypted}
 				if text := strings.TrimSpace(block.Thinking); text != "" {
 					item.Summary = []turn.ReasoningPart{{Type: "summary_text", Text: text}}
 				}
@@ -307,14 +303,14 @@ func normalizeToolInput(input json.RawMessage) (string, error) {
 	return string(trimmed), nil
 }
 
-func normalizeToolResult(content Content) (string, []codex.ContentPart, error) {
-	parts := make([]codex.ContentPart, 0, len(content))
+func normalizeToolResult(content Content) (string, []turn.ContentPart, error) {
+	parts := make([]turn.ContentPart, 0, len(content))
 	allText := true
 	texts := make([]string, 0, len(content))
 	for _, block := range content {
 		switch block.Type {
 		case "text":
-			parts = append(parts, codex.ContentPart{Type: "input_text", Text: block.Text})
+			parts = append(parts, turn.ContentPart{Type: "input_text", Text: block.Text})
 			texts = append(texts, block.Text)
 		case "image":
 			allText = false
@@ -322,7 +318,7 @@ func normalizeToolResult(content Content) (string, []codex.ContentPart, error) {
 			if err != nil {
 				return "", nil, err
 			}
-			parts = append(parts, codex.ContentPart{Type: "input_image", ImageURL: imageURL})
+			parts = append(parts, turn.ContentPart{Type: "input_image", ImageURL: imageURL})
 		default:
 			return "", nil, fmt.Errorf("unsupported tool result block type %q", block.Type)
 		}
@@ -333,7 +329,7 @@ func normalizeToolResult(content Content) (string, []codex.ContentPart, error) {
 	return "", parts, nil
 }
 
-func normalizeThinking(request MessagesRequest, catalog *models.Catalog) (*codex.Reasoning, []string, error) {
+func normalizeThinking(request MessagesRequest, catalog *models.Catalog) (*turn.Reasoning, []string, error) {
 	typeName := ""
 	if request.Thinking != nil {
 		typeName = strings.TrimSpace(request.Thinking.Type)
@@ -374,7 +370,7 @@ func normalizeThinking(request MessagesRequest, catalog *models.Catalog) (*codex
 			return nil, nil, fmt.Errorf("unsupported reasoning effort %q for model %q", effort, request.Model)
 		}
 	}
-	reasoning := &codex.Reasoning{Effort: effort}
+	reasoning := &turn.Reasoning{Effort: effort}
 	if !thinkingEnabled {
 		return reasoning, nil, nil
 	}
@@ -427,249 +423,6 @@ func clampThinkingEffort(effort string, supported []models.ReasoningEffort) stri
 		}
 	}
 	return bestEffort
-}
-
-func normalizeOutputFormat(config *OutputConfig) (*codex.TextConfig, map[string]any, error) {
-	if config == nil || config.Format == nil {
-		return nil, nil, nil
-	}
-	format := config.Format
-	if strings.TrimSpace(format.Type) != "json_schema" {
-		return nil, nil, fmt.Errorf("unsupported output format %q", format.Type)
-	}
-	if len(format.Schema) == 0 {
-		return nil, nil, errors.New("schema is required")
-	}
-	responseSchema := openai.NormalizeSchema(format.Schema)
-	strictSchema := jsonutil.CloneMap(responseSchema)
-	if err := makeOpenAIStrictSchema(strictSchema); err != nil {
-		return nil, nil, err
-	}
-	if compileSchema(responseSchema) == nil {
-		return nil, nil, errors.New("output schema is invalid")
-	}
-	return &codex.TextConfig{Format: codex.TextFormat{
-		Type:   "json_schema",
-		Name:   cmp.Or(strings.TrimSpace(format.Name), "anthropic_output"),
-		Schema: strictSchema,
-		Strict: true,
-	}}, responseSchema, nil
-}
-
-func makeOpenAIStrictSchema(node map[string]any) error {
-	if node["type"] != "object" {
-		return errors.New("output schema root must have type object")
-	}
-	if _, ok := node["anyOf"]; ok {
-		return errors.New(`output schema keyword "anyOf" is not supported at the root`)
-	}
-	return makeOpenAIStrictSchemaNode(node, newSchemaMatcher())
-}
-
-func makeOpenAIStrictSchemaNode(node map[string]any, matcher *schemaMatcher) error {
-	for _, keyword := range slices.Sorted(maps.Keys(node)) {
-		if !supportedOutputSchemaKeyword(keyword) {
-			return fmt.Errorf("output schema keyword %q is not supported", keyword)
-		}
-	}
-	if err := validateOutputSchemaKeywordValues(node); err != nil {
-		return err
-	}
-	if err := visitSchemaChildren(node, func(child map[string]any) error {
-		return makeOpenAIStrictSchemaNode(child, matcher)
-	}); err != nil {
-		return err
-	}
-	properties, hasProperties := node["properties"].(map[string]any)
-	hasObjectType := schemaHasType(node["type"], "object")
-	if !hasProperties && !hasObjectType {
-		return nil
-	}
-	if !hasObjectType {
-		return errors.New("output schema nodes with properties must include type object")
-	}
-	if !hasProperties {
-		properties = map[string]any{}
-		node["properties"] = properties
-	}
-	if additionalProperties, ok := node["additionalProperties"]; ok && additionalProperties != false {
-		return errors.New("output schema object nodes must set additionalProperties to false")
-	}
-	node["additionalProperties"] = false
-	required := schemaRequiredNames(node["required"])
-	for name := range required {
-		if _, ok := properties[name]; !ok {
-			return fmt.Errorf("output schema required property %q must be declared in properties", name)
-		}
-	}
-	for name, raw := range properties {
-		child, ok := raw.(map[string]any)
-		if !ok {
-			return fmt.Errorf("output schema property %q must use an object schema", name)
-		}
-		if !required[name] {
-			properties[name] = makeSchemaNullable(child, matcher)
-		}
-		required[name] = true
-	}
-	requiredNames := slices.Sorted(maps.Keys(required))
-	if requiredNames == nil {
-		requiredNames = []string{}
-	}
-	node["required"] = requiredNames
-	return nil
-}
-
-func supportedOutputSchemaKeyword(keyword string) bool {
-	switch keyword {
-	case
-		"type",
-		"properties",
-		"required",
-		"additionalProperties",
-		"items",
-		"enum",
-		"const",
-		"anyOf",
-		"pattern",
-		"format",
-		"multipleOf",
-		"maximum",
-		"exclusiveMaximum",
-		"minimum",
-		"exclusiveMinimum",
-		"minItems",
-		"maxItems",
-		"title",
-		"description":
-		return true
-	default:
-		return false
-	}
-}
-
-func validateOutputSchemaKeywordValues(node map[string]any) error {
-	if schemaHasType(node["type"], "array") {
-		if _, ok := node["items"]; !ok {
-			return errors.New("output schema array nodes must define items")
-		}
-	}
-	if schemaHasType(node["type"], "object") {
-		if _, ok := node["anyOf"]; ok {
-			return errors.New(`output schema keyword "anyOf" cannot be combined with type object`)
-		}
-	}
-	if rawFormat, ok := node["format"]; ok {
-		format, ok := rawFormat.(string)
-		if !ok || !supportedOutputSchemaFormat(format) {
-			return fmt.Errorf("output schema format %q is not supported", format)
-		}
-	}
-	for _, keyword := range []string{"pattern", "format"} {
-		if _, ok := node[keyword]; ok && !schemaHasType(node["type"], "string") {
-			return fmt.Errorf("output schema keyword %q requires type string", keyword)
-		}
-	}
-	for _, keyword := range []string{"multipleOf", "maximum", "exclusiveMaximum", "minimum", "exclusiveMinimum"} {
-		if _, ok := node[keyword]; ok && !schemaHasType(node["type"], "number") && !schemaHasType(node["type"], "integer") {
-			return fmt.Errorf("output schema keyword %q requires a numeric type", keyword)
-		}
-	}
-	for _, keyword := range []string{"items", "minItems", "maxItems"} {
-		if _, ok := node[keyword]; ok && !schemaHasType(node["type"], "array") {
-			return fmt.Errorf("output schema keyword %q requires type array", keyword)
-		}
-	}
-	for _, keyword := range []string{"properties", "required", "additionalProperties"} {
-		if _, ok := node[keyword]; ok && !schemaHasType(node["type"], "object") {
-			return fmt.Errorf("output schema keyword %q requires type object", keyword)
-		}
-	}
-	return nil
-}
-
-func supportedOutputSchemaFormat(format string) bool {
-	switch format {
-	case "date-time", "time", "date", "duration", "email", "hostname", "ipv4", "ipv6", "uuid":
-		return true
-	default:
-		return false
-	}
-}
-
-func visitSchemaChildren(node map[string]any, visit func(map[string]any) error) error {
-	properties, _ := node["properties"].(map[string]any)
-	for _, raw := range properties {
-		if child, ok := raw.(map[string]any); ok {
-			if err := visit(child); err != nil {
-				return err
-			}
-		}
-	}
-	if raw, exists := node["items"]; exists {
-		child, ok := raw.(map[string]any)
-		if !ok {
-			return errors.New(`output schema "items" must use an object schema`)
-		}
-		if err := visit(child); err != nil {
-			return err
-		}
-	}
-	if rawChildren, exists := node["anyOf"]; exists {
-		children, ok := rawChildren.([]any)
-		if !ok {
-			return errors.New(`output schema "anyOf" must be an array`)
-		}
-		if len(children) == 0 {
-			return errors.New(`output schema "anyOf" must contain at least one schema`)
-		}
-		for _, raw := range children {
-			child, ok := raw.(map[string]any)
-			if !ok {
-				return errors.New(`output schema "anyOf" entries must use object schemas`)
-			}
-			if err := visit(child); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func schemaRequiredNames(raw any) map[string]bool {
-	required := make(map[string]bool)
-	switch values := raw.(type) {
-	case []any:
-		for _, value := range values {
-			if name, ok := value.(string); ok {
-				required[name] = true
-			}
-		}
-	case []string:
-		for _, name := range values {
-			required[name] = true
-		}
-	}
-	return required
-}
-
-func makeSchemaNullable(schema map[string]any, matcher *schemaMatcher) map[string]any {
-	if matcher.matches(schema, nil) {
-		return schema
-	}
-	return map[string]any{"anyOf": []any{schema, map[string]any{"type": "null"}}}
-}
-
-func schemaHasType(raw any, want string) bool {
-	switch schemaType := raw.(type) {
-	case string:
-		return schemaType == want
-	case []any:
-		return slices.Contains(schemaType, any(want))
-	case []string:
-		return slices.Contains(schemaType, want)
-	}
-	return false
 }
 
 func normalizeServiceTier(raw string) (string, error) {

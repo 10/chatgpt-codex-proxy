@@ -1,4 +1,4 @@
-package openai
+package schema
 
 import (
 	"maps"
@@ -12,7 +12,7 @@ var (
 	schemaDirectChildKeys = []string{"if", "then", "else", "not"}
 )
 
-func PrepareSchema(schema map[string]any) (prepared map[string]any, tupleSchema map[string]any) {
+func Prepare(schema map[string]any) (prepared map[string]any, tupleSchema map[string]any) {
 	cloned := jsonutil.CloneMap(schema)
 	if !hasTupleSchemas(cloned) {
 		return injectAdditionalProperties(cloned), nil
@@ -23,7 +23,7 @@ func PrepareSchema(schema map[string]any) (prepared map[string]any, tupleSchema 
 	return injectAdditionalProperties(cloned), original
 }
 
-func NormalizeSchema(schema map[string]any) map[string]any {
+func Normalize(schema map[string]any) map[string]any {
 	if len(schema) == 0 {
 		return schema
 	}

@@ -5,17 +5,21 @@ This document describes how `chatgpt-codex-proxy` translates between its OpenAI-
 It is based on the current implementation, not an external specification. The code paths that define this behavior live primarily in:
 
 - `internal/server/public.go`
+- `internal/server/upstream_stream.go`
+- `internal/server/routing.go`
 - `internal/server/compact.go`
 - `internal/server/images.go`
 - `internal/server/session.go`
 - `internal/openai/request.go`
-- `internal/openai/schema.go`
-- `internal/openai/tuple.go`
+- `internal/schema/schema.go`
+- `internal/schema/tuple.go`
 - `internal/turn/normalized.go`
 - `internal/turn/accumulator.go`
+- `internal/turn/response.go`
 - `internal/codex/http_client.go`
 - `internal/turn/request.go`
 - `internal/codex/ws_client.go`
+- `internal/codex/ws_request.go`
 - `internal/openai/types.go`
 
 ## Overview

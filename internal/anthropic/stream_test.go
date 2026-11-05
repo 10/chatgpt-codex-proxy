@@ -3,14 +3,13 @@ package anthropic
 import (
 	"testing"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestStreamEncoderBuffersAndCleansStructuredOutput(t *testing.T) {
 	t.Parallel()
 
-	accumulator := structuredOutputAccumulator(map[string]any{
+	accumulator := structuredOutputAccumulator(t, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"result":     map[string]any{"type": "string"},
@@ -20,11 +19,11 @@ func TestStreamEncoderBuffersAndCleansStructuredOutput(t *testing.T) {
 	})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
-		&codex.StreamEvent{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_structured", "model": "gpt-5.4"}}},
-		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": `{"result":"ok",`}},
-		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": `"impossible":null}`}},
-		&codex.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": `{"result":"ok","impossible":null}`}},
-		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
+		&turn.StreamEvent{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_structured", "model": "gpt-5.4"}}},
+		&turn.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": `{"result":"ok",`}},
+		&turn.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": `"impossible":null}`}},
+		&turn.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": `{"result":"ok","impossible":null}`}},
+		&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
 			"id": "resp_structured", "model": "gpt-5.4", "status": "completed",
 		}}},
 	)
@@ -39,17 +38,17 @@ func TestStreamEncoderBuffersAndCleansStructuredOutput(t *testing.T) {
 func TestStreamEncoderEmitsThinkingSignatureBeforeBlockStop(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
-		&codex.StreamEvent{Type: "response.reasoning_summary_text.delta", Raw: map[string]any{"delta": "considering"}},
-		&codex.StreamEvent{Type: "response.reasoning_summary_text.done", Raw: map[string]any{"text": "considering"}},
-		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
+		&turn.StreamEvent{Type: "response.reasoning_summary_text.delta", Raw: map[string]any{"delta": "considering"}},
+		&turn.StreamEvent{Type: "response.reasoning_summary_text.done", Raw: map[string]any{"text": "considering"}},
+		&turn.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
 			"type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "considering"}}, "encrypted_content": "signed",
 		}}},
-		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "answer"}},
-		&codex.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "answer"}},
-		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_reasoning", "status": "completed", "output_text": "answer"}}},
+		&turn.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "answer"}},
+		&turn.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "answer"}},
+		&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_reasoning", "status": "completed", "output_text": "answer"}}},
 	)
 
 	want := []string{
@@ -68,15 +67,15 @@ func TestStreamEncoderEmitsThinkingSignatureBeforeBlockStop(t *testing.T) {
 func TestStreamEncoderEmitsSignatureOnlyThinkingBlockBeforeText(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"}}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
-		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
+		&turn.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
 			"type": "reasoning", "encrypted_content": "signed",
 		}}},
-		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "answer"}},
-		&codex.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "answer"}},
-		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_reasoning", "status": "completed", "output_text": "answer"}}},
+		&turn.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "answer"}},
+		&turn.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "answer"}},
+		&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_reasoning", "status": "completed", "output_text": "answer"}}},
 	)
 
 	want := []string{
@@ -98,16 +97,16 @@ func TestStreamEncoderEmitsSignatureOnlyThinkingBlockBeforeText(t *testing.T) {
 func TestStreamEncoderBuffersInterleavedParallelToolCalls(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
-		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_a", "call_id": "call_a", "name": "first", "delta": `{"a":`}},
-		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_b", "call_id": "call_b", "name": "second", "delta": `{"b":`}},
-		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_a", "call_id": "call_a", "delta": `1}`}},
-		&codex.StreamEvent{Type: "response.function_call_arguments.done", Raw: map[string]any{"item_id": "item_a", "call_id": "call_a", "arguments": `{"a":1}`}},
-		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_b", "call_id": "call_b", "delta": `2}`}},
-		&codex.StreamEvent{Type: "response.function_call_arguments.done", Raw: map[string]any{"item_id": "item_b", "call_id": "call_b", "arguments": `{"b":2}`}},
-		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_parallel", "status": "completed"}}},
+		&turn.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_a", "call_id": "call_a", "name": "first", "delta": `{"a":`}},
+		&turn.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_b", "call_id": "call_b", "name": "second", "delta": `{"b":`}},
+		&turn.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_a", "call_id": "call_a", "delta": `1}`}},
+		&turn.StreamEvent{Type: "response.function_call_arguments.done", Raw: map[string]any{"item_id": "item_a", "call_id": "call_a", "arguments": `{"a":1}`}},
+		&turn.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_b", "call_id": "call_b", "delta": `2}`}},
+		&turn.StreamEvent{Type: "response.function_call_arguments.done", Raw: map[string]any{"item_id": "item_b", "call_id": "call_b", "arguments": `{"b":2}`}},
+		&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_parallel", "status": "completed"}}},
 	)
 
 	want := []string{
@@ -132,11 +131,11 @@ func TestStreamEncoderBuffersInterleavedParallelToolCalls(t *testing.T) {
 func TestStreamEncoderFlushesActiveToolBeforeTerminalFallbackText(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
-		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_1", "call_id": "call_1", "name": "lookup", "delta": `{"query":`}},
-		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
+		&turn.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{"item_id": "item_1", "call_id": "call_1", "name": "lookup", "delta": `{"query":`}},
+		&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
 			"id": "resp_terminal", "status": "completed", "output_text": "fallback",
 			"output": []any{map[string]any{"type": "function_call", "id": "item_1", "call_id": "call_1", "name": "lookup", "arguments": `{"query":"docs"}`}},
 		}}},
@@ -161,13 +160,13 @@ func TestStreamEncoderFlushesActiveToolBeforeTerminalFallbackText(t *testing.T) 
 func TestStreamEncoderSuppressesIncompleteToolCallAfterDeltas(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
-		&codex.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{
+		&turn.StreamEvent{Type: "response.function_call_arguments.delta", Raw: map[string]any{
 			"item_id": "item_1", "call_id": "call_1", "name": "lookup", "delta": `{"query":`,
 		}},
-		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
+		&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
 			"id": "resp_partial_tool", "status": "incomplete",
 			"incomplete_details": map[string]any{"reason": "max_output_tokens"},
 			"output": []any{map[string]any{
@@ -183,18 +182,18 @@ func TestStreamEncoderSuppressesIncompleteToolCallAfterDeltas(t *testing.T) {
 func TestStreamEncoderSuppressesThinkingWhenNotEnabled(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{
-		Model: "gpt-5.4", Reasoning: &codex.Reasoning{Effort: "low"},
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{
+		Model: "gpt-5.4", Reasoning: &turn.Reasoning{Effort: "low"},
 	}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
-		&codex.StreamEvent{Type: "response.reasoning_summary_text.delta", Raw: map[string]any{"delta": "hidden"}},
-		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
+		&turn.StreamEvent{Type: "response.reasoning_summary_text.delta", Raw: map[string]any{"delta": "hidden"}},
+		&turn.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
 			"type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "hidden"}}, "encrypted_content": "signed",
 		}}},
-		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "answer"}},
-		&codex.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "answer"}},
-		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_hidden_reasoning", "status": "completed", "output_text": "answer"}}},
+		&turn.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "answer"}},
+		&turn.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "answer"}},
+		&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_hidden_reasoning", "status": "completed", "output_text": "answer"}}},
 	)
 
 	want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
@@ -207,18 +206,18 @@ func TestStreamEncoderSuppressesThinkingWhenNotEnabled(t *testing.T) {
 func TestStreamEncoderSuppressesUnsignedThinking(t *testing.T) {
 	t.Parallel()
 
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{
 		Model: "gpt-5.4", Include: []string{"reasoning.encrypted_content"},
 	}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
-		&codex.StreamEvent{Type: "response.reasoning_summary_text.delta", Raw: map[string]any{"delta": "unsigned"}},
-		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
+		&turn.StreamEvent{Type: "response.reasoning_summary_text.delta", Raw: map[string]any{"delta": "unsigned"}},
+		&turn.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
 			"type": "reasoning", "summary": []any{map[string]any{"type": "summary_text", "text": "unsigned"}},
 		}}},
-		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "answer"}},
-		&codex.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "answer"}},
-		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_unsigned", "status": "completed", "output_text": "answer"}}},
+		&turn.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "answer"}},
+		&turn.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "answer"}},
+		&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{"id": "resp_unsigned", "status": "completed", "output_text": "answer"}}},
 	)
 
 	want := []string{"message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"}
@@ -238,22 +237,22 @@ func TestStreamEncoderMapsHostedWebSearchWithoutTerminalDuplicates(t *testing.T)
 			map[string]any{"title": "OpenAI Codex", "url": "https://openai.com/codex"},
 		},
 	}
-	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: codex.Request{Model: "gpt-5.4"}})
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
 	encoder := NewStreamEncoder(0)
 	events := applyAndEncode(accumulator, encoder,
-		&codex.StreamEvent{Type: "response.output_item.added", Raw: map[string]any{
+		&turn.StreamEvent{Type: "response.output_item.added", Raw: map[string]any{
 			"output_index": 0,
 			"item":         map[string]any{"type": "web_search_call", "id": "ws_1", "status": "in_progress"},
 		}},
-		&codex.StreamEvent{Type: "response.web_search_call.searching", Raw: map[string]any{
+		&turn.StreamEvent{Type: "response.web_search_call.searching", Raw: map[string]any{
 			"output_index": 0, "item_id": "ws_1",
 		}},
-		&codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{
+		&turn.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{
 			"output_index": 0, "item": searchItem,
 		}},
-		&codex.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "Here is what I found."}},
-		&codex.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "Here is what I found."}},
-		&codex.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
+		&turn.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "Here is what I found."}},
+		&turn.StreamEvent{Type: "response.output_text.done", Raw: map[string]any{"text": "Here is what I found."}},
+		&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
 			"id": "resp_search", "model": "gpt-5.4", "status": "completed",
 			"output": []any{
 				searchItem,
@@ -290,7 +289,7 @@ func TestStreamEncoderMapsHostedWebSearchWithoutTerminalDuplicates(t *testing.T)
 	}
 }
 
-func applyAndEncode(accumulator *turn.Accumulator, encoder *StreamEncoder, input ...*codex.StreamEvent) []StreamEvent {
+func applyAndEncode(accumulator *turn.Accumulator, encoder *StreamEncoder, input ...*turn.StreamEvent) []StreamEvent {
 	var result []StreamEvent
 	for _, event := range input {
 		accumulator.Apply(event)

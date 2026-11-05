@@ -177,16 +177,22 @@ chatgpt-codex-proxy/
 │   ├── openai/ anthropic/    # public protocol adapters
 │   ├── turn/                 # internal turn model and accumulation
 │   ├── codex/ codexauth/     # private upstream client and OAuth
-│   ├── accounts/             # account store
-│   ├── accountmanager/       # rotation, cooldowns, quota routing
+│   ├── accounts/             # persisted account state, quotas, rotation
+│   ├── accountmanager/       # token readiness, OAuth refresh, usage
 │   ├── devicelogin/          # device-auth onboarding
 │   ├── conversation/         # continuation state and affinity
-│   ├── models/               # runtime model catalog
+│   ├── models/               # runtime model catalog and cache
+│   ├── schema/               # shared schema normalization and tuple conversion
 │   ├── middleware/           # authentication and request logging
 │   └── config/               # environment configuration
 ├── test/integration/         # live compatibility suite
 └── docs/                     # upstream and translation references
 ```
+
+Protocol adapters depend on `turn`, `models`, and `schema`. The Codex client owns
+upstream wire formats and transports. The server coordinates account selection,
+continuation, model refresh, and public responses; account eligibility lives in
+`accounts.Record.Eligible`.
 
 ## Development
 

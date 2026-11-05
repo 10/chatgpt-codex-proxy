@@ -14,7 +14,7 @@ import (
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/middleware"
-	"chatgpt-codex-proxy/internal/openai"
+	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
@@ -71,7 +71,7 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 		PreferredAccountID: replay.AccountID,
 	}
 	account, stream, quota, err := a.openStream(c, c.Request.Context(), "anthropic_messages", &resolution)
-	if err != nil && isInvalidReasoningSignatureError(err) {
+	if err != nil && codex.IsInvalidReasoningSignatureError(err) {
 		sanitized, changed := anthropic.WithoutThinking(request)
 		if changed {
 			a.claudeReplays.Delete(replayScope, request.Model)
@@ -169,25 +169,9 @@ func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, no
 			break
 		}
 	}
-	// Every error path returns from the loop; reaching here requires a completed
-	// or incomplete terminal response whose executable tool calls are finalized.
 	a.claudeReplays.Remember(replayScope, replayModel, account.ID, accumulator)
 	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
 	c.Writer.Flush()
-}
-
-func isInvalidReasoningSignatureError(err error) bool {
-	var upstreamErr *codex.UpstreamError
-	if !errors.As(err, &upstreamErr) {
-		return false
-	}
-	code := strings.ToLower(strings.TrimSpace(upstreamErr.Code))
-	message := strings.ToLower(strings.TrimSpace(upstreamErr.Message()))
-	return code == "thinking_signature_invalid" ||
-		strings.Contains(code, "invalid_encrypted_content") ||
-		strings.Contains(message, "invalid signature in thinking block") ||
-		strings.Contains(message, "thinking_signature_invalid") ||
-		strings.Contains(message, "invalid_encrypted_content")
 }
 
 func (a *App) validateAnthropicVersion(c *gin.Context) bool {
@@ -204,7 +188,7 @@ func (a *App) validateAnthropicVersion(c *gin.Context) bool {
 }
 
 func (a *App) respondAnthropicNormalizeError(c *gin.Context, err error) {
-	var modelErr *openai.ModelNotFoundError
+	var modelErr *models.NotFoundError
 	if errors.As(err, &modelErr) {
 		a.writeAnthropicError(c, http.StatusNotFound, "Model '"+strings.TrimSpace(modelErr.Model)+"' not found")
 		return
@@ -216,7 +200,7 @@ func (a *App) respondAnthropicOpenError(c *gin.Context, actualAccountID, reporte
 	if a.recordRequestCancellation(c, actualAccountID, "", err) {
 		return
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "no active accounts") {
+	if errors.Is(err, accounts.ErrNoAvailableAccounts) {
 		a.writeAnthropicError(c, http.StatusServiceUnavailable, "no available accounts")
 		return
 	}

@@ -3,6 +3,7 @@ package codex
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -86,17 +87,19 @@ func parseUpstreamErrorBody(body string) (string, int) {
 		nested.ResetsAt = payload.ResetsAt
 	}
 
-	code := strings.TrimSpace(nested.Code)
-	if retryAfter, ok := parsePositiveInt64(nested.ResetsInSeconds); ok {
-		return code, int(retryAfter)
+	return strings.TrimSpace(nested.Code), retryAfterSeconds(nested.ResetsInSeconds, nested.RetryAfter, nested.ResetsAt)
+}
+
+func retryAfterSeconds(resetsInSeconds, retryAfter, resetsAt any) int {
+	for _, value := range []any{resetsInSeconds, retryAfter} {
+		if seconds, ok := parsePositiveInt64(value); ok {
+			return int(seconds)
+		}
 	}
-	if retryAfter, ok := parsePositiveInt64(nested.RetryAfter); ok {
-		return code, int(retryAfter)
+	if resetAt, ok := parsePositiveInt64(resetsAt); ok {
+		return max(int(time.Until(time.Unix(resetAt, 0)).Seconds()), 0)
 	}
-	if resetAt, ok := parsePositiveInt64(nested.ResetsAt); ok {
-		return code, max(int(time.Until(time.Unix(resetAt, 0)).Seconds()), 0)
-	}
-	return code, 0
+	return 0
 }
 
 func parseRetryAfterHeaders(headers http.Header) int {
@@ -131,11 +134,29 @@ type upstreamErrorFields struct {
 	ResetsAt        json.RawMessage `json:"resets_at"`
 }
 
-func parsePositiveInt64(raw json.RawMessage) (int64, bool) {
+func parsePositiveInt64(value any) (int64, bool) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return 0, false
+	}
 	var parsed jsonutil.FlexibleInt64
 	if err := parsed.UnmarshalJSON(raw); err != nil {
 		return 0, false
 	}
-	value, ok := parsed.Int64()
-	return value, ok && value > 0
+	number, ok := parsed.Int64()
+	return number, ok && number > 0
+}
+
+func IsInvalidReasoningSignatureError(err error) bool {
+	var upstreamErr *UpstreamError
+	if !errors.As(err, &upstreamErr) {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(upstreamErr.Code))
+	message := strings.ToLower(strings.TrimSpace(upstreamErr.Message()))
+	return code == "thinking_signature_invalid" ||
+		strings.Contains(code, "invalid_encrypted_content") ||
+		strings.Contains(message, "invalid signature in thinking block") ||
+		strings.Contains(message, "thinking_signature_invalid") ||
+		strings.Contains(message, "invalid_encrypted_content")
 }

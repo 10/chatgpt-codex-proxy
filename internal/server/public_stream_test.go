@@ -19,7 +19,7 @@ func TestChatImageStreamerMapsAndDeduplicatesImages(t *testing.T) {
 	t.Parallel()
 
 	streamer := newChatImageStreamer()
-	partial := &codex.StreamEvent{Type: "response.image_generation_call.partial_image", Raw: map[string]any{
+	partial := &turn.StreamEvent{Type: "response.image_generation_call.partial_image", Raw: map[string]any{
 		"item_id": "ig_1", "output_format": "png", "partial_image_b64": "aGVsbG8=",
 	}}
 	images := streamer.imagesForEvent(partial)
@@ -31,7 +31,7 @@ func TestChatImageStreamerMapsAndDeduplicatesImages(t *testing.T) {
 		t.Fatalf("partial image URL = %#v", imageURL["url"])
 	}
 
-	done := &codex.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
+	done := &turn.StreamEvent{Type: "response.output_item.done", Raw: map[string]any{"item": map[string]any{
 		"id": "ig_1", "type": "image_generation_call", "output_format": "png", "result": "aGVsbG8=",
 	}}}
 	if duplicate := streamer.imagesForEvent(done); len(duplicate) != 0 {
@@ -72,7 +72,7 @@ func TestStreamResponsesPassesThroughIncompleteTerminalEvent(t *testing.T) {
 
 	app := newFailoverTestApp(t)
 	record := mustGetAccount(t, app.accounts, "acct-a")
-	stream := &fakeEventStream{events: []*codex.StreamEvent{
+	stream := &fakeEventStream{events: []*turn.StreamEvent{
 		{
 			Type: "response.output_text.delta",
 			Raw:  map[string]any{"response_id": "resp_responses_limit", "delta": "partial"},
@@ -90,7 +90,7 @@ func TestStreamResponsesPassesThroughIncompleteTerminalEvent(t *testing.T) {
 	}}
 
 	app.streamResponses(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{Model: "gpt-5.6-terra", Stream: true},
+		Request: turn.Request{Model: "gpt-5.6-terra", Stream: true},
 	}, stream)
 
 	events := parseSSEEvents(t, recorder.Body.String())
@@ -113,7 +113,7 @@ func TestStreamChatCompletionEmitsReasoningContentAndStrictUsage(t *testing.T) {
 	app := newFailoverTestApp(t)
 	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{
+		events: []*turn.StreamEvent{
 			{
 				Type: "response.reasoning_summary_text.delta",
 				Raw: map[string]any{
@@ -153,10 +153,10 @@ func TestStreamChatCompletionEmitsReasoningContentAndStrictUsage(t *testing.T) {
 	}
 
 	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:     "gpt-5.6-terra",
 			Stream:    true,
-			Reasoning: &codex.Reasoning{Effort: "high"},
+			Reasoning: &turn.Reasoning{Effort: "high"},
 		},
 	}, stream)
 
@@ -209,7 +209,7 @@ func TestStreamChatCompletionUsesToolNameFromOutputItemWhenArgumentEventsOmitIt(
 	app := newFailoverTestApp(t)
 	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{
+		events: []*turn.StreamEvent{
 			{
 				Type: "response.function_call_arguments.delta",
 				Raw: map[string]any{
@@ -257,7 +257,7 @@ func TestStreamChatCompletionUsesToolNameFromOutputItemWhenArgumentEventsOmitIt(
 	}
 
 	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:  "gpt-5.6-terra",
 			Stream: true,
 		},
@@ -314,7 +314,7 @@ func TestStreamChatCompletionSupportsCustomToolCalls(t *testing.T) {
 	app := newFailoverTestApp(t)
 	record := mustGetAccount(t, app.accounts, "acct-a")
 	stream := &fakeEventStream{
-		events: []*codex.StreamEvent{
+		events: []*turn.StreamEvent{
 			{
 				Type: "response.custom_tool_call_input.delta",
 				Raw: map[string]any{
@@ -362,7 +362,7 @@ func TestStreamChatCompletionSupportsCustomToolCalls(t *testing.T) {
 	}
 
 	app.streamChatCompletion(ctx, record, turn.NormalizedRequest{
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:  "gpt-5.6-terra",
 			Stream: true,
 		},
@@ -423,17 +423,17 @@ func TestContinuationInputHistoryIncludesReasoningReplay(t *testing.T) {
 	t.Parallel()
 
 	accumulator := turn.NewAccumulator(turn.NormalizedRequest{
-		Request: codex.Request{
-			Input: []codex.InputItem{{
+		Request: turn.Request{
+			Input: []turn.InputItem{{
 				Role: "user",
-				Content: []codex.ContentPart{{
+				Content: []turn.ContentPart{{
 					Type: "input_text",
 					Text: "hello",
 				}},
 			}},
 		},
 	})
-	accumulator.Apply(&codex.StreamEvent{
+	accumulator.Apply(&turn.StreamEvent{
 		Type: "response.completed",
 		Raw: map[string]any{
 			"response": map[string]any{
@@ -506,12 +506,12 @@ func TestContinuationInputHistoryKeepsShortToolNameForUpstreamReplay(t *testing.
 	shortName := "mcp__read_project_file"
 	originalName := "mcp__filesystem__read_project_file_with_a_name_longer_than_sixty_four_characters"
 	accumulator := turn.NewAccumulator(turn.NormalizedRequest{
-		Request: codex.Request{
-			Input: []codex.InputItem{userText("inspect the project")},
+		Request: turn.Request{
+			Input: []turn.InputItem{userText("inspect the project")},
 		},
 		ToolNameAliases: map[string]string{shortName: originalName},
 	})
-	accumulator.Apply(&codex.StreamEvent{
+	accumulator.Apply(&turn.StreamEvent{
 		Type: "response.completed",
 		Raw: map[string]any{
 			"response": map[string]any{

@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/conversation"
+	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
@@ -66,79 +66,21 @@ func (a *App) resolveSession(normalized turn.NormalizedRequest) (sessionResoluti
 		resolution.Original.PromptCacheKey = key
 	}
 
-	if resolution.ConversationKey == "" {
-		return a.resolveImplicitResumeFallback(resolution, nil), nil
+	if a.continuations == nil || !hasPriorAssistantOrToolHistory(normalized.Input) {
+		return resolution, nil
 	}
 	records := a.continuations.ListByConversation(resolution.ConversationKey)
+	records = append(records, a.continuations.ListAll()...)
+	seen := make(map[string]struct{}, len(records))
 	for _, record := range records {
+		if _, ok := seen[record.ResponseID]; ok {
+			continue
+		}
+		seen[record.ResponseID] = struct{}{}
 		if !canImplicitlyResume(record, normalized) {
 			continue
 		}
 		trimmed, ok := trimmedContinuationInput(normalized.Input, record)
-		if !ok {
-			continue
-		}
-
-		resolution.Request.Input = trimmed
-		resolution.Request.PreviousResponseID = record.ResponseID
-		resolution.Request.Model = record.Model
-		resolution.Original.Model = record.Model
-		resolution.PreferredAccountID = record.AccountID
-		resolution.TurnState = strings.TrimSpace(record.TurnState)
-		resolution.Request.ToolNameAliases = turn.MergeToolNameAliases(resolution.Request.ToolNameAliases, record.ToolNameAliases)
-		resolution.Original.ToolNameAliases = turn.MergeToolNameAliases(resolution.Original.ToolNameAliases, record.ToolNameAliases)
-		resolution.ImplicitResume = true
-		return resolution, nil
-	}
-	return a.resolveImplicitResumeFallback(resolution, records), nil
-}
-
-func canImplicitlyResume(record conversation.ContinuationRecord, normalized turn.NormalizedRequest) bool {
-	if strings.TrimSpace(record.ResponseID) == "" {
-		return false
-	}
-	if strings.TrimSpace(record.Model) != strings.TrimSpace(normalized.Model) {
-		return false
-	}
-	if strings.TrimSpace(record.Instructions) != strings.TrimSpace(normalized.Instructions) {
-		return false
-	}
-	return hasPriorAssistantOrToolHistory(normalized.Input)
-}
-
-func hasPriorAssistantOrToolHistory(input []codex.InputItem) bool {
-	for _, item := range input {
-		if item.Role == "assistant" {
-			return true
-		}
-		switch item.Type {
-		case "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output":
-			return true
-		}
-	}
-	return false
-}
-
-func (a *App) resolveImplicitResumeFallback(resolution sessionResolution, excluded []conversation.ContinuationRecord) sessionResolution {
-	if a == nil || a.continuations == nil || !hasPriorAssistantOrToolHistory(resolution.Request.Input) {
-		return resolution
-	}
-
-	excludedIDs := make(map[string]struct{}, len(excluded))
-	for _, record := range excluded {
-		if responseID := strings.TrimSpace(record.ResponseID); responseID != "" {
-			excludedIDs[responseID] = struct{}{}
-		}
-	}
-
-	for _, record := range a.continuations.ListAll() {
-		if _, skip := excludedIDs[record.ResponseID]; skip {
-			continue
-		}
-		if !canImplicitlyResume(record, resolution.Request) {
-			continue
-		}
-		trimmed, ok := trimmedContinuationInput(resolution.Request.Input, record)
 		if !ok {
 			continue
 		}
@@ -157,12 +99,38 @@ func (a *App) resolveImplicitResumeFallback(resolution sessionResolution, exclud
 			resolution.Request.PromptCacheKey = key
 			resolution.Original.PromptCacheKey = key
 		}
-		return resolution
+		return resolution, nil
 	}
-	return resolution
+	return resolution, nil
 }
 
-func trimmedContinuationInput(input []codex.InputItem, record conversation.ContinuationRecord) ([]codex.InputItem, bool) {
+func canImplicitlyResume(record conversation.ContinuationRecord, normalized turn.NormalizedRequest) bool {
+	if strings.TrimSpace(record.ResponseID) == "" {
+		return false
+	}
+	if strings.TrimSpace(record.Model) != strings.TrimSpace(normalized.Model) {
+		return false
+	}
+	if strings.TrimSpace(record.Instructions) != strings.TrimSpace(normalized.Instructions) {
+		return false
+	}
+	return hasPriorAssistantOrToolHistory(normalized.Input)
+}
+
+func hasPriorAssistantOrToolHistory(input []turn.InputItem) bool {
+	for _, item := range input {
+		if item.Role == "assistant" {
+			return true
+		}
+		switch item.Type {
+		case "function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output":
+			return true
+		}
+	}
+	return false
+}
+
+func trimmedContinuationInput(input []turn.InputItem, record conversation.ContinuationRecord) ([]turn.InputItem, bool) {
 	if len(input) == 0 {
 		return nil, false
 	}
@@ -185,7 +153,7 @@ func trimmedContinuationInput(input []codex.InputItem, record conversation.Conti
 		}
 	}
 
-	trimmed := append([]codex.InputItem(nil), input[len(history):]...)
+	trimmed := append([]turn.InputItem(nil), input[len(history):]...)
 	for _, item := range trimmed {
 		switch item.Type {
 		case "function_call_output", "custom_tool_call_output":
@@ -234,4 +202,36 @@ func resolutionConversationKey(normalized turn.NormalizedRequest) string {
 		return key
 	}
 	return conversation.Derive(normalized.Request)
+}
+
+type sessionResolution struct {
+	Request            turn.NormalizedRequest
+	Original           turn.NormalizedRequest
+	PreferredAccountID string
+	TurnState          string
+	ConversationKey    string
+	ExplicitPrevious   bool
+	ImplicitResume     bool
+	ReplayAvailable    bool
+}
+
+func (a *App) rememberContinuation(accountID string, accumulator *turn.Accumulator, turnState string) {
+	if accumulator == nil || accumulator.ResponseID == "" {
+		return
+	}
+	conversationKey := accumulator.Normalized.PromptCacheKey
+	if strings.TrimSpace(conversationKey) == "" {
+		conversationKey = resolutionConversationKey(accumulator.Normalized)
+	}
+	a.continuations.Put(conversation.ContinuationRecord{
+		ResponseID:      accumulator.ResponseID,
+		AccountID:       accountID,
+		ConversationKey: conversationKey,
+		TurnState:       strings.TrimSpace(turnState),
+		Instructions:    strings.TrimSpace(accumulator.Normalized.Instructions),
+		Model:           jsonutil.FirstNonEmpty(accumulator.Model, accumulator.Normalized.Model),
+		InputHistory:    continuationInputHistory(accumulator),
+		FunctionCallIDs: functionCallIDs(accumulator),
+		ToolNameAliases: accumulator.Normalized.ToolNameAliases,
+	})
 }

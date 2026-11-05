@@ -25,8 +25,8 @@ import (
 func TestHandleResponsesCompactReturnsCompactedWindow(t *testing.T) {
 	t.Parallel()
 
-	var received codex.CompactRequest
-	app := newCompactTestApp(t, func(ctx context.Context, record accounts.Record, req codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error) {
+	var received turn.CompactRequest
+	app := newCompactTestApp(t, func(ctx context.Context, record accounts.Record, req turn.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error) {
 		received = req
 		return codex.CompactResponse{
 			ID: "resp_compact", Object: "response.compaction", CreatedAt: 123,
@@ -71,8 +71,8 @@ func TestHandleResponsesCompactReturnsCompactedWindow(t *testing.T) {
 func TestHandleResponsesCompactPreservesUsageAndExpandsPreviousResponse(t *testing.T) {
 	t.Parallel()
 
-	var received codex.CompactRequest
-	app := newCompactTestApp(t, func(ctx context.Context, record accounts.Record, req codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error) {
+	var received turn.CompactRequest
+	app := newCompactTestApp(t, func(ctx context.Context, record accounts.Record, req turn.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error) {
 		received = req
 		return codex.CompactResponse{
 			ID:        "cmp_resp_1",
@@ -142,7 +142,7 @@ func TestHandleResponsesCompactPreservesUsageAndExpandsPreviousResponse(t *testi
 	}
 }
 
-func newCompactTestApp(t *testing.T, caller func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)) *App {
+func newCompactTestApp(t *testing.T, caller func(context.Context, accounts.Record, turn.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)) *App {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
@@ -177,7 +177,7 @@ func newCompactTestApp(t *testing.T, caller func(context.Context, accounts.Recor
 		continuations: conversation.NewContinuationManager(time.Minute),
 		models:        modelCatalog,
 	}
-	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil, modelCatalog.SupportsRecord)
+	app.accountMgr = accountmanager.NewAccountManager(cfg, accountsSvc, nil, nil)
 	app.routes()
 	return app
 }

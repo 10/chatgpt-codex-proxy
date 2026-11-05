@@ -12,11 +12,19 @@ import (
 	"chatgpt-codex-proxy/internal/turn"
 )
 
-func (c *HTTPClient) CompactResponse(ctx context.Context, record accounts.Record, req CompactRequest) (CompactResponse, *accounts.QuotaSnapshot, error) {
-	stream, err := c.StreamResponse(ctx, record, Request{
+type CompactResponse struct {
+	ID        string           `json:"id,omitempty"`
+	Object    string           `json:"object,omitempty"`
+	CreatedAt int64            `json:"created_at,omitempty"`
+	Output    []map[string]any `json:"output,omitempty"`
+	Usage     map[string]any   `json:"usage,omitempty"`
+}
+
+func (c *HTTPClient) CompactResponse(ctx context.Context, record accounts.Record, req turn.CompactRequest) (CompactResponse, *accounts.QuotaSnapshot, error) {
+	stream, err := c.StreamResponse(ctx, record, turn.Request{
 		Model:        req.Model,
 		Instructions: req.Instructions,
-		Input:        slices.Concat(req.Input, []InputItem{{Type: "compaction_trigger"}}),
+		Input:        slices.Concat(req.Input, []turn.InputItem{{Type: "compaction_trigger"}}),
 		Text:         req.Text,
 		Reasoning:    req.Reasoning,
 	}, "")

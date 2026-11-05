@@ -5,19 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
 	"chatgpt-codex-proxy/internal/models"
 	"chatgpt-codex-proxy/internal/turn"
 )
-
-type ModelNotFoundError struct {
-	Model string
-}
-
-func (e *ModelNotFoundError) Error() string {
-	return fmt.Sprintf("unsupported model %q", e.Model)
-}
 
 type UnsupportedContentPartError struct {
 	PartType string
@@ -66,7 +57,7 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 	}
 	if req.Text != nil && req.Text.Verbosity != "" {
 		if out.Text == nil {
-			out.Text = &codex.TextConfig{}
+			out.Text = &turn.TextConfig{}
 		}
 		out.Text.Verbosity = req.Text.Verbosity
 	}
@@ -81,9 +72,9 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 	}
 
 	if len(out.Input) == 0 {
-		out.Input = append(out.Input, codex.InputItem{
+		out.Input = append(out.Input, turn.InputItem{
 			Role: "user",
-			Content: []codex.ContentPart{{
+			Content: []turn.ContentPart{{
 				Type: "input_text",
 				Text: "",
 			}},
@@ -169,7 +160,7 @@ func Compact(req ResponsesCompactRequest, catalog *models.Catalog) (turn.Normali
 	out := turn.NormalizedCompactRequest{
 		ModelExplicit:      modelExplicit,
 		PreviousResponseID: strings.TrimSpace(req.PreviousResponseID),
-		CompactRequest: codex.CompactRequest{
+		CompactRequest: turn.CompactRequest{
 			Model:        model,
 			Instructions: payload.Instructions,
 			Input:        payload.Input,
@@ -184,16 +175,16 @@ func Compact(req ResponsesCompactRequest, catalog *models.Catalog) (turn.Normali
 
 type normalizedResponsesPayload struct {
 	Instructions string
-	Input        []codex.InputItem
-	Text         *codex.TextConfig
+	Input        []turn.InputItem
+	Text         *turn.TextConfig
 	TupleSchema  map[string]any
 }
 
-func normalizeResponsesReasoning(explicit *Reasoning, fallback *codex.Reasoning) *codex.Reasoning {
+func normalizeResponsesReasoning(explicit *Reasoning, fallback *turn.Reasoning) *turn.Reasoning {
 	if explicit == nil {
 		return fallback
 	}
-	reasoning := &codex.Reasoning{
+	reasoning := &turn.Reasoning{
 		Effort:  explicit.Effort,
 		Summary: explicit.Summary,
 	}
@@ -213,9 +204,9 @@ func normalizeResponsesPayload(instructionsText string, textConfig *ResponsesTex
 	out.Text, out.TupleSchema = normalizeResponsesText(textConfig)
 
 	if input.String != "" {
-		out.Input = append(out.Input, codex.InputItem{
+		out.Input = append(out.Input, turn.InputItem{
 			Role: "user",
-			Content: []codex.ContentPart{{
+			Content: []turn.ContentPart{{
 				Type: "input_text",
 				Text: input.String,
 			}},
@@ -232,10 +223,10 @@ func normalizeResponsesPayload(instructionsText string, textConfig *ResponsesTex
 	return out, nil
 }
 
-func newNormalizedRequest(model string, modelExplicit bool, stream bool, tools []codex.Tool, toolChoice json.RawMessage, reasoning *codex.Reasoning, serviceTier, previousResponseID string) turn.NormalizedRequest {
+func newNormalizedRequest(model string, modelExplicit bool, stream bool, tools []turn.ToolDefinition, toolChoice json.RawMessage, reasoning *turn.Reasoning, serviceTier, previousResponseID string) turn.NormalizedRequest {
 	return turn.NormalizedRequest{
 		ModelExplicit: modelExplicit,
-		Request: codex.Request{
+		Request: turn.Request{
 			Model:              model,
 			Stream:             stream,
 			Tools:              tools,
@@ -267,7 +258,7 @@ func normalizeChatMessage(out *turn.NormalizedRequest, instructions *[]string, t
 			return nil
 		}
 		if message.FunctionCall != nil {
-			out.Input = append(out.Input, codex.InputItem{
+			out.Input = append(out.Input, turn.InputItem{
 				Type:      "function_call",
 				Name:      toolNames.Shorten(message.FunctionCall.Name),
 				Arguments: message.FunctionCall.Arguments,
@@ -284,7 +275,7 @@ func normalizeChatMessage(out *turn.NormalizedRequest, instructions *[]string, t
 		if toolCallTypes[message.ToolCallID] == "custom" {
 			itemType = "custom_tool_call_output"
 		}
-		out.Input = append(out.Input, codex.InputItem{
+		out.Input = append(out.Input, turn.InputItem{
 			Type:          itemType,
 			CallID:        message.ToolCallID,
 			OutputText:    text,
@@ -307,9 +298,9 @@ func normalizeChatToolCallType(call ToolCall, customToolNames map[string]bool) s
 	return callType
 }
 
-func chatToolCallInputItem(call ToolCall, callType string, toolNames *turn.ToolNames) codex.InputItem {
+func chatToolCallInputItem(call ToolCall, callType string, toolNames *turn.ToolNames) turn.InputItem {
 	if callType != "custom" {
-		return codex.InputItem{
+		return turn.InputItem{
 			Type:      "function_call",
 			CallID:    call.ID,
 			Name:      toolNames.Shorten(call.Function.Name),
@@ -329,7 +320,7 @@ func chatToolCallInputItem(call ToolCall, callType string, toolNames *turn.ToolN
 	if input == "" {
 		input = customToolInputFromFunctionArguments(call.Function.Arguments)
 	}
-	return codex.InputItem{
+	return turn.InputItem{
 		Type:   "custom_tool_call",
 		CallID: call.ID,
 		Name:   toolNames.Shorten(name),
@@ -337,27 +328,27 @@ func chatToolCallInputItem(call ToolCall, callType string, toolNames *turn.ToolN
 	}
 }
 
-func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, toolNames *turn.ToolNames, item ResponsesInputItem) error {
+func appendResponsesInputItem(out *[]turn.InputItem, instructions *[]string, toolNames *turn.ToolNames, item ResponsesInputItem) error {
 	if item.Type == "" && (item.Role == "system" || item.Role == "developer") {
 		return appendInstructionText(instructions, item.Content)
 	}
 
 	switch item.Type {
 	case "web_search_call":
-		*out = append(*out, codex.InputItem{
+		*out = append(*out, turn.InputItem{
 			Type:   "web_search_call",
 			ID:     strings.TrimSpace(item.ID),
 			Status: strings.TrimSpace(item.Status),
 		})
 	case "function_call":
-		*out = append(*out, codex.InputItem{
+		*out = append(*out, turn.InputItem{
 			Type:      "function_call",
 			CallID:    item.CallID,
 			Name:      toolNames.Shorten(item.Name),
 			Arguments: item.Arguments,
 		})
 	case "custom_tool_call":
-		*out = append(*out, codex.InputItem{
+		*out = append(*out, turn.InputItem{
 			Type:   "custom_tool_call",
 			CallID: item.CallID,
 			Name:   toolNames.Shorten(item.Name),
@@ -368,7 +359,7 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, to
 		if err != nil {
 			return err
 		}
-		*out = append(*out, codex.InputItem{
+		*out = append(*out, turn.InputItem{
 			Type:          item.Type,
 			CallID:        item.CallID,
 			OutputText:    item.OutputText,
@@ -379,7 +370,7 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, to
 		if err != nil {
 			return err
 		}
-		*out = append(*out, codex.InputItem{
+		*out = append(*out, turn.InputItem{
 			Type:             "reasoning",
 			ID:               strings.TrimSpace(item.ID),
 			Status:           strings.TrimSpace(item.Status),
@@ -388,7 +379,7 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, to
 			EncryptedContent: strings.TrimSpace(item.EncryptedContent),
 		})
 	case "compaction":
-		*out = append(*out, codex.InputItem{
+		*out = append(*out, turn.InputItem{
 			Type:             "compaction",
 			ID:               strings.TrimSpace(item.ID),
 			EncryptedContent: strings.TrimSpace(item.EncryptedContent),
@@ -397,7 +388,7 @@ func appendResponsesInputItem(out *[]codex.InputItem, instructions *[]string, to
 		if len(item.Raw) > 0 {
 			// Codex-native items (additional_tools, compaction_trigger, ...) are
 			// already in upstream shape, so forward them untouched.
-			*out = append(*out, codex.InputItem{Type: item.Type, Raw: item.Raw})
+			*out = append(*out, turn.InputItem{Type: item.Type, Raw: item.Raw})
 			return nil
 		}
 		role := item.Role
@@ -420,12 +411,12 @@ func appendInstructionText(instructions *[]string, content MessageContent) error
 	return nil
 }
 
-func appendRoleContentInput(out *[]codex.InputItem, role, phase string, content MessageContent) error {
+func appendRoleContentInput(out *[]turn.InputItem, role, phase string, content MessageContent) error {
 	parts, err := normalizeContentPartsChecked(content)
 	if err != nil {
 		return err
 	}
-	*out = append(*out, codex.InputItem{
+	*out = append(*out, turn.InputItem{
 		Role:    role,
 		Phase:   strings.TrimSpace(phase),
 		Content: parts,
@@ -433,7 +424,7 @@ func appendRoleContentInput(out *[]codex.InputItem, role, phase string, content 
 	return nil
 }
 
-func normalizeToolOutput(content MessageContent) (string, []codex.ContentPart, error) {
+func normalizeToolOutput(content MessageContent) (string, []turn.ContentPart, error) {
 	parts, err := normalizeContentPartsChecked(content)
 	if err != nil {
 		return "", nil, err
@@ -450,11 +441,11 @@ func normalizeToolOutput(content MessageContent) (string, []codex.ContentPart, e
 	return strings.Join(text, "\n"), nil, nil
 }
 
-func normalizeContentPartsChecked(parts MessageContent) ([]codex.ContentPart, error) {
+func normalizeContentPartsChecked(parts MessageContent) ([]turn.ContentPart, error) {
 	if len(parts) == 0 {
 		return nil, nil
 	}
-	out := make([]codex.ContentPart, 0, len(parts))
+	out := make([]turn.ContentPart, 0, len(parts))
 	for _, part := range parts {
 		contentType, kind, ok := classifyContentPartType(part.Type)
 		if !ok {
@@ -462,7 +453,7 @@ func normalizeContentPartsChecked(parts MessageContent) ([]codex.ContentPart, er
 		}
 		switch kind {
 		case contentPartText:
-			out = append(out, codex.ContentPart{
+			out = append(out, turn.ContentPart{
 				Type: contentType,
 				Text: part.Text,
 			})
@@ -470,7 +461,7 @@ func normalizeContentPartsChecked(parts MessageContent) ([]codex.ContentPart, er
 			if part.ImageURL == nil || strings.TrimSpace(part.ImageURL.URL) == "" && strings.TrimSpace(part.ImageURL.FileID) == "" {
 				return nil, fmt.Errorf("image_url.url or image_url.file_id is required")
 			}
-			out = append(out, codex.ContentPart{
+			out = append(out, turn.ContentPart{
 				Type:     "input_image",
 				ImageURL: strings.TrimSpace(part.ImageURL.URL),
 				FileID:   strings.TrimSpace(part.ImageURL.FileID),
@@ -490,7 +481,7 @@ func normalizeContentPartsChecked(parts MessageContent) ([]codex.ContentPart, er
 			if fileData == "" && fileURL == "" && fileID == "" {
 				return nil, fmt.Errorf("input_file requires file_data, file_url, or file_id")
 			}
-			out = append(out, codex.ContentPart{
+			out = append(out, turn.ContentPart{
 				Type:     "input_file",
 				Detail:   strings.TrimSpace(part.Detail),
 				FileURL:  fileURL,

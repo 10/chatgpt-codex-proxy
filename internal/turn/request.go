@@ -122,8 +122,6 @@ func appendInputItemContent(payload map[string]any, item InputItem) {
 	payload["content"] = strings.Join(textParts, "\n")
 }
 
-// PrependDeveloperInstructions inserts collapsed system/developer text as a
-// leading developer-role message instead of the top-level instructions field.
 // The Codex backend reserves instructions for its own baseline prompt, so
 // client-supplied instructions belong in the input as a developer turn.
 func PrependDeveloperInstructions(input []InputItem, text string) []InputItem {

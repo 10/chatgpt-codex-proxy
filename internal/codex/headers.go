@@ -5,22 +5,24 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
+
+	"chatgpt-codex-proxy/internal/clientidentity"
 )
 
 const (
-	desktopClientVersion = "26.1007.71326"
-	desktopOriginator    = "Codex Desktop"
-	openAIBeta           = "responses_websockets=2026-02-06"
-	codexResidency       = "us"
-	desktopUserAgent     = "Codex Desktop/" + desktopClientVersion + " (Windows NT 10.0; x64)"
-	chromiumPreset       = "chrome-155"
-	chromiumMajor        = 155
-	clientHintPlatform   = "Windows"
-	acceptLanguage       = "en-US,en;q=0.9"
+	desktopOriginator  = "Codex Desktop"
+	openAIBeta         = "responses_websockets=2026-02-06"
+	codexResidency     = "us"
+	chromiumMajor      = 155
+	clientHintPlatform = "Windows"
+	acceptLanguage     = "en-US,en;q=0.9"
 )
 
-type HeaderOptions struct {
+var chromiumPreset = "chrome-" + strconv.Itoa(chromiumMajor)
+
+type headerOptions struct {
 	AccountID      string
 	Cookies        map[string]string
 	ContentType    string
@@ -31,7 +33,7 @@ type HeaderOptions struct {
 	IncludeBeta    bool
 }
 
-func BuildHeaders(token string, opts HeaderOptions) http.Header {
+func buildHeaders(token string, opts headerOptions) http.Header {
 	headers := make(http.Header)
 	headers.Set("Authorization", "Bearer "+token)
 	if opts.AccountID != "" {
@@ -48,7 +50,7 @@ func BuildHeaders(token string, opts HeaderOptions) http.Header {
 	if opts.IncludeBeta {
 		headers.Set("OpenAI-Beta", openAIBeta)
 	}
-	headers.Set("User-Agent", desktopUserAgent)
+	headers.Set("User-Agent", clientidentity.UserAgent)
 	headers.Set("sec-ch-ua", chromiumSecCHUA(chromiumMajor))
 	headers.Set("sec-ch-ua-mobile", "?0")
 	headers.Set("sec-ch-ua-platform", fmt.Sprintf(`"%s"`, clientHintPlatform))

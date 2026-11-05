@@ -1,11 +1,15 @@
-package openai
+package schema_test
 
-import "testing"
+import (
+	"testing"
 
-func TestNormalizeSchemaInlinesRefsAndInjectsAdditionalProperties(t *testing.T) {
+	"chatgpt-codex-proxy/internal/schema"
+)
+
+func TestNormalizeInlinesRefsAndInjectsAdditionalProperties(t *testing.T) {
 	t.Parallel()
 
-	normalized := NormalizeSchema(map[string]any{
+	normalized := schema.Normalize(map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"candidates": map[string]any{
@@ -51,10 +55,10 @@ func TestNormalizeSchemaInlinesRefsAndInjectsAdditionalProperties(t *testing.T) 
 	}
 }
 
-func TestNormalizeSchemaStopsAtRecursiveRefs(t *testing.T) {
+func TestNormalizeStopsAtRecursiveRefs(t *testing.T) {
 	t.Parallel()
 
-	normalized := NormalizeSchema(map[string]any{
+	normalized := schema.Normalize(map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"head": map[string]any{"$ref": "#/$defs/node"},

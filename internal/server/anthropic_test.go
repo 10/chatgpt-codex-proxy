@@ -20,6 +20,7 @@ import (
 	"chatgpt-codex-proxy/internal/anthropic"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/middleware"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func serverTestCodexReasoningSignature() string {
@@ -35,7 +36,7 @@ func TestAnthropicMessagesNonStreaming(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, _ accounts.Record, request turn.Request, _ string) (eventStream, error) {
 		if request.Instructions != "" || len(request.Input) != 2 {
 			t.Fatalf("upstream request = %#v", request)
 		}
@@ -45,7 +46,7 @@ func TestAnthropicMessagesNonStreaming(t *testing.T) {
 		if request.Input[1].Content[0].Text != "Hello" {
 			t.Fatalf("user item = %#v", request.Input[1])
 		}
-		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+		return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed", Raw: map[string]any{
 			"response": map[string]any{
 				"id": "resp_anthropic", "model": "gpt-5.6-terra", "status": "completed", "output_text": "Hi",
 				"usage": map[string]any{"input_tokens": 8, "output_tokens": 2},
@@ -86,7 +87,7 @@ func TestAnthropicMessagesAcceptsCurrentClaudeCodeRequestShape(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, _ accounts.Record, request turn.Request, _ string) (eventStream, error) {
 		if request.Instructions != "" {
 			t.Fatalf("instructions = %q, want empty (lifted to developer input item)", request.Instructions)
 		}
@@ -102,7 +103,7 @@ func TestAnthropicMessagesAcceptsCurrentClaudeCodeRequestShape(t *testing.T) {
 		if got := request.Input[2].Content[0].Text; got != "<system-reminder>\nUse the Workflow tool.\n</system-reminder>" {
 			t.Fatalf("system reminder = %q", got)
 		}
-		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+		return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed", Raw: map[string]any{
 			"response": map[string]any{
 				"id": "resp_claude_code", "model": "gpt-5.6-sol", "status": "completed", "output_text": "Ready",
 				"usage": map[string]any{"input_tokens": 8, "output_tokens": 2},
@@ -142,10 +143,10 @@ func TestAnthropicMessagesReplaysMissingClaudeToolState(t *testing.T) {
 	app := newFailoverTestApp(t)
 	app.claudeReplays = anthropic.NewReplayManager(time.Minute)
 	requestNumber := 0
-	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, _ accounts.Record, request turn.Request, _ string) (eventStream, error) {
 		requestNumber++
 		if requestNumber == 1 {
-			return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+			return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed", Raw: map[string]any{
 				"response": map[string]any{
 					"id": "resp_tool", "model": "gpt-5.6-terra", "status": "completed",
 					"output": []any{
@@ -168,7 +169,7 @@ func TestAnthropicMessagesReplaysMissingClaudeToolState(t *testing.T) {
 			request.Input[2].Type != "function_call_output" {
 			t.Fatalf("replayed upstream input = %#v", request.Input)
 		}
-		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+		return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed", Raw: map[string]any{
 			"response": map[string]any{
 				"id": "resp_done", "model": "gpt-5.6-terra", "status": "completed", "output_text": "done",
 				"usage": map[string]any{"input_tokens": 8, "output_tokens": 1},
@@ -219,10 +220,10 @@ func TestAnthropicMessagesDoesNotReplayToolStateAcrossClaudeCodeAgents(t *testin
 	app := newFailoverTestApp(t)
 	app.claudeReplays = anthropic.NewReplayManager(time.Minute)
 	requestNumber := 0
-	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ turn.Request, _ string) (eventStream, error) {
 		requestNumber++
 		if requestNumber == 1 {
-			return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+			return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed", Raw: map[string]any{
 				"response": map[string]any{
 					"id": "resp_agent_a", "model": "gpt-5.6-terra", "status": "completed",
 					"output": []any{
@@ -234,7 +235,7 @@ func TestAnthropicMessagesDoesNotReplayToolStateAcrossClaudeCodeAgents(t *testin
 				},
 			}}}}, nil
 		}
-		return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+		return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed", Raw: map[string]any{
 			"response": map[string]any{
 				"id": "resp_agent_b", "model": "gpt-5.6-terra", "status": "completed", "output_text": "unexpected replay",
 			},
@@ -284,11 +285,11 @@ func TestAnthropicMessagesRetriesOnceWithoutInvalidReasoningState(t *testing.T) 
 	app := newFailoverTestApp(t)
 	app.claudeReplays = anthropic.NewReplayManager(time.Minute)
 	requestNumber := 0
-	app.httpStream = func(_ context.Context, _ accounts.Record, request codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, _ accounts.Record, request turn.Request, _ string) (eventStream, error) {
 		requestNumber++
 		switch requestNumber {
 		case 1:
-			return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+			return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed", Raw: map[string]any{
 				"response": map[string]any{
 					"id": "resp_tool", "model": "gpt-5.6-terra", "status": "completed",
 					"output": []any{
@@ -311,7 +312,7 @@ func TestAnthropicMessagesRetriesOnceWithoutInvalidReasoningState(t *testing.T) 
 					t.Fatalf("sanitized retry retained reasoning: %#v", request.Input)
 				}
 			}
-			return &fakeEventStream{events: []*codex.StreamEvent{{Type: "response.completed", Raw: map[string]any{
+			return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.completed", Raw: map[string]any{
 				"response": map[string]any{
 					"id": "resp_retried", "model": "gpt-5.6-terra", "status": "completed", "output_text": "recovered",
 				},
@@ -360,8 +361,8 @@ func TestAnthropicMessagesStreamingUsesNamedEventsWithoutDoneSentinel(t *testing
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
-		return &fakeEventStream{events: []*codex.StreamEvent{
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ turn.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*turn.StreamEvent{
 			{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_stream", "model": "gpt-5.6-terra"}}},
 			{Type: "response.output_text.delta", Raw: map[string]any{"delta": "Hello"}},
 			{Type: "response.output_text.done", Raw: map[string]any{"text": "Hello"}},
@@ -392,8 +393,8 @@ func TestAnthropicMessagesNonStreamingAcceptsIncompleteResponse(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
-		return &fakeEventStream{events: []*codex.StreamEvent{{
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ turn.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*turn.StreamEvent{{
 			Type: "response.incomplete",
 			Raw: map[string]any{"response": map[string]any{
 				"id":                 "resp_anthropic_limit",
@@ -434,8 +435,8 @@ func TestAnthropicMessagesStreamingEndsNormallyOnIncompleteResponse(t *testing.T
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
-		return &fakeEventStream{events: []*codex.StreamEvent{
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ turn.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*turn.StreamEvent{
 			{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_anthropic_filter", "model": "gpt-5.6-terra"}}},
 			{Type: "response.output_text.delta", Raw: map[string]any{"delta": "partial"}},
 			{Type: "response.output_text.done", Raw: map[string]any{"text": "partial"}},
@@ -470,9 +471,9 @@ func TestAnthropicMessagesWritesMidstreamErrorEvent(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ turn.Request, _ string) (eventStream, error) {
 		return &fakeEventStream{
-			events:  []*codex.StreamEvent{{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_error", "model": "gpt-5.6-terra"}}}},
+			events:  []*turn.StreamEvent{{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_error", "model": "gpt-5.6-terra"}}}},
 			tailErr: errors.New("stream disconnected"),
 		}, nil
 	}
@@ -497,9 +498,9 @@ func TestAnthropicMessagesDoesNotWriteErrorAfterClientCancellation(t *testing.T)
 	var logs bytes.Buffer
 	app.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 	requestContext, cancel := context.WithCancel(context.Background())
-	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ turn.Request, _ string) (eventStream, error) {
 		return &fakeEventStream{
-			events: []*codex.StreamEvent{{
+			events: []*turn.StreamEvent{{
 				Type: "response.created",
 				Raw:  map[string]any{"response": map[string]any{"id": "resp_canceled", "model": "gpt-5.6-terra"}},
 			}},
@@ -534,8 +535,8 @@ func TestAnthropicMessagesKeepsPrestreamFailureAsJSON(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
-		return &fakeEventStream{events: []*codex.StreamEvent{{
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ turn.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*turn.StreamEvent{{
 			Type: "response.failed",
 			Raw: map[string]any{"response": map[string]any{"error": map[string]any{
 				"code": "rate_limited", "message": "slow down",
@@ -587,7 +588,7 @@ func TestAnthropicCountTokensDoesNotOpenUpstream(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(context.Context, accounts.Record, codex.Request, string) (eventStream, error) {
+	app.httpStream = func(context.Context, accounts.Record, turn.Request, string) (eventStream, error) {
 		t.Fatal("count_tokens opened an upstream request")
 		return nil, io.EOF
 	}
@@ -632,17 +633,17 @@ func TestAnthropicZeroMaxTokensUsesWebSocketGenerateFalse(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(context.Context, accounts.Record, codex.Request, string) (eventStream, error) {
+	app.httpStream = func(context.Context, accounts.Record, turn.Request, string) (eventStream, error) {
 		t.Fatal("max_tokens zero used HTTP instead of WebSocket")
 		return nil, io.EOF
 	}
-	fakeStream := &fakeResponsesWebSocketStream{turns: [][]*codex.StreamEvent{{{
+	fakeStream := &fakeResponsesWebSocketStream{turns: [][]*turn.StreamEvent{{{
 		Type: "response.completed",
 		Raw:  map[string]any{"response": map[string]any{"id": "resp_cached", "model": "gpt-5.6-terra", "status": "completed"}},
 	}}}}
-	app.wsConnector = func(_ context.Context, _ string, _ http.Header, body any) (responsesWebSocketStream, error) {
+	app.wsConnector = func(_ context.Context, _ accounts.Record, request turn.NormalizedRequest, _ string) (responsesWebSocketStream, error) {
 		fakeStream.connects++
-		if err := fakeStream.begin(body); err != nil {
+		if err := fakeStream.begin(codex.WSCreatePayload(request)); err != nil {
 			return nil, err
 		}
 		return fakeStream, nil
@@ -666,11 +667,11 @@ func TestAnthropicHostedWebSearchUsesWebSocketAndMapsResponse(t *testing.T) {
 	t.Parallel()
 
 	app := newFailoverTestApp(t)
-	app.httpStream = func(context.Context, accounts.Record, codex.Request, string) (eventStream, error) {
+	app.httpStream = func(context.Context, accounts.Record, turn.Request, string) (eventStream, error) {
 		t.Fatal("hosted web search used HTTP instead of WebSocket")
 		return nil, io.EOF
 	}
-	fakeStream := &fakeResponsesWebSocketStream{turns: [][]*codex.StreamEvent{{{
+	fakeStream := &fakeResponsesWebSocketStream{turns: [][]*turn.StreamEvent{{{
 		Type: "response.completed",
 		Raw: map[string]any{"response": map[string]any{
 			"id": "resp_search", "model": "gpt-5.6-terra", "status": "completed",
@@ -687,9 +688,9 @@ func TestAnthropicHostedWebSearchUsesWebSocketAndMapsResponse(t *testing.T) {
 			},
 		}},
 	}}}}
-	app.wsConnector = func(_ context.Context, _ string, _ http.Header, body any) (responsesWebSocketStream, error) {
+	app.wsConnector = func(_ context.Context, _ accounts.Record, request turn.NormalizedRequest, _ string) (responsesWebSocketStream, error) {
 		fakeStream.connects++
-		if err := fakeStream.begin(body); err != nil {
+		if err := fakeStream.begin(codex.WSCreatePayload(request)); err != nil {
 			return nil, err
 		}
 		return fakeStream, nil

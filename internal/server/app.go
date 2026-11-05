@@ -30,8 +30,8 @@ type App struct {
 	deviceLogins    *devicelogin.DeviceLoginService
 	accountMgr      *accountmanager.AccountManager
 	httpClient      *codex.HTTPClient
-	httpStream      func(context.Context, accounts.Record, codex.Request, string) (eventStream, error)
-	compactCaller   func(context.Context, accounts.Record, codex.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
+	httpStream      func(context.Context, accounts.Record, turn.Request, string) (eventStream, error)
+	compactCaller   func(context.Context, accounts.Record, turn.CompactRequest) (codex.CompactResponse, *accounts.QuotaSnapshot, error)
 	imageOpener     func(*gin.Context, string, turn.NormalizedRequest) (openedRequest, bool)
 	directImageOpen func(context.Context, accounts.Record, string, []byte, bool) (*http.Response, error)
 	wsConnector     responsesWebSocketConnector
@@ -57,9 +57,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	httpClient := codex.NewHTTPClient(cfg)
 	oauthSvc := codexauth.NewOAuthService(cfg)
-	accountMgr := accountmanager.NewAccountManager(cfg, accountsSvc, oauthSvc, httpClient, modelCatalog.SupportsRecord)
+	accountMgr := accountmanager.NewAccountManager(cfg, accountsSvc, oauthSvc, httpClient)
 	deviceLogins := devicelogin.NewDeviceLoginService(oauthSvc, accountsSvc, cfg.LoginTimeout)
-	modelRefresher := models.NewFetcher(cfg, logger, accountsSvc, accountMgr, httpClient, modelCatalog)
 
 	engine := gin.New()
 	engine.SetTrustedProxies(nil)
@@ -84,7 +83,7 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	app.cancel = cancel
 	go app.housekeeping(ctx)
-	go modelRefresher.Run(ctx)
+	go app.refreshModels(ctx)
 
 	return app, nil
 }

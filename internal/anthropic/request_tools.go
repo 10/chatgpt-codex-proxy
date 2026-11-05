@@ -7,13 +7,12 @@ import (
 	"maps"
 	"strings"
 
-	"chatgpt-codex-proxy/internal/codex"
-	"chatgpt-codex-proxy/internal/openai"
+	"chatgpt-codex-proxy/internal/schema"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
-func normalizeTools(tools []Tool, names *turn.ToolNames) ([]codex.Tool, error) {
-	result := make([]codex.Tool, 0, len(tools))
+func normalizeTools(tools []Tool, names *turn.ToolNames) ([]turn.ToolDefinition, error) {
+	result := make([]turn.ToolDefinition, 0, len(tools))
 	for _, tool := range tools {
 		toolType := strings.TrimSpace(tool.Type)
 		if isHostedWebSearchToolType(toolType) {
@@ -35,18 +34,18 @@ func normalizeTools(tools []Tool, names *turn.ToolNames) ([]codex.Tool, error) {
 		if len(tool.InputSchema) == 0 {
 			return nil, errors.New("input_schema is required")
 		}
-		result = append(result, codex.Tool{
+		result = append(result, turn.ToolDefinition{
 			Type:        "function",
 			Name:        names.Shorten(tool.Name),
 			Description: tool.Description,
-			Parameters:  openai.NormalizeSchema(tool.InputSchema),
+			Parameters:  schema.Normalize(tool.InputSchema),
 		})
 	}
 	return result, nil
 }
 
-func normalizeHostedWebSearchTool(tool Tool) codex.Tool {
-	normalized := codex.Tool{
+func normalizeHostedWebSearchTool(tool Tool) turn.ToolDefinition {
+	normalized := turn.ToolDefinition{
 		Type:         "web_search",
 		UserLocation: maps.Clone(tool.UserLocation),
 	}

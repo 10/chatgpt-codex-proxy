@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"chatgpt-codex-proxy/internal/codex"
+	"chatgpt-codex-proxy/internal/schema"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
@@ -27,12 +27,12 @@ func legacyFunctionsAsTools(functions []LegacyFunctionDefinition) []ToolDefiniti
 	return tools
 }
 
-func normalizeTools(tools []ToolDefinition, toolNames *turn.ToolNames) []codex.Tool {
+func normalizeTools(tools []ToolDefinition, toolNames *turn.ToolNames) []turn.ToolDefinition {
 	if len(tools) == 0 {
 		return nil
 	}
 
-	result := make([]codex.Tool, 0, len(tools))
+	result := make([]turn.ToolDefinition, 0, len(tools))
 	for _, tool := range tools {
 		switch tool.Type {
 		case "function":
@@ -48,15 +48,15 @@ func normalizeTools(tools []ToolDefinition, toolNames *turn.ToolNames) []codex.T
 			if function == nil {
 				continue
 			}
-			result = append(result, codex.Tool{
+			result = append(result, turn.ToolDefinition{
 				Type:        "function",
 				Name:        toolNames.Shorten(function.Name),
 				Description: function.Description,
-				Parameters:  NormalizeSchema(function.Parameters),
+				Parameters:  schema.Normalize(function.Parameters),
 				Strict:      function.Strict,
 			})
 		case "web_search", "web_search_preview":
-			result = append(result, codex.Tool{
+			result = append(result, turn.ToolDefinition{
 				Type:              "web_search",
 				SearchContextSize: tool.SearchContextSize,
 				UserLocation:      tool.UserLocation,

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"chatgpt-codex-proxy/internal/accounts"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestParseQuotaFromHeaders(t *testing.T) {
@@ -84,7 +85,7 @@ func TestParseQuotaFromHeaders(t *testing.T) {
 func TestParseQuotaFromEvent(t *testing.T) {
 	t.Parallel()
 
-	event := &StreamEvent{
+	event := &turn.StreamEvent{
 		Type: "codex.rate_limits",
 		Raw: map[string]any{
 			"rate_limits": map[string]any{

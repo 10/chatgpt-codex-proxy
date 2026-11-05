@@ -9,6 +9,7 @@ import (
 
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/jsonutil"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func ParseQuotaFromHeaders(headers http.Header) *accounts.QuotaSnapshot {
@@ -60,7 +61,7 @@ func QuotaFromUsageResponse(payload UsageResponse) *accounts.QuotaSnapshot {
 	return snapshot
 }
 
-func ParseQuotaFromEvent(event *StreamEvent, planType string) *accounts.QuotaSnapshot {
+func ParseQuotaFromEvent(event *turn.StreamEvent, planType string) *accounts.QuotaSnapshot {
 	if event == nil || event.Type != "codex.rate_limits" {
 		return nil
 	}

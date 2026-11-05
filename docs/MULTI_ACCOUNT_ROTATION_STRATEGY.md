@@ -367,7 +367,7 @@ Implicit replay detection initially pins the matching continuation in the same w
 
 Selecting an account is not the same as proving it is ready to send a request.
 
-After the service chooses an account, `AccountManager.AcquireReady` runs readiness checks:
+The server's `selectReadyAccount` selects through the rotation service, then calls `AccountManager.EnsureReady`:
 
 1. Acquire an eligible account from the rotation service
 2. Check the current token state

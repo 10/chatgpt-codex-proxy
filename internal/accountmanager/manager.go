@@ -19,43 +19,17 @@ type AccountManager struct {
 	accounts *accounts.Service
 	oauth    *codexauth.OAuthService
 	http     *codex.HTTPClient
-	models   func(accounts.Record, string) bool
 
 	locks sync.Map
 }
 
-// ErrAccountNotFound indicates that the requested local account does not exist.
-var ErrAccountNotFound = errors.New("account not found")
-
-func NewAccountManager(cfg config.Config, accountsSvc *accounts.Service, oauth *codexauth.OAuthService, httpClient *codex.HTTPClient, modelSupport func(accounts.Record, string) bool) *AccountManager {
+func NewAccountManager(cfg config.Config, accountsSvc *accounts.Service, oauth *codexauth.OAuthService, httpClient *codex.HTTPClient) *AccountManager {
 	return &AccountManager{
 		cfg:      cfg,
 		accounts: accountsSvc,
 		oauth:    oauth,
 		http:     httpClient,
-		models:   modelSupport,
 	}
-}
-
-func (m *AccountManager) AcquireReady(ctx context.Context, preferredID string) (accounts.Record, error) {
-	record, err := m.accounts.Acquire(preferredID)
-	if err != nil {
-		return accounts.Record{}, err
-	}
-	return m.EnsureReady(ctx, record.ID)
-}
-
-func (m *AccountManager) AcquireReadyForModel(ctx context.Context, preferredID, modelID string) (accounts.Record, error) {
-	record, err := m.accounts.AcquireMatching(preferredID, func(record accounts.Record) bool {
-		if m.models == nil {
-			return true
-		}
-		return m.models(record, modelID)
-	})
-	if err != nil {
-		return accounts.Record{}, err
-	}
-	return m.EnsureReady(ctx, record.ID)
 }
 
 func (m *AccountManager) EnsureReady(ctx context.Context, id string) (accounts.Record, error) {
@@ -107,7 +81,7 @@ func (m *AccountManager) GetUsage(ctx context.Context, id string, cached bool) (
 			return accounts.Record{}, nil, err
 		}
 		if !ok {
-			return accounts.Record{}, nil, ErrAccountNotFound
+			return accounts.Record{}, nil, accounts.ErrNotFound
 		}
 		return record, record.CachedQuota, nil
 	}
@@ -162,7 +136,7 @@ func (m *AccountManager) refreshLocked(ctx context.Context, record accounts.Reco
 	}
 	updated, err := m.getRecord(record.ID)
 	if err != nil {
-		if errors.Is(err, ErrAccountNotFound) {
+		if errors.Is(err, accounts.ErrNotFound) {
 			return accounts.Record{}, fmt.Errorf("account %q disappeared after auth update", record.ID)
 		}
 		return accounts.Record{}, err
@@ -176,7 +150,7 @@ func (m *AccountManager) getRecord(id string) (accounts.Record, error) {
 		return accounts.Record{}, err
 	}
 	if !ok {
-		return accounts.Record{}, ErrAccountNotFound
+		return accounts.Record{}, accounts.ErrNotFound
 	}
 	return record, nil
 }

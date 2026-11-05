@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"chatgpt-codex-proxy/internal/accounts"
-	"chatgpt-codex-proxy/internal/codex"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestHandleCompletionsReturnsTextCompletion(t *testing.T) {
@@ -19,8 +19,8 @@ func TestHandleCompletionsReturnsTextCompletion(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	app := newFailoverTestApp(t)
-	app.httpStream = func(_ context.Context, _ accounts.Record, _ codex.Request, _ string) (eventStream, error) {
-		return &fakeEventStream{events: []*codex.StreamEvent{{
+	app.httpStream = func(_ context.Context, _ accounts.Record, _ turn.Request, _ string) (eventStream, error) {
+		return &fakeEventStream{events: []*turn.StreamEvent{{
 			Type: "response.completed",
 			Raw: map[string]any{"response": map[string]any{
 				"id": "resp_completion", "model": "gpt-5.6-terra", "status": "completed", "output_text": "completed text",

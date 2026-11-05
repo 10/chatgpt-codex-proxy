@@ -1,32 +1,14 @@
 package openai
 
 import (
-	"encoding/json"
 	"strings"
 
 	"chatgpt-codex-proxy/internal/jsonutil"
+	"chatgpt-codex-proxy/internal/schema"
 )
 
-func ReconvertJSONText(text string, schema map[string]any) (string, error) {
-	if schema == nil || strings.TrimSpace(text) == "" {
-		return text, nil
-	}
-
-	var decoded any
-	if err := json.Unmarshal([]byte(text), &decoded); err != nil {
-		return text, err
-	}
-
-	reconverted := reconvertTupleValues(decoded, schema, schema)
-	payload, err := json.Marshal(reconverted)
-	if err != nil {
-		return text, err
-	}
-	return string(payload), nil
-}
-
-func PatchChatCompletionObjectForTuple(object map[string]any, schema map[string]any) error {
-	if schema == nil || len(object) == 0 {
+func PatchChatCompletionObjectForTuple(object map[string]any, originalSchema map[string]any) error {
+	if originalSchema == nil || len(object) == 0 {
 		return nil
 	}
 
@@ -36,20 +18,20 @@ func PatchChatCompletionObjectForTuple(object map[string]any, schema map[string]
 	}
 
 	message := jsonutil.MapValue(choices[0], "message")
-	return patchTupleTextField(message, "content", schema)
+	return patchTupleTextField(message, "content", originalSchema)
 }
 
-func PatchResponsesObjectForTuple(object map[string]any, schema map[string]any) error {
-	if schema == nil || len(object) == 0 {
+func PatchResponsesObjectForTuple(object map[string]any, originalSchema map[string]any) error {
+	if originalSchema == nil || len(object) == 0 {
 		return nil
 	}
-	if err := patchTupleTextField(object, "output_text", schema); err != nil {
+	if err := patchTupleTextField(object, "output_text", originalSchema); err != nil {
 		return err
 	}
-	return patchTupleOutputMessages(jsonutil.SliceOfMaps(object["output"]), schema)
+	return patchTupleOutputMessages(jsonutil.SliceOfMaps(object["output"]), originalSchema)
 }
 
-func patchTupleOutputMessages(items []map[string]any, schema map[string]any) error {
+func patchTupleOutputMessages(items []map[string]any, originalSchema map[string]any) error {
 	for _, item := range items {
 		if jsonutil.StringValue(item["type"]) != "message" {
 			continue
@@ -58,7 +40,7 @@ func patchTupleOutputMessages(items []map[string]any, schema map[string]any) err
 			if jsonutil.StringValue(content["type"]) != "output_text" {
 				continue
 			}
-			if err := patchTupleTextField(content, "text", schema); err != nil {
+			if err := patchTupleTextField(content, "text", originalSchema); err != nil {
 				return err
 			}
 		}
@@ -66,12 +48,12 @@ func patchTupleOutputMessages(items []map[string]any, schema map[string]any) err
 	return nil
 }
 
-func patchTupleTextField(target map[string]any, key string, schema map[string]any) error {
+func patchTupleTextField(target map[string]any, key string, originalSchema map[string]any) error {
 	text := jsonutil.StringValue(target[key])
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	reconverted, err := ReconvertJSONText(text, schema)
+	reconverted, err := schema.ReconvertJSONText(text, originalSchema)
 	if err != nil {
 		return err
 	}

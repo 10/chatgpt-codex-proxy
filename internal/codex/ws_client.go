@@ -2,23 +2,37 @@ package codex
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/gorilla/websocket"
 
+	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/httpbody"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
-// WSStream wraps a websocket connection and exposes the event-stream interface used by the server package.
 type WSStream struct {
 	conn    *websocket.Conn
 	headers http.Header
 }
 
-func ConnectWS(ctx context.Context, endpoint string, headers http.Header, body any) (*WSStream, error) {
+func (c *HTTPClient) ConnectResponsesWS(ctx context.Context, record accounts.Record, req turn.NormalizedRequest, turnState string) (*WSStream, error) {
+	headers := buildHeaders(record.Token.AccessToken, headerOptions{
+		AccountID:   record.AccountID,
+		Cookies:     record.Cookies,
+		TurnState:   turnState,
+		RequestID:   newRequestID(),
+		IncludeBeta: true,
+	})
+	endpoint := strings.TrimRight(c.cfg.CodexBaseURL, "/") + "/codex/responses"
+	endpoint = strings.Replace(endpoint, "https://", "wss://", 1)
+	endpoint = strings.Replace(endpoint, "http://", "ws://", 1)
+	return connectWS(ctx, endpoint, headers, WSCreatePayload(req))
+}
+
+func connectWS(ctx context.Context, endpoint string, headers http.Header, body any) (*WSStream, error) {
 	dialer := websocket.Dialer{}
 	conn, resp, err := dialer.DialContext(ctx, endpoint, headers)
 	if err != nil {
@@ -51,18 +65,17 @@ func (s *WSStream) SendJSON(body any) error {
 	return s.conn.WriteJSON(body)
 }
 
-func (s *WSStream) NextEvent() (*StreamEvent, error) {
+func (s *WSStream) NextEvent() (*turn.StreamEvent, error) {
 	_, message, err := s.conn.ReadMessage()
 	if err != nil {
 		return nil, err
 	}
-	var raw map[string]any
-	if err := json.Unmarshal(message, &raw); err != nil {
+	event, err := decodeStreamEvent(message)
+	if err != nil {
 		return nil, err
 	}
-	eventType, _ := raw["type"].(string)
-	if strings.TrimSpace(eventType) == "" {
+	if strings.TrimSpace(event.Type) == "" {
 		return nil, io.EOF
 	}
-	return &StreamEvent{Type: eventType, Raw: raw}, nil
+	return event, nil
 }

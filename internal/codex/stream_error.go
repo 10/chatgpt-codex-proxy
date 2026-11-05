@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"chatgpt-codex-proxy/internal/jsonutil"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
-// StreamEventError translates upstream failure events for all response consumers.
-func StreamEventError(event *StreamEvent) error {
+func StreamEventError(event *turn.StreamEvent) error {
 	if event == nil {
 		return nil
 	}
@@ -24,7 +23,7 @@ func StreamEventError(event *StreamEvent) error {
 	return details
 }
 
-func extractUpstreamEventDetails(event *StreamEvent) *UpstreamError {
+func extractUpstreamEventDetails(event *turn.StreamEvent) *UpstreamError {
 	if event == nil || event.Raw == nil {
 		return nil
 	}
@@ -92,19 +91,12 @@ func upstreamStatusCodeFromCode(code string) int {
 }
 
 func firstRetryAfterSeconds(values ...map[string]any) int {
-	now := time.Now().UTC()
 	for _, value := range values {
 		if value == nil {
 			continue
 		}
-		if seconds, ok := jsonutil.IntValue(value["resets_in_seconds"]); ok && seconds > 0 {
+		if seconds := retryAfterSeconds(value["resets_in_seconds"], value["retry_after"], value["resets_at"]); seconds > 0 {
 			return seconds
-		}
-		if resetAt, ok := jsonutil.IntValue(value["resets_at"]); ok && resetAt > 0 {
-			diff := resetAt - int(now.Unix())
-			if diff > 0 {
-				return diff
-			}
 		}
 	}
 	return 0

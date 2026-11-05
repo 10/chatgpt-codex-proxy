@@ -83,7 +83,6 @@ func normalizeRateLimitWindow(window *RateLimitWindow, now time.Time) bool {
 	if window == nil || window.ResetAt == nil || window.ResetAt.After(now) {
 		return false
 	}
-	// A window that has reset starts again at zero usage.
 	zero := 0.0
 	window.Allowed = true
 	window.LimitReached = false
@@ -119,17 +118,4 @@ func windowLimitActive(window *RateLimitWindow, now time.Time) bool {
 		return true
 	}
 	return window.ResetAt.After(now)
-}
-
-func isEligible(record *Record, now time.Time) bool {
-	if record == nil || record.Status != StatusActive {
-		return false
-	}
-	if strings.TrimSpace(record.Token.AccessToken) == "" {
-		return false
-	}
-	if record.CooldownUntil != nil && record.CooldownUntil.After(now) {
-		return false
-	}
-	return !quotaBlocksGeneralRouting(record.CachedQuota, now)
 }

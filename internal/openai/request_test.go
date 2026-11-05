@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
@@ -709,7 +708,7 @@ func TestToolNamesAreShortenedConsistentlyAndRestored(t *testing.T) {
 	}
 
 	accumulator := turn.NewAccumulator(normalized)
-	accumulator.Apply(&codex.StreamEvent{
+	accumulator.Apply(&turn.StreamEvent{
 		Type: "response.output_item.added",
 		Raw: map[string]any{
 			"output_index": 0,
@@ -794,7 +793,7 @@ func TestUnsupportedContentPartRejected(t *testing.T) {
 	}
 }
 
-func marshalTextConfig(t *testing.T, text *codex.TextConfig) map[string]any {
+func marshalTextConfig(t *testing.T, text *turn.TextConfig) map[string]any {
 	t.Helper()
 	if text == nil {
 		t.Fatal("text config is nil")
