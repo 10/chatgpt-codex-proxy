@@ -34,7 +34,6 @@ ENV DATA_DIR=/app/data
 ENV GIN_MODE=release
 
 EXPOSE 8080
-VOLUME ["/app/data"]
 USER app
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
