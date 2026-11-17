@@ -68,5 +68,9 @@ func bootstrapEntry(id string, isDefault bool, defaultReasoningEffort string, co
 }
 
 func BootstrapEntries() []Entry {
-	return cloneEntries(bootstrapEntries)
+	entries := cloneEntries(bootstrapEntries)
+	for index := range entries {
+		entries[index].Priority = index + 1
+	}
+	return entries
 }

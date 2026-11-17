@@ -169,7 +169,9 @@ not the public API's advertised context size. GPT-6.1 Terra's bundled limits are
 fetched account metadata takes precedence, including newer context limits. No bundled
 Codex catalog lists GPT-6.2 yet, so its fallback limits follow the live Codex catalog:
 500,000 by default and 872,000 maximum for GPT-6.2 Sol, and 272,000 and 872,000 for
-GPT-6.2 Astra.
+GPT-6.2 Astra. Model lists follow upstream priority. Models upstream marks
+`visibility: hide` stay routable but are left out of `/v1/models` and reported as
+hidden to Codex clients.
 
 - If a model is explicitly supplied, it must exist in the current model catalog.
 - If no model is supplied, normalization leaves it empty.

@@ -1,7 +1,9 @@
 package models
 
 import (
+	"cmp"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -188,7 +190,10 @@ func (c *Catalog) rebuildVisibleLocked() {
 		return
 	}
 
-	ids := slices.Sorted(maps.Keys(visibleIDs))
+	ids := slices.Collect(maps.Keys(visibleIDs))
+	slices.SortFunc(ids, func(a, b string) int {
+		return cmp.Or(cmp.Compare(priorityRank(c.entriesByID[a]), priorityRank(c.entriesByID[b])), strings.Compare(a, b))
+	})
 
 	visible := make([]Entry, 0, len(ids))
 	for _, id := range ids {
@@ -200,6 +205,13 @@ func (c *Catalog) rebuildVisibleLocked() {
 	}
 	c.visible = visible
 	c.visibleIDs = visibleIDs
+}
+
+func priorityRank(entry Entry) int {
+	if entry.Priority <= 0 {
+		return math.MaxInt
+	}
+	return entry.Priority
 }
 
 func (c *Catalog) hasUnrefreshedRoutesLocked() bool {
@@ -236,7 +248,7 @@ func (c *Catalog) resolveDefaultLocked(record accounts.Record, configured string
 		return configured
 	}
 	for _, entry := range c.visible {
-		if !entry.IsDefault {
+		if !entry.IsDefault || entry.Hidden {
 			continue
 		}
 		if c.supportsRecordLocked(record, entry.ID) {
@@ -244,7 +256,7 @@ func (c *Catalog) resolveDefaultLocked(record accounts.Record, configured string
 		}
 	}
 	for _, entry := range c.visible {
-		if c.supportsRecordLocked(record, entry.ID) {
+		if !entry.Hidden && c.supportsRecordLocked(record, entry.ID) {
 			return entry.ID
 		}
 	}

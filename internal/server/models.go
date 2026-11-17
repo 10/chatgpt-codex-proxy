@@ -31,7 +31,9 @@ func (a *App) handleModels(c *gin.Context) {
 		}
 		data := make([]map[string]any, 0, len(entries))
 		for _, entry := range entries {
-			data = append(data, anthropicModelObject(entry.ID, entry.DisplayName))
+			if !entry.Hidden {
+				data = append(data, anthropicModelObject(entry.ID, entry.DisplayName))
+			}
 		}
 		response := gin.H{"data": data, "has_more": false}
 		if len(data) > 0 {
@@ -48,8 +50,10 @@ func (a *App) handleModels(c *gin.Context) {
 	data := make([]modelResponse, 0, len(entries)+len(codexImageModels))
 	seen := make(map[string]bool, len(entries)+len(codexImageModels))
 	for _, entry := range entries {
-		data = append(data, modelObject(entry.ID))
 		seen[entry.ID] = true
+		if !entry.Hidden {
+			data = append(data, modelObject(entry.ID))
+		}
 	}
 	for _, model := range codexImageModels {
 		if !seen[model] {
@@ -70,6 +74,10 @@ func codexClientModelsResponse(entries []models.Entry) map[string]any {
 				"description": effort.Description,
 			})
 		}
+		visibility := "list"
+		if entry.Hidden {
+			visibility = "hide"
+		}
 		data = append(data, map[string]any{
 			"slug":                       entry.ID,
 			"display_name":               entry.DisplayName,
@@ -82,7 +90,7 @@ func codexClientModelsResponse(entries []models.Entry) map[string]any {
 			"max_context_window":         entry.MaxContextWindow,
 			"default_reasoning_level":    entry.DefaultReasoningEffort,
 			"supported_reasoning_levels": levels,
-			"visibility":                 "list",
+			"visibility":                 visibility,
 			"supported_in_api":           true,
 			"priority":                   index + 1,
 		})
