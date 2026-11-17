@@ -16,9 +16,6 @@ func normalizeTools(tools []Tool, names *turn.ToolNames) ([]turn.ToolDefinition,
 	for _, tool := range tools {
 		toolType := strings.TrimSpace(tool.Type)
 		if isHostedWebSearchToolType(toolType) {
-			if tool.MaxUses != nil {
-				return nil, errors.New("max_uses is not supported for hosted web search")
-			}
 			if len(tool.BlockedDomains) > 0 {
 				return nil, errors.New("blocked_domains is not supported for hosted web search")
 			}

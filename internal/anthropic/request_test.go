@@ -631,27 +631,32 @@ func TestNormalizeMessagesReplaysHostedWebSearchBlocks(t *testing.T) {
 	}
 }
 
-func TestNormalizeMessagesRejectsUnsupportedHostedWebSearchLimits(t *testing.T) {
+func TestNormalizeMessagesHostedWebSearchLimits(t *testing.T) {
 	t.Parallel()
 
-	maxTokens := 10
-	maxUses := 1
-	for name, tool := range map[string]Tool{
-		"max_uses":        {Type: "web_search_20250305", Name: "web_search", MaxUses: &maxUses},
-		"blocked_domains": {Type: "web_search_20250305", Name: "web_search", BlockedDomains: []string{"example.com"}},
+	for name, test := range map[string]struct {
+		tool    string
+		wantErr string
+	}{
+		"claude code max_uses is advisory": {`{"type":"web_search_20250305","name":"web_search","allowed_domains":["go.dev"],"blocked_domains":[],"max_uses":8}`, ""},
+		"blocked_domains is rejected":      {`{"type":"web_search_20250305","name":"web_search","blocked_domains":["example.com"]}`, "blocked_domains is not supported"},
 	} {
-		name, tool := name, tool
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := Normalize(MessagesRequest{
-				Model:     "gpt-5.6-terra",
-				MaxTokens: &maxTokens,
-				Messages:  []Message{{Role: "user", Content: Content{{Type: "text", Text: "search"}}}},
-				Tools:     []Tool{tool},
-			}, models.NewCatalog(models.BootstrapEntries()))
-			if err == nil || !strings.Contains(err.Error(), name+" is not supported") {
-				t.Fatalf("Normalize() error = %v", err)
+			request, err := DecodeMessages([]byte(`{"model":"gpt-5.6-terra","max_tokens":10,"messages":[{"role":"user","content":"search"}],"tools":[` + test.tool + `]}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			normalized, err := Normalize(request, models.NewCatalog(models.BootstrapEntries()))
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("Normalize() error = %v, want %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil || len(normalized.Tools) != 1 || normalized.Tools[0].Type != "web_search" {
+				t.Fatalf("Normalize() = %#v, %v", normalized.Tools, err)
 			}
 		})
 	}
