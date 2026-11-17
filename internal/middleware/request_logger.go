@@ -84,8 +84,7 @@ func RequestLogger(logger *slog.Logger) gin.HandlerFunc {
 		if responseID := c.GetString(RequestResponseIDKey); responseID != "" {
 			attrs = append(attrs, "response_id", responseID)
 		}
-		if value, ok := c.Get(RequestUsageKey); ok {
-			usage := value.(requestUsage)
+		if usage, ok := c.Value(RequestUsageKey).(requestUsage); ok {
 			attrs = append(attrs, "input_tokens", usage.input, "cached_tokens", usage.cached, "output_tokens", usage.output)
 		}
 		if errorCode := c.GetString(RequestErrorCodeKey); errorCode != "" {

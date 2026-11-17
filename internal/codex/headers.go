@@ -129,6 +129,8 @@ func sessionID(accountID string, req turn.Request) string {
 		return ""
 	}
 	sum := sha256.Sum256(seed)
+	sum[6] = sum[6]&0x0f | 0x40
+	sum[8] = sum[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
 

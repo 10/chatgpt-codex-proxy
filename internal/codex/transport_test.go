@@ -35,8 +35,8 @@ func TestResponseTransportsPreserveRequestAndEventSemantics(t *testing.T) {
 						t.Errorf("%s = %q, want %q", name, got, want)
 					}
 				}
-				if got := r.Header.Get("Session-Id"); len(got) != 36 {
-					t.Errorf("Session-Id = %q, want a conversation id", got)
+				if got := r.Header.Get("Session-Id"); len(got) != 36 || got[14] != '4' || !strings.ContainsRune("89ab", rune(got[19])) {
+					t.Errorf("Session-Id = %q, want a version 4 UUID for the conversation", got)
 				}
 				for _, name := range []string{"User-Agent", "X-Client-Request-Id", "OpenAI-Beta"} {
 					if r.Header.Get(name) == "" {
