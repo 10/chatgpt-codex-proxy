@@ -15,6 +15,9 @@ import (
 func ParseQuotaFromHeaders(headers http.Header) *accounts.QuotaSnapshot {
 	primary := parseRateWindow(headers, "x-codex-primary")
 	secondary := parseRateWindow(headers, "x-codex-secondary")
+	if secondary != nil && *secondary.UsedPercent == 0 && secondary.ResetAt == nil && (secondary.LimitWindowSeconds == nil || *secondary.LimitWindowSeconds == 0) {
+		secondary = nil
+	}
 	credits := parseCredits(headers, "x-codex")
 	if primary == nil && secondary == nil {
 		return nil
@@ -119,9 +122,6 @@ func parseRateWindow(headers http.Header, prefix string) *accounts.RateLimitWind
 			seconds := minutes * 60
 			window.LimitWindowSeconds = &seconds
 		}
-	}
-	if pct == 0 && window.ResetAt == nil && (window.LimitWindowSeconds == nil || *window.LimitWindowSeconds == 0) {
-		return nil
 	}
 	return window
 }

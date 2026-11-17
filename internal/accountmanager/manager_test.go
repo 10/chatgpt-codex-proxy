@@ -115,6 +115,7 @@ func TestRefreshExpiresAccountAfterRejectedRefreshToken(t *testing.T) {
 		"oauth invalid_grant":            {http.StatusBadRequest, `{"error":"invalid_grant","error_description":"refresh token is invalid"}`, "refresh token is invalid"},
 		"reused refresh token":           {http.StatusBadRequest, `{"error":{"message":"Refresh token was already used.","code":"refresh_token_reused"}}`, "Refresh token was already used."},
 		"unauthorized refresh":           {http.StatusUnauthorized, `{"error":{"message":"Unauthorized"}}`, "Unauthorized"},
+		"rejected oauth client":          {http.StatusUnauthorized, `{"error":"invalid_client","error_description":"client authentication failed"}`, ""},
 		"openai malformed refresh token": {http.StatusBadRequest, `{"error":{"message":"Invalid refresh token.","type":"invalid_request_error","param":null,"code":"invalid_refresh_token_ciphertext_header"}}`, "Invalid refresh token."},
 		"openai invalid_refresh_token":   {http.StatusUnauthorized, `{"error":{"message":"Could not validate your refresh token. Please try signing in again.","type":"invalid_request_error","param":null,"code":"invalid_refresh_token"}}`, "Could not validate your refresh token. Please try signing in again."},
 	} {
@@ -139,6 +140,12 @@ func TestRefreshExpiresAccountAfterRejectedRefreshToken(t *testing.T) {
 			}
 			if !ok {
 				t.Fatal("account missing after refresh failure")
+			}
+			if test.wantError == "" {
+				if record.Status != accounts.StatusActive || record.CooldownUntil == nil {
+					t.Fatalf("account = %q until %v, want active behind a cooldown", record.Status, record.CooldownUntil)
+				}
+				return
 			}
 			if record.Status != accounts.StatusExpired {
 				t.Fatalf("account status = %q, want expired", record.Status)

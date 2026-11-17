@@ -70,6 +70,18 @@ func TestParseQuotaFromHeaders(t *testing.T) {
 			},
 		},
 		{
+			name: "keeps a primary window at zero usage",
+			header: func(headers http.Header) {
+				headers.Set("X-Codex-Primary-Used-Percent", "0")
+			},
+			assert: func(t *testing.T, snapshot *accounts.QuotaSnapshot) {
+				t.Helper()
+				if snapshot == nil || snapshot.RateLimit.UsedPercent == nil || *snapshot.RateLimit.UsedPercent != 0 {
+					t.Fatalf("ParseQuotaFromHeaders() = %#v, want the 0%% primary window", snapshot)
+				}
+			},
+		},
+		{
 			name: "ignores credits-only headers",
 			header: func(headers http.Header) {
 				headers.Set("X-Codex-Credits-Has-Credits", "true")
