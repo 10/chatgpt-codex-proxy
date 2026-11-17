@@ -62,6 +62,31 @@ func TestResponsesStreamErrorUsesTopLevelResponsesShape(t *testing.T) {
 	}
 }
 
+func TestStreamResponsesKeepsUpstreamFailureCode(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	app := newFailoverTestApp(t)
+	stream := &fakeEventStream{events: []*turn.StreamEvent{
+		{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_overflow", "status": "in_progress"}}},
+		{Type: "response.failed", Raw: map[string]any{"response": map[string]any{"id": "resp_overflow", "status": "failed", "error": map[string]any{
+			"code": "context_length_exceeded", "message": "Your input exceeds the context window of this model.",
+		}}}},
+	}}
+
+	app.streamResponses(ctx, mustGetAccount(t, app.accounts, "acct-a"), turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.6-terra", Stream: true}}, stream)
+
+	events := parseSSEEvents(t, recorder.Body.String())
+	last := events[len(events)-1]
+	failure := nestedMapFromAny(nestedMapFromAny(last.Data["response"])["error"])
+	if last.Event != "response.failed" || failure["code"] != "context_length_exceeded" || failure["message"] != "Your input exceeds the context window of this model." {
+		t.Fatalf("last event = %#v", last)
+	}
+}
+
 func TestStreamResponsesPassesThroughIncompleteTerminalEvent(t *testing.T) {
 	t.Parallel()
 

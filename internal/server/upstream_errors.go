@@ -187,7 +187,12 @@ func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID
 	middleware.SetRequestError(c, code, message)
 	middleware.SetRequestResponseID(c, responseID)
 	if endpoint == "responses" {
-		writeResponsesStreamError(c.Writer, status, message)
+		var upstreamErr *codex.UpstreamError
+		if classify && errors.As(err, &upstreamErr) {
+			writeResponsesFailed(c.Writer, responseID, cmp.Or(strings.TrimSpace(upstreamErr.Code), responsesErrorCode(status)), message)
+		} else {
+			writeResponsesStreamError(c.Writer, status, message)
+		}
 		c.Writer.Flush()
 		return
 	}
@@ -195,7 +200,31 @@ func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID
 	c.Writer.Flush()
 }
 
+// Codex CLI reads a failed turn's code (such as context_length_exceeded) only
+// from response.failed; an error event reaches it as a dropped stream.
+func writeResponsesFailed(writer io.Writer, responseID, code, message string) {
+	writeSSE(writer, "response.failed", mustJSON(map[string]any{
+		"type":            "response.failed",
+		"sequence_number": 0,
+		"response": map[string]any{
+			"id":     responseID,
+			"object": "response",
+			"status": "failed",
+			"error":  map[string]any{"code": code, "message": strings.TrimSpace(message)},
+		},
+	}))
+}
+
 func writeResponsesStreamError(writer io.Writer, status int, message string) {
+	writeSSE(writer, "error", mustJSON(map[string]any{
+		"type":            "error",
+		"code":            responsesErrorCode(status),
+		"message":         strings.TrimSpace(message),
+		"sequence_number": 0,
+	}))
+}
+
+func responsesErrorCode(status int) string {
 	code := "unknown_error"
 	switch status {
 	case http.StatusUnauthorized:
@@ -215,10 +244,5 @@ func writeResponsesStreamError(writer io.Writer, status int, message string) {
 			code = "invalid_request_error"
 		}
 	}
-	writeSSE(writer, "error", mustJSON(map[string]any{
-		"type":            "error",
-		"code":            code,
-		"message":         strings.TrimSpace(message),
-		"sequence_number": 0,
-	}))
+	return code
 }
