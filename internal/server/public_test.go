@@ -315,6 +315,42 @@ func TestOpenStreamDoesNotFailOverNonRetryableRequestError(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsSurfacesUpstreamErrorMessageAndCode(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	app.httpStream = func(context.Context, accounts.Record, turn.Request, string) (eventStream, error) {
+		return nil, codex.NewUpstreamError("codex response", http.StatusBadRequest, `{
+  "error": {
+    "code": "unsupported_value",
+    "message": "Unsupported value: 'none' is not supported with the 'gpt-5.6-terra' model.",
+    "param": "reasoning.effort",
+    "type": "invalid_request_error"
+  }
+}`, nil)
+	}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.6-terra","messages":[{"role":"user","content":"hi"}]}`))
+	app.handleChatCompletions(ctx)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Error struct {
+			Message string `json:"message"`
+			Code    string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Error.Message != "Unsupported value: 'none' is not supported with the 'gpt-5.6-terra' model." || response.Error.Code != "unsupported_value" {
+		t.Fatalf("error = %#v", response.Error)
+	}
+}
+
 func TestOpenStreamDoesNotFailOverAfterRequestCancellation(t *testing.T) {
 	t.Parallel()
 

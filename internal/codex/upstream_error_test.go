@@ -1,10 +1,13 @@
 package codex
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"testing"
 	"time"
+
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 func TestNewUpstreamErrorParsesRetryAfter(t *testing.T) {
@@ -42,6 +45,18 @@ func TestNewUpstreamErrorParsesRetryAfter(t *testing.T) {
 			wantExact: 11,
 		},
 		{
+			name:      "object detail keeps code and reset",
+			body:      `{"error":{"code":"rate_limit_exceeded","resets_in_seconds":120},"detail":{"message":"x"}}`,
+			wantCode:  "rate_limit_exceeded",
+			wantExact: 120,
+		},
+		{
+			name:      "object message keeps code and reset",
+			body:      `{"error":{"code":"rate_limit_exceeded","message":{"text":"busy"},"resets_in_seconds":30}}`,
+			wantCode:  "rate_limit_exceeded",
+			wantExact: 30,
+		},
+		{
 			name:      "from retry-after header",
 			body:      `{"error":{"message":"rate limited"}}`,
 			headers:   http.Header{"Retry-After": []string{"9"}},
@@ -69,5 +84,24 @@ func TestNewUpstreamErrorParsesRetryAfter(t *testing.T) {
 				t.Fatalf("RetryAfter = %d, want >= %d", err.RetryAfter, tc.wantMin)
 			}
 		})
+	}
+}
+
+func TestInvalidEncryptedContentIsRecognizedFromErrorType(t *testing.T) {
+	t.Parallel()
+
+	err := NewUpstreamError("codex response", http.StatusBadRequest, `{"error":{"type":"invalid_encrypted_content","message":"The encrypted content could not be verified."}}`, nil)
+	if !IsInvalidReasoningSignatureError(err) {
+		t.Fatalf("IsInvalidReasoningSignatureError(%v) = false", err)
+	}
+}
+
+func TestStreamEventErrorDoesNotUseEventTypeAsCode(t *testing.T) {
+	t.Parallel()
+
+	var upstreamErr *UpstreamError
+	err := StreamEventError(&turn.StreamEvent{Type: "error", Raw: map[string]any{"type": "error", "status": 429, "message": "busy"}})
+	if !errors.As(err, &upstreamErr) || upstreamErr.Code != "" || upstreamErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("StreamEventError() = %#v", err)
 	}
 }

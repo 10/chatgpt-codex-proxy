@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -59,6 +60,34 @@ func TestResponsesStreamErrorUsesTopLevelResponsesShape(t *testing.T) {
 	}
 	if _, nested := events[0].Data["error"]; nested {
 		t.Fatalf("error payload = %#v, want top-level fields", events[0].Data)
+	}
+}
+
+func TestStreamResponsesKeepsUpstreamFailureCode(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	app := newFailoverTestApp(t)
+	stream := &fakeEventStream{events: []*turn.StreamEvent{
+		{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_overflow", "status": "in_progress"}}},
+		{Type: "response.failed", Raw: map[string]any{"type": "response.failed", "sequence_number": 7, "response": map[string]any{"id": "resp_overflow", "model": "gpt-5.6-terra", "status": "failed", "error": map[string]any{
+			"code": "context_length_exceeded", "message": "Your input exceeds the context window of this model.",
+		}}}},
+	}}
+
+	app.streamResponses(ctx, mustGetAccount(t, app.accounts, "acct-a"), turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.6-terra", Stream: true}}, stream)
+
+	events := parseSSEEvents(t, recorder.Body.String())
+	last := events[len(events)-1]
+	failure := nestedMapFromAny(nestedMapFromAny(last.Data["response"])["error"])
+	if last.Event != "response.failed" || failure["code"] != "context_length_exceeded" || failure["message"] != "Your input exceeds the context window of this model." {
+		t.Fatalf("last event = %#v", last)
+	}
+	if last.Data["sequence_number"] != float64(7) || nestedMapFromAny(last.Data["response"])["model"] != "gpt-5.6-terra" {
+		t.Fatalf("Codex's failed response was not passed through: %#v", last.Data)
 	}
 }
 
@@ -567,5 +596,96 @@ func TestClassifyUpstreamErrorCoolsDownGeneric403ButNotCloudflare403(t *testing.
 	cloudflare := mustGetAccount(t, app.accounts, "acct-b")
 	if cloudflare.Status != accounts.StatusActive {
 		t.Fatalf("cloudflare status = %q, want active", cloudflare.Status)
+	}
+}
+
+func TestStreamResponsesFailureShapes(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	for name, test := range map[string]struct {
+		failure   *turn.StreamEvent
+		wantEvent string
+		wantCode  string
+		wantReset any
+	}{
+		"top-level error on response.failed": {
+			failure:   &turn.StreamEvent{Type: "response.failed", Raw: map[string]any{"type": "response.failed", "response": map[string]any{"id": "resp_x", "status": "failed"}, "error": map[string]any{"code": "context_length_exceeded", "message": "too long"}}},
+			wantEvent: "response.failed",
+			wantCode:  "context_length_exceeded",
+		},
+		"type only on the SSE event line": {
+			failure:   &turn.StreamEvent{Type: "response.failed", Raw: map[string]any{"sequence_number": 7, "response": map[string]any{"id": "resp_x", "model": "gpt-5.6-terra", "error": map[string]any{"code": "context_length_exceeded", "message": "too long"}}}},
+			wantEvent: "response.failed",
+			wantCode:  "context_length_exceeded",
+		},
+		"codeless 403 keeps the retryable error event": {
+			failure:   &turn.StreamEvent{Type: "error", Raw: map[string]any{"type": "error", "status": 403, "message": "forbidden"}},
+			wantEvent: "error",
+		},
+		"error type without a code keeps the retryable error event": {
+			failure:   &turn.StreamEvent{Type: "error", Raw: map[string]any{"type": "error", "error": map[string]any{"type": "invalid_request_error", "code": nil, "message": "bad request"}}},
+			wantEvent: "error",
+		},
+		"explicit top-level code wins over the error type": {
+			failure:   &turn.StreamEvent{Type: "error", Raw: map[string]any{"type": "error", "code": "context_length_exceeded", "error": map[string]any{"type": "invalid_request_error", "code": nil, "message": "too long"}}},
+			wantEvent: "response.failed",
+			wantCode:  "context_length_exceeded",
+		},
+		"Codex's other error fields are kept": {
+			failure:   &turn.StreamEvent{Type: "response.failed", Raw: map[string]any{"type": "response.failed", "response": map[string]any{"id": "resp_x", "status": "failed", "error": map[string]any{"code": "usage_limit_reached", "message": "limit", "resets_in_seconds": 30}}}},
+			wantEvent: "response.failed",
+			wantCode:  "usage_limit_reached",
+			wantReset: float64(30),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			app := newFailoverTestApp(t)
+			stream := &fakeEventStream{events: []*turn.StreamEvent{
+				{Type: "response.created", Raw: map[string]any{"sequence_number": 6, "response": map[string]any{"id": "resp_x", "status": "in_progress"}}},
+				test.failure,
+			}}
+			app.streamResponses(ctx, mustGetAccount(t, app.accounts, "acct-a"), turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.6-terra", Stream: true}}, stream)
+
+			events := parseSSEEvents(t, recorder.Body.String())
+			last := events[len(events)-1]
+			if last.Event != test.wantEvent {
+				t.Fatalf("last event = %#v, want %s", last, test.wantEvent)
+			}
+			if test.wantCode != "" && nestedMapFromAny(nestedMapFromAny(last.Data["response"])["error"])["code"] != test.wantCode {
+				t.Fatalf("last event = %#v, want code %s", last, test.wantCode)
+			}
+			if test.wantReset != nil && nestedMapFromAny(nestedMapFromAny(last.Data["response"])["error"])["resets_in_seconds"] != test.wantReset {
+				t.Fatalf("last event = %#v, want resets_in_seconds %v", last, test.wantReset)
+			}
+			if model := nestedMapFromAny(test.failure.Raw["response"])["model"]; model != nil && (last.Data["sequence_number"] != float64(7) || nestedMapFromAny(last.Data["response"])["model"] != model) {
+				t.Fatalf("last event = %#v, want Codex's event passed through", last)
+			}
+		})
+	}
+}
+
+func TestResponsesStreamReportsFirstEventFailureAsSSE(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	app := newFailoverTestApp(t)
+	app.httpStream = func(context.Context, accounts.Record, turn.Request, string) (eventStream, error) {
+		return &fakeEventStream{events: []*turn.StreamEvent{{Type: "response.failed", Raw: map[string]any{"type": "response.failed", "response": map[string]any{
+			"id": "resp_first", "status": "failed", "error": map[string]any{"code": "context_length_exceeded", "message": "too long"},
+		}}}}}, nil
+	}
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-terra","input":"hi","stream":true}`))
+	app.handleResponses(ctx)
+
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "event: response.failed") || !strings.Contains(recorder.Body.String(), "context_length_exceeded") {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 }

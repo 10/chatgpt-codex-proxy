@@ -19,6 +19,10 @@ type UpstreamError struct {
 	Body       string
 	Code       string
 	RetryAfter int
+	// Event is the stream event that failed the turn, when there was one.
+	Event map[string]any
+
+	message string
 }
 
 func (e *UpstreamError) Error() string {
@@ -42,6 +46,9 @@ func (e *UpstreamError) Message() string {
 	if e == nil {
 		return ""
 	}
+	if e.message != "" {
+		return e.message
+	}
 	if body := strings.TrimSpace(e.Body); body != "" {
 		return body
 	}
@@ -57,19 +64,19 @@ func NewUpstreamError(op string, statusCode int, body string, headers http.Heade
 		StatusCode: statusCode,
 		Body:       strings.TrimSpace(body),
 	}
-	err.Code, err.RetryAfter = parseUpstreamErrorBody(err.Body)
+	err.Code, err.message, err.RetryAfter = parseUpstreamErrorBody(err.Body)
 	err.RetryAfter = max(err.RetryAfter, parseRetryAfterHeaders(headers))
 	return err
 }
 
-func parseUpstreamErrorBody(body string) (string, int) {
+func parseUpstreamErrorBody(body string) (string, string, int) {
 	if strings.TrimSpace(body) == "" {
-		return "", 0
+		return "", "", 0
 	}
 
 	var payload upstreamErrorEnvelope
 	if err := json.Unmarshal([]byte(body), &payload); err != nil {
-		return "", 0
+		return "", "", 0
 	}
 
 	nested := upstreamErrorFields{}
@@ -87,7 +94,11 @@ func parseUpstreamErrorBody(body string) (string, int) {
 		nested.ResetsAt = payload.ResetsAt
 	}
 
-	return strings.TrimSpace(nested.Code), retryAfterSeconds(nested.ResetsInSeconds, nested.RetryAfter, nested.ResetsAt)
+	var message, detail string
+	_ = json.Unmarshal(nested.Message, &message)
+	_ = json.Unmarshal(payload.Detail, &detail)
+	message = strings.TrimSpace(cmp.Or(message, detail))
+	return strings.TrimSpace(nested.Code), message, retryAfterSeconds(nested.ResetsInSeconds, nested.RetryAfter, nested.ResetsAt)
 }
 
 func retryAfterSeconds(resetsInSeconds, retryAfter, resetsAt any) int {
@@ -122,6 +133,7 @@ func parseRetryAfterHeaders(headers http.Header) int {
 type upstreamErrorEnvelope struct {
 	Error           *upstreamErrorFields `json:"error"`
 	Code            string               `json:"code"`
+	Detail          json.RawMessage      `json:"detail"`
 	ResetsInSeconds json.RawMessage      `json:"resets_in_seconds"`
 	RetryAfter      json.RawMessage      `json:"retry_after"`
 	ResetsAt        json.RawMessage      `json:"resets_at"`
@@ -129,6 +141,7 @@ type upstreamErrorEnvelope struct {
 
 type upstreamErrorFields struct {
 	Code            string          `json:"code"`
+	Message         json.RawMessage `json:"message"`
 	ResetsInSeconds json.RawMessage `json:"resets_in_seconds"`
 	RetryAfter      json.RawMessage `json:"retry_after"`
 	ResetsAt        json.RawMessage `json:"resets_at"`
@@ -153,7 +166,7 @@ func IsInvalidReasoningSignatureError(err error) bool {
 		return false
 	}
 	code := strings.ToLower(strings.TrimSpace(upstreamErr.Code))
-	message := strings.ToLower(strings.TrimSpace(upstreamErr.Message()))
+	message := strings.ToLower(upstreamErr.Message() + " " + upstreamErr.Body)
 	return code == "thinking_signature_invalid" ||
 		strings.Contains(code, "invalid_encrypted_content") ||
 		strings.Contains(message, "invalid signature in thinking block") ||

@@ -21,6 +21,7 @@ type ReasoningPart struct {
 type Reasoning struct {
 	Effort  string `json:"effort,omitempty"`
 	Summary string `json:"summary,omitempty"`
+	Context string `json:"context,omitempty"`
 }
 
 type TextFormat struct {

@@ -1,8 +1,10 @@
 package server
 
 import (
+	"cmp"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -46,7 +48,7 @@ func (a *App) classifyUpstreamError(accountID string, err error) (int, string, s
 			a.setAccountCooldown(accountID, a.rateLimitCooldownUntil(accountID, err, time.Now().UTC()), err)
 			return http.StatusTooManyRequests, "rate_limited", "upstream account rate limited"
 		}
-		return clampUpstreamStatus(upstreamErr.StatusCode), "upstream_error", upstreamErr.Message()
+		return clampUpstreamStatus(upstreamErr.StatusCode), cmp.Or(upstreamErr.Code, "upstream_error"), upstreamErr.Message()
 	}
 	return http.StatusBadGateway, "upstream_error", err.Error()
 }
@@ -186,7 +188,11 @@ func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID
 	middleware.SetRequestError(c, code, message)
 	middleware.SetRequestResponseID(c, responseID)
 	if endpoint == "responses" {
-		writeResponsesStreamError(c.Writer, status, message)
+		if event := responsesFailedEvent(err, responseID, message); classify && event != nil {
+			writeSSE(c.Writer, "response.failed", event)
+		} else {
+			writeResponsesStreamError(c.Writer, status, message)
+		}
 		c.Writer.Flush()
 		return
 	}
@@ -194,7 +200,68 @@ func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID
 	c.Writer.Flush()
 }
 
+// Codex CLI reads a failed turn's code (such as context_length_exceeded) only
+// from response.failed; an error event reaches it as a dropped stream, which
+// it retries, or on a WebSocket as a failed connection. Codex's own
+// response.failed is passed through with the classified message; other Codex
+// failures become one only when they carry an explicit code. It returns nil
+// otherwise.
+func responsesFailedEvent(err error, responseID, message string) []byte {
+	var upstreamErr *codex.UpstreamError
+	if !errors.As(err, &upstreamErr) || upstreamErr.Event == nil {
+		return nil
+	}
+	response, _ := upstreamErr.Event["response"].(map[string]any)
+	failure, _ := response["error"].(map[string]any)
+	if failure == nil {
+		failure, _ = upstreamErr.Event["error"].(map[string]any)
+	}
+	explicitCode := jsonutil.FirstNonEmpty(jsonutil.StringValue(failure["code"]), jsonutil.StringValue(upstreamErr.Event["code"]))
+	failure = maps.Clone(failure)
+	if failure == nil {
+		failure = map[string]any{}
+	}
+	failure["code"] = cmp.Or(explicitCode, upstreamErr.Code)
+	failure["message"] = strings.TrimSpace(message)
+	if upstreamErr.Event["type"] == "response.failed" {
+		event := maps.Clone(upstreamErr.Event)
+		response = maps.Clone(response)
+		if response == nil {
+			response = map[string]any{}
+		}
+		response["error"] = failure
+		event["response"] = response
+		return responseEventJSON("response.failed", responseID, event)
+	}
+	if strings.TrimSpace(explicitCode) == "" {
+		return nil
+	}
+	sequence := any(0)
+	if value, ok := upstreamErr.Event["sequence_number"]; ok {
+		sequence = value
+	}
+	return mustJSON(map[string]any{
+		"type":            "response.failed",
+		"sequence_number": sequence,
+		"response": map[string]any{
+			"id":     responseID,
+			"object": "response",
+			"status": "failed",
+			"error":  failure,
+		},
+	})
+}
+
 func writeResponsesStreamError(writer io.Writer, status int, message string) {
+	writeSSE(writer, "error", mustJSON(map[string]any{
+		"type":            "error",
+		"code":            responsesErrorCode(status),
+		"message":         strings.TrimSpace(message),
+		"sequence_number": 0,
+	}))
+}
+
+func responsesErrorCode(status int) string {
 	code := "unknown_error"
 	switch status {
 	case http.StatusUnauthorized:
@@ -214,10 +281,5 @@ func writeResponsesStreamError(writer io.Writer, status int, message string) {
 			code = "invalid_request_error"
 		}
 	}
-	writeSSE(writer, "error", mustJSON(map[string]any{
-		"type":            "error",
-		"code":            code,
-		"message":         strings.TrimSpace(message),
-		"sequence_number": 0,
-	}))
+	return code
 }

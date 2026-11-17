@@ -188,6 +188,7 @@ func StreamRequestPayload(req turn.Request) turn.Request {
 	bodyReq.Stream = true
 	bodyReq.Store = false
 	bodyReq.PreviousResponseID = ""
+	bodyReq.Input = inputList(bodyReq.Input)
 	return bodyReq
 }
 

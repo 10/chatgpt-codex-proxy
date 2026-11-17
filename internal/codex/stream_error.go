@@ -2,6 +2,7 @@ package codex
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -46,7 +47,6 @@ func extractUpstreamEventDetails(event *turn.StreamEvent) *UpstreamError {
 		jsonutil.StringValue(nested["code"]),
 		jsonutil.StringValue(nested["type"]),
 		jsonutil.StringValue(event.Raw["code"]),
-		jsonutil.StringValue(event.Raw["type"]),
 	)
 	statusCode := 0
 	for _, value := range []any{nested["status_code"], nested["status"], event.Raw["status_code"], event.Raw["status"]} {
@@ -65,6 +65,7 @@ func extractUpstreamEventDetails(event *turn.StreamEvent) *UpstreamError {
 		Body:       message,
 		Code:       code,
 		RetryAfter: firstRetryAfterSeconds(nested, event.Raw),
+		Event:      eventWithType(event),
 	}
 }
 
@@ -100,4 +101,13 @@ func firstRetryAfterSeconds(values ...map[string]any) int {
 		}
 	}
 	return 0
+}
+
+// SSE can name the event only on its event: line, so record that type too.
+func eventWithType(event *turn.StreamEvent) map[string]any {
+	raw := maps.Clone(event.Raw)
+	if _, ok := raw["type"]; !ok {
+		raw["type"] = event.Type
+	}
+	return raw
 }

@@ -147,6 +147,40 @@ func TestResponsesWebSocketContinuesAfterIncompleteResponse(t *testing.T) {
 	}
 }
 
+func TestResponsesWebSocketSendsCodexFailureAsResponseFailed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	fakeStream := &fakeResponsesWebSocketStream{
+		turns: [][]*turn.StreamEvent{{
+			{Type: "response.created", Raw: map[string]any{"response": map[string]any{"id": "resp_ws_overflow", "status": "in_progress"}}},
+			{Type: "error", Raw: map[string]any{"type": "error", "error": map[string]any{
+				"code": "context_length_exceeded", "message": "Your input exceeds the context window of this model.",
+			}}},
+		}},
+	}
+	app := newResponsesWebSocketTestApp(t, fakeStream)
+	server := httptest.NewServer(app.Handler())
+	defer server.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(websocketTestURL(server.URL)+"/v1/responses", http.Header{
+		"Authorization": []string{"Bearer test-key"},
+	})
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{"type": "response.create", "model": "gpt-5.6-terra", "input": "long prompt"}); err != nil {
+		t.Fatalf("WriteJSON() error = %v", err)
+	}
+	events := readResponsesWebSocketTurn(t, conn)
+	last := events[len(events)-1]
+	failure := nestedMapFromAny(nestedMapFromAny(last["response"])["error"])
+	if last["type"] != "response.failed" || failure["code"] != "context_length_exceeded" {
+		t.Fatalf("last event = %#v", last)
+	}
+}
+
 func TestResponsesWebSocketReturnsProtocolErrorsWithoutClosing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -185,6 +219,36 @@ func TestResponsesWebSocketReturnsProtocolErrorsWithoutClosing(t *testing.T) {
 	}
 	events := readResponsesWebSocketTurn(t, conn)
 	assertResponsesWebSocketEventTypes(t, events, "response.created", "response.output_text.delta", "response.completed")
+}
+
+func TestResponsesWebSocketSendsCodexWarmupInputAsEmptyList(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	fakeStream := &fakeResponsesWebSocketStream{
+		turns: [][]*turn.StreamEvent{responsesWebSocketTextEvents("resp_ws_warmup", "gpt-5.6-terra", "")},
+	}
+	app := newResponsesWebSocketTestApp(t, fakeStream)
+	server := httptest.NewServer(app.Handler())
+	defer server.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(websocketTestURL(server.URL)+"/v1/responses", http.Header{
+		"Authorization": []string{"Bearer test-key"},
+	})
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{"type": "response.create", "model": "gpt-5.6-terra", "generate": false, "input": []any{}}); err != nil {
+		t.Fatalf("WriteJSON() error = %v", err)
+	}
+	readResponsesWebSocketTurn(t, conn)
+
+	fakeStream.mu.Lock()
+	defer fakeStream.mu.Unlock()
+	if input, ok := fakeStream.requests[0]["input"].([]any); !ok || len(input) != 0 {
+		t.Fatalf("upstream input = %#v, want []", fakeStream.requests[0]["input"])
+	}
 }
 
 func TestNormalizeResponsesWebSocketMessagePreservesGenerateAndIgnoresStream(t *testing.T) {
@@ -287,7 +351,7 @@ func readResponsesWebSocketTurn(t *testing.T, conn *websocket.Conn) []map[string
 			t.Fatalf("ReadJSON() error = %v", err)
 		}
 		events = append(events, event)
-		if event["type"] == "response.completed" || event["type"] == "response.incomplete" || event["type"] == "error" {
+		if event["type"] == "response.completed" || event["type"] == "response.incomplete" || event["type"] == "response.failed" || event["type"] == "error" {
 			return events
 		}
 	}

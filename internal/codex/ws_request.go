@@ -6,7 +6,7 @@ func WSCreatePayload(r turn.NormalizedRequest) map[string]any {
 	payload := map[string]any{
 		"type":         "response.create",
 		"model":        r.Model,
-		"input":        r.Input,
+		"input":        inputList(r.Input),
 		"instructions": r.Instructions,
 	}
 	if len(r.Tools) > 0 {
@@ -40,4 +40,12 @@ func WSCreatePayload(r turn.NormalizedRequest) map[string]any {
 		payload["generate"] = *r.Generate
 	}
 	return payload
+}
+
+// Codex rejects `"input": null`; Codex CLI's generate=false warm-up sends `[]`.
+func inputList(input []turn.InputItem) []turn.InputItem {
+	if input == nil {
+		return []turn.InputItem{}
+	}
+	return input
 }
