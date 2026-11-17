@@ -37,10 +37,21 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (turn.Normalize
 	}
 
 	toolNames := turn.NewToolNames(requestToolNames(request))
-	loadedTools := loadedTools(request)
-	tools, err := normalizeTools(loadedTools, toolNames)
+	declaredTools, err := normalizeTools(request.Tools, toolNames)
 	if err != nil {
 		return turn.NormalizedRequest{}, err
+	}
+	loaded := loadedToolNames(request)
+	var tools []turn.ToolDefinition
+	var loadedTools []Tool
+	for index, tool := range request.Tools {
+		if !tool.DeferLoading || loaded[strings.TrimSpace(tool.Name)] {
+			tools = append(tools, declaredTools[index])
+			loadedTools = append(loadedTools, tool)
+		}
+	}
+	if request.ToolChoice != nil && strings.TrimSpace(request.ToolChoice.Type) == "any" && len(tools) == 0 {
+		return turn.NormalizedRequest{}, errors.New("tool_choice any requires at least one loaded tool")
 	}
 	toolChoice, parallelToolCalls, err := normalizeToolChoice(request.ToolChoice, toolNames, loadedTools)
 	if err != nil {
@@ -505,32 +516,28 @@ func normalizeServiceTier(raw string) (string, error) {
 }
 
 // A defer_loading tool stays hidden from the model until a tool_reference
-// block in a tool result loads it, as with Anthropic tool search, or
-// tool_choice names it.
-func loadedTools(request MessagesRequest) []Tool {
-	referenced := make(map[string]bool)
+// block in a tool result loads it, as with Anthropic tool search. A tool that
+// tool_choice names, or that the model has already called, is loaded too.
+func loadedToolNames(request MessagesRequest) map[string]bool {
+	loaded := make(map[string]bool)
 	if request.ToolChoice != nil {
-		referenced[strings.TrimSpace(request.ToolChoice.Name)] = true
+		loaded[strings.TrimSpace(request.ToolChoice.Name)] = true
 	}
 	for _, message := range request.Messages {
 		for _, block := range message.Content {
-			if block.Type != "tool_result" {
-				continue
-			}
-			for _, nested := range block.Content {
-				if nested.Type == "tool_reference" {
-					referenced[strings.TrimSpace(nested.ToolName)] = true
+			switch block.Type {
+			case "tool_use":
+				loaded[strings.TrimSpace(block.Name)] = true
+			case "tool_result":
+				for _, nested := range block.Content {
+					if nested.Type == "tool_reference" {
+						loaded[strings.TrimSpace(nested.ToolName)] = true
+					}
 				}
 			}
 		}
 	}
-	tools := make([]Tool, 0, len(request.Tools))
-	for _, tool := range request.Tools {
-		if !tool.DeferLoading || referenced[strings.TrimSpace(tool.Name)] {
-			tools = append(tools, tool)
-		}
-	}
-	return tools
+	return loaded
 }
 
 func requestToolNames(request MessagesRequest) []string {

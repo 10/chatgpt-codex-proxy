@@ -333,6 +333,14 @@ func TestNormalizeMessagesLoadsDeferredToolsFromToolReferences(t *testing.T) {
 		extra     string
 		wantTools []string
 	}{
+		"loaded by an earlier call": {
+			messages: `[
+				{"role":"user","content":"Edit nb.ipynb"},
+				{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"NotebookEdit","input":{}}]},
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"done"}]}
+			]`,
+			wantTools: []string{"Read", "ToolSearch", "NotebookEdit"},
+		},
 		"forced by tool_choice": {
 			messages:  `[{"role":"user","content":"Edit nb.ipynb"}]`,
 			extra:     `,"tool_choice":{"type":"tool","name":"NotebookEdit"}`,
@@ -372,6 +380,36 @@ func TestNormalizeMessagesLoadsDeferredToolsFromToolReferences(t *testing.T) {
 			last := normalized.Input[len(normalized.Input)-1]
 			if name == "after search" && (last.Type != "function_call_output" || last.OutputText != "Tool loaded: NotebookEdit") {
 				t.Fatalf("tool search output = %#v", last)
+			}
+		})
+	}
+}
+
+func TestNormalizeMessagesValidatesDeferredTools(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		body    string
+		wantErr string
+	}{
+		"unloaded hosted search with zero max_uses": {
+			`"tools":[{"type":"web_search_20250305","name":"web_search","max_uses":0,"defer_loading":true}]`,
+			"max_uses must be greater than 0",
+		},
+		"tool_choice any with nothing loaded": {
+			`"tools":[{"name":"NotebookEdit","input_schema":{"type":"object","properties":{}},"defer_loading":true}],"tool_choice":{"type":"any"}`,
+			"tool_choice any requires at least one loaded tool",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			request, err := DecodeMessages([]byte(`{"model":"gpt-5.6-terra","max_tokens":10,"messages":[{"role":"user","content":"hi"}],` + test.body + `}`))
+			if err != nil {
+				t.Fatalf("DecodeMessages() error = %v", err)
+			}
+			if _, err := Normalize(request, models.NewCatalog(models.BootstrapEntries())); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("Normalize() error = %v, want %q", err, test.wantErr)
 			}
 		})
 	}
