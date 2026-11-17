@@ -154,7 +154,7 @@ Model normalization does not rewrite user-supplied model IDs.
 
 The bootstrap catalog includes `gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`,
 `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
-GPT-6.2 Sol, GPT-6.2 Astra, GPT-6.1 Sol, Astra, GPT-6.1 Terra, and GPT-5.6 Sol advertise a
+GPT-6.2 Sol, GPT-6.2 Astra, GPT-6.1 Sol, GPT-6 Astra, GPT-6.1 Terra, and GPT-5.6 Sol advertise a
 `low` default reasoning level; the proxy's default model is GPT-6.2 Sol. GPT-6.2 Sol,
 GPT-6.2 Astra, GPT-6.1 Sol, and GPT-6.1 Terra accept the Codex effort levels `low`,
 `medium`, `high`, `xhigh`, `max`, and `ultra`.
