@@ -187,9 +187,8 @@ func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID
 	middleware.SetRequestError(c, code, message)
 	middleware.SetRequestResponseID(c, responseID)
 	if endpoint == "responses" {
-		var upstreamErr *codex.UpstreamError
-		if classify && errors.As(err, &upstreamErr) {
-			writeResponsesFailed(c.Writer, responseID, cmp.Or(strings.TrimSpace(upstreamErr.Code), responsesErrorCode(status)), message)
+		if classify {
+			writeSSE(c.Writer, "response.failed", responsesFailedEvent(err, responseID, status, message))
 		} else {
 			writeResponsesStreamError(c.Writer, status, message)
 		}
@@ -201,9 +200,19 @@ func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID
 }
 
 // Codex CLI reads a failed turn's code (such as context_length_exceeded) only
-// from response.failed; an error event reaches it as a dropped stream.
-func writeResponsesFailed(writer io.Writer, responseID, code, message string) {
-	writeSSE(writer, "response.failed", mustJSON(map[string]any{
+// from response.failed; an error event reaches it as a dropped stream or, on
+// a WebSocket, as a failed connection. Codex's own response.failed is passed
+// through whole.
+func responsesFailedEvent(err error, responseID string, status int, message string) []byte {
+	var upstreamErr *codex.UpstreamError
+	if errors.As(err, &upstreamErr) && upstreamErr.Event["type"] == "response.failed" {
+		return responseEventJSON("response.failed", responseID, upstreamErr.Event)
+	}
+	code := responsesErrorCode(status)
+	if upstreamErr != nil {
+		code = cmp.Or(strings.TrimSpace(upstreamErr.Code), code)
+	}
+	return mustJSON(map[string]any{
 		"type":            "response.failed",
 		"sequence_number": 0,
 		"response": map[string]any{
@@ -212,7 +221,7 @@ func writeResponsesFailed(writer io.Writer, responseID, code, message string) {
 			"status": "failed",
 			"error":  map[string]any{"code": code, "message": strings.TrimSpace(message)},
 		},
-	}))
+	})
 }
 
 func writeResponsesStreamError(writer io.Writer, status int, message string) {

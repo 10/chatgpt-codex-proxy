@@ -203,6 +203,9 @@ func (a *App) handleResponsesWebSocketTurn(c *gin.Context, conn *websocket.Conn,
 			middleware.SetRequestOutcome(c, "upstream_error")
 			middleware.SetRequestError(c, code, message)
 			middleware.SetRequestResponseID(c, accumulator.ResponseID)
+			if upstreamErr {
+				return conn.WriteMessage(websocket.TextMessage, responsesFailedEvent(err, accumulator.ResponseID, status, message)) == nil
+			}
 			return writeResponsesWebSocketError(conn, status, code, message, "api_error", "")
 		}
 

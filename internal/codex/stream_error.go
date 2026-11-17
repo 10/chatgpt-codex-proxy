@@ -46,7 +46,6 @@ func extractUpstreamEventDetails(event *turn.StreamEvent) *UpstreamError {
 		jsonutil.StringValue(nested["code"]),
 		jsonutil.StringValue(nested["type"]),
 		jsonutil.StringValue(event.Raw["code"]),
-		jsonutil.StringValue(event.Raw["type"]),
 	)
 	statusCode := 0
 	for _, value := range []any{nested["status_code"], nested["status"], event.Raw["status_code"], event.Raw["status"]} {
@@ -65,6 +64,7 @@ func extractUpstreamEventDetails(event *turn.StreamEvent) *UpstreamError {
 		Body:       message,
 		Code:       code,
 		RetryAfter: firstRetryAfterSeconds(nested, event.Raw),
+		Event:      event.Raw,
 	}
 }
 

@@ -654,7 +654,7 @@ Upstream failures are classified into OpenAI-style proxy errors:
 
 The message is the upstream `error.message` (or `detail`) when the body has one, otherwise the raw body.
 
-During streaming, classified errors are sent as SSE error payloads instead of raw upstream error objects. Responses streams send a Codex failure as `response.failed` with Codex's own error code (such as `context_length_exceeded`), which Codex CLI needs to report it, and proxy-side failures as top-level `{type, code, message, sequence_number}` error events; Chat and legacy Completions retain the OpenAI error wrapper.
+During streaming, classified errors are sent as SSE error payloads instead of raw upstream error objects. Responses streams and the Responses WebSocket send a Codex failure as `response.failed`, passing Codex's own event through when it sent one, so its error code (such as `context_length_exceeded`) reaches Codex CLI; proxy-side failures as top-level `{type, code, message, sequence_number}` error events; Chat and legacy Completions retain the OpenAI error wrapper.
 
 For requests without explicit continuation state, retryable upstream failures (`401`, `402`, `403`, `408`, `429`, and transient `5xx` statuses) fail over to another eligible account before client-visible output begins. Each account is attempted at most once. Non-streaming responses remain retryable until the full upstream response has been buffered; streaming responses stop being retryable after the first public event is ready for delivery.
 
