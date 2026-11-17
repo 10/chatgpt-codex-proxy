@@ -37,7 +37,7 @@ Built for local and small-scale use.
 
 ## Quick Start
 
-Needs Docker or Go `1.26.11` or later, and a long random `PROXY_API_KEY`.
+Needs Docker or Go `1.26.11`+ (or `1.27.4`+ on Go 1.27), and a long random `PROXY_API_KEY`.
 
 ```bash
 export PROXY_URL=http://localhost:8080
