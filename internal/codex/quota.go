@@ -120,6 +120,9 @@ func parseRateWindow(headers http.Header, prefix string) *accounts.RateLimitWind
 			window.LimitWindowSeconds = &seconds
 		}
 	}
+	if pct == 0 && window.ResetAt == nil && (window.LimitWindowSeconds == nil || *window.LimitWindowSeconds == 0) {
+		return nil
+	}
 	return window
 }
 
