@@ -402,6 +402,8 @@ When possible, the proxy derives a stable `prompt_cache_key` from:
 
 The conversation prefix stops at the last assistant or tool-call item. Explicit client values are preserved; this derivation is used only when `prompt_cache_key` is omitted.
 
+Upstream requests also carry a `session-id` header, which Codex needs before it serves cached tokens. It hashes the model, instructions, and the input items before the first model output, so it stays the same on every turn of a conversation.
+
 ## Upstream Transport Translation
 
 Chat Completions and Responses requests consume an upstream stream even when the public request is non-streaming. Native Images requests use the matching JSON or SSE mode. Responses compact also consumes an upstream stream and returns a JSON compaction object.

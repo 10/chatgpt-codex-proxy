@@ -35,6 +35,9 @@ func TestResponseTransportsPreserveRequestAndEventSemantics(t *testing.T) {
 						t.Errorf("%s = %q, want %q", name, got, want)
 					}
 				}
+				if got := r.Header.Get("Session-Id"); len(got) != 36 {
+					t.Errorf("Session-Id = %q, want a conversation id", got)
+				}
 				for _, name := range []string{"User-Agent", "X-Client-Request-Id", "OpenAI-Beta"} {
 					if r.Header.Get(name) == "" {
 						t.Errorf("missing %s", name)
@@ -136,5 +139,69 @@ func TestResponseTransportsPreserveRequestAndEventSemantics(t *testing.T) {
 				t.Fatalf("accepted multiple JSON values as one event: %#v", event)
 			}
 		})
+	}
+}
+
+func TestStreamResponseKeepsOneSessionIDPerConversation(t *testing.T) {
+	t.Parallel()
+	sessionIDs := make(chan string, 3)
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessionIDs <- r.Header.Get("Session-Id")
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\"}}\n\n")
+	}))
+	upstream.EnableHTTP2 = true
+	upstream.StartTLS()
+	defer upstream.Close()
+	client := NewHTTPClient(config.Config{CodexBaseURL: upstream.URL, RequestTimeout: 3 * time.Second})
+	defer client.Close()
+	client.sessions["account"] = httpcloak.NewSession(chromiumPreset, httpcloak.WithTimeout(3*time.Second), httpcloak.WithDisableHTTP3(), httpcloak.WithoutRetry(), httpcloak.WithInsecureSkipVerify())
+
+	message := func(role, text string) turn.InputItem {
+		return turn.InputItem{Role: role, Content: []turn.ContentPart{{Type: "input_text", Text: text}}}
+	}
+	firstTurn := []turn.InputItem{message("developer", "Be brief."), message("user", "Plan a trip")}
+	secondTurn := append(append([]turn.InputItem(nil), firstTurn...), message("assistant", "Where to?"), message("user", "Lisbon"))
+	otherChat := []turn.InputItem{message("developer", "Be brief."), message("user", "Fix my bike")}
+	for _, input := range [][]turn.InputItem{firstTurn, secondTurn, otherChat} {
+		stream, err := client.StreamResponse(context.Background(), accounts.Record{ID: "account"}, turn.Request{Model: "gpt-6.1-sol", Input: input}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream.Close()
+	}
+
+	first, second, other := <-sessionIDs, <-sessionIDs, <-sessionIDs
+	if first == "" || first != second || first == other {
+		t.Fatalf("session ids = %q, %q, %q; want one per conversation", first, second, other)
+	}
+}
+
+func TestResponsesWebSocketWarmupSendsSessionID(t *testing.T) {
+	t.Parallel()
+	sessionIDs := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessionIDs <- r.Header.Get("Session-Id")
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		conn.Close()
+	}))
+	defer upstream.Close()
+	client := NewHTTPClient(config.Config{CodexBaseURL: upstream.URL, RequestTimeout: 3 * time.Second})
+	defer client.Close()
+
+	generate := false
+	stream, err := client.ConnectResponsesWS(context.Background(), accounts.Record{ID: "account"}, turn.NormalizedRequest{
+		Request: turn.Request{Model: "gpt-6.1-sol", PromptCacheKey: "codex-cli-session"}, Generate: &generate,
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream.Close()
+	if got := <-sessionIDs; len(got) != 36 {
+		t.Fatalf("warm-up Session-Id = %q, want one from prompt_cache_key", got)
 	}
 }

@@ -23,6 +23,7 @@ func (c *HTTPClient) ConnectResponsesWS(ctx context.Context, record accounts.Rec
 		AccountID:   record.AccountID,
 		Cookies:     record.Cookies,
 		TurnState:   turnState,
+		SessionID:   sessionID(req.Request),
 		RequestID:   newRequestID(),
 		IncludeBeta: true,
 	})

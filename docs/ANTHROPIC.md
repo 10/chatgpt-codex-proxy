@@ -84,6 +84,6 @@ The result is a Codex-oriented estimate. It is not an Anthropic billing-token gu
 - Document `citations` are accepted, but Codex does not return citation blocks.
 - Hosted-search `max_uses` must be positive and is advisory, so Claude Code's WebSearch tool works; Codex cannot cap searches per request. `blocked_domains` is rejected because Codex cannot enforce it. Use `allowed_domains` for domain filtering.
 - `thinking.budget_tokens` maps to a discrete Codex reasoning effort, not an exact token cap. A zero or omitted budget uses the model catalog's default reasoning effort.
-- Prompt caching controls are accepted as content metadata. Reported cache-read usage comes from Codex cached-token counters when available.
+- Prompt caching controls are accepted as content metadata. Codex caches automatically per conversation; reported cache-read usage comes from Codex cached-token counters when available.
 - Anthropic client-side tools and hosted web search are supported. Other Anthropic server-tool families are rejected until their state can be round-tripped faithfully through Codex.
 - Claude Code replay sessions share the proxy's single configured API-key trust boundary. Do not share one proxy key between mutually untrusted users.
