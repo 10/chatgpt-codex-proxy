@@ -66,6 +66,8 @@ Streaming responses use named Anthropic SSE events:
 5. `message_delta`
 6. `message_stop`
 
+`message_start` reports a local input-token estimate; the final `message_delta` carries Codex's input, cache-read, and output token counts.
+
 Text uses `text_delta`, thinking uses `thinking_delta` and `signature_delta`, and tool input uses `input_json_delta`. Hosted search emits paired `server_tool_use` and `web_search_tool_result` blocks. The proxy does not emit an OpenAI `[DONE]` sentinel.
 
 If a request fails before streaming begins, the endpoint returns a normal JSON error and HTTP status. A failure after SSE headers have been committed is emitted as an `event: error` frame and is not followed by `message_stop`.

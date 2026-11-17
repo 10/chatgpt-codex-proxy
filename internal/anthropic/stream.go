@@ -136,12 +136,22 @@ func (e *StreamEncoder) Events(event *turn.StreamEvent, accumulator *turn.Accumu
 					"stop_reason":   stopReason,
 					"stop_sequence": nullableString(stopSequence),
 				},
-				"usage": map[string]any{"output_tokens": usageFromAccumulator(accumulator).OutputTokens},
+				"usage": deltaUsage(accumulator),
 			},
 			StreamEvent{"type": "message_stop"},
 		)
 	}
 	return result
+}
+
+// message_start can only estimate input tokens; the final delta carries Codex's
+// counts, which Anthropic SDKs merge into the message usage.
+func deltaUsage(accumulator *turn.Accumulator) any {
+	usage := usageFromAccumulator(accumulator)
+	if accumulator.Usage == nil {
+		return map[string]any{"output_tokens": usage.OutputTokens}
+	}
+	return usage
 }
 
 func (e *StreamEncoder) ensureStarted(accumulator *turn.Accumulator) []StreamEvent {
