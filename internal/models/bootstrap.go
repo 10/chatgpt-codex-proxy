@@ -9,9 +9,18 @@ var bootstrapReasoningEfforts = []ReasoningEffort{
 
 // Codex limits differ from the public API. Source: openai/codex rust-v0.166.0,
 // codex-rs/models-manager/models.json, without gpt-5.5, which Codex retired on
-// 2026-10-14. Fetched account metadata takes precedence.
+// 2026-10-14. No bundled catalog lists GPT-6.2 yet, so its entries follow the
+// live Codex catalog of 2026-11-17. Fetched account metadata takes precedence.
 var bootstrapEntries = []Entry{
-	bootstrapEntry("gpt-6.1-sol", true, "low", 272000, 872000,
+	bootstrapEntry("gpt-6.2-sol", true, "low", 500000, 872000,
+		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
+		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
+	),
+	bootstrapEntry("gpt-6.2-astra", false, "low", 272000, 872000,
+		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
+		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
+	),
+	bootstrapEntry("gpt-6.1-sol", false, "low", 272000, 872000,
 		ReasoningEffort{ReasoningEffort: "max", Description: "Maximum reasoning depth for the hardest problems"},
 		ReasoningEffort{ReasoningEffort: "ultra", Description: "Maximum reasoning with automatic task delegation"},
 	),

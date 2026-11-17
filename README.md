@@ -61,7 +61,7 @@ Then:
 curl -sS "${PROXY_URL}/v1/chat/completions" \
   -H "Authorization: Bearer ${PROXY_API_KEY}" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-6.1-sol","messages":[{"role":"user","content":"hello"}]}'
+  -d '{"model":"gpt-6.2-sol","messages":[{"role":"user","content":"hello"}]}'
 ```
 
 ## Clients
@@ -72,11 +72,11 @@ the API key. For Claude Code or another Anthropic client:
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8080
 export ANTHROPIC_API_KEY="${PROXY_API_KEY}"
-export ANTHROPIC_MODEL=gpt-6.1-sol
+export ANTHROPIC_MODEL=gpt-6.2-sol
 ```
 
-Use a model ID from `GET /v1/models`; the default is `gpt-6.1-sol`.
-The fallback catalog also includes `gpt-6.1-terra`, `gpt-6-astra`, and `gpt-6-luna`.
+Use a model ID from `GET /v1/models`; the default is `gpt-6.2-sol`.
+The fallback catalog also includes `gpt-6.2-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-astra`, and `gpt-6-luna`.
 Available models and their limits refresh from each account's upstream catalog.
 
 Every route except `GET /health/live` needs the key, as either
@@ -204,7 +204,7 @@ Live tests, against a proxy you already have running:
 
 ```bash
 OPENAI_API_KEY=change-me-to-a-long-random-string \
-OPENAI_MODEL=gpt-6.1-sol \
+OPENAI_MODEL=gpt-6.2-sol \
 OPENAI_BASE_URL="${PROXY_URL}/v1" \
 go test -tags=live ./test/integration -v -count=1
 ```

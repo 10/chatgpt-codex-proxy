@@ -152,12 +152,12 @@ Image options are passed through, not simulated locally. Live direct-endpoint te
 
 Model normalization does not rewrite user-supplied model IDs.
 
-The bootstrap catalog includes `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-astra`, `gpt-6-sol`,
-`gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. GPT-6.1 Sol,
-Astra, GPT-6.1 Terra, and GPT-5.6 Sol advertise a `low` default reasoning level; the proxy's
-default model is GPT-6.1 Sol. GPT-6.1 Sol and GPT-6.1 Terra
-accept the Codex effort levels `low`, `medium`, `high`, `xhigh`, `max`, and
-`ultra`.
+The bootstrap catalog includes `gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6.1-sol`, `gpt-6.1-terra`,
+`gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
+GPT-6.2 Sol, GPT-6.2 Astra, GPT-6.1 Sol, Astra, GPT-6.1 Terra, and GPT-5.6 Sol advertise a
+`low` default reasoning level; the proxy's default model is GPT-6.2 Sol. GPT-6.2 Sol,
+GPT-6.2 Astra, GPT-6.1 Sol, and GPT-6.1 Terra accept the Codex effort levels `low`,
+`medium`, `high`, `xhigh`, `max`, and `ultra`.
 
 Model discovery records access per account, including accounts on the same plan.
 Model limits and reasoning metadata from upstream are cached and returned to Codex
@@ -166,7 +166,10 @@ context limits are 272,000 by default and 872,000 maximum; these are Codex clien
 not the public API's advertised context size. GPT-6.1 Terra's bundled limits are
 500,000 by default and 872,000 maximum. These fallback values follow the
 [Codex CLI 0.166.0 catalog](https://github.com/openai/codex/blob/rust-v0.166.0/codex-rs/models-manager/models.json);
-fetched account metadata takes precedence, including newer context limits.
+fetched account metadata takes precedence, including newer context limits. No bundled
+Codex catalog lists GPT-6.2 yet, so its fallback limits follow the live Codex catalog:
+500,000 by default and 872,000 maximum for GPT-6.2 Sol, and 272,000 and 872,000 for
+GPT-6.2 Astra.
 
 - If a model is explicitly supplied, it must exist in the current model catalog.
 - If no model is supplied, normalization leaves it empty.

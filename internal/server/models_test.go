@@ -17,7 +17,7 @@ func TestHandleModelsReturnsCodexClientMetadata(t *testing.T) {
 	t.Parallel()
 
 	gin.SetMode(gin.TestMode)
-	app := &App{cfg: config.Config{ProxyAPIKey: "test-key", DefaultModel: "gpt-6.1-sol"}, engine: gin.New()}
+	app := &App{cfg: config.Config{ProxyAPIKey: "test-key", DefaultModel: "gpt-6.2-sol"}, engine: gin.New()}
 	app.routes()
 	recorder := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/models?client_version=0.166.0", nil)
@@ -43,20 +43,22 @@ func TestHandleModelsReturnsCodexClientMetadata(t *testing.T) {
 	if _, hasOpenAIList := model["object"]; hasOpenAIList {
 		t.Fatalf("Codex client model metadata unexpectedly uses OpenAI list shape: %#v", model)
 	}
-	index := slices.IndexFunc(body.Models, func(model map[string]any) bool { return model["slug"] == "gpt-6.1-terra" })
-	if index < 0 {
-		t.Fatal("Codex model catalog is missing GPT-6.1 Terra")
-	}
-	terra := body.Models[index]
-	if terra["context_window"] != float64(500000) || terra["max_context_window"] != float64(872000) || terra["default_reasoning_level"] != "low" {
-		t.Fatalf("GPT-6.1 Terra metadata = %#v", terra)
-	}
-	var efforts []string
-	for _, level := range terra["supported_reasoning_levels"].([]any) {
-		efforts = append(efforts, level.(map[string]any)["effort"].(string))
-	}
-	if !slices.Equal(efforts, []string{"low", "medium", "high", "xhigh", "max", "ultra"}) {
-		t.Fatalf("GPT-6.1 Terra reasoning levels = %v", efforts)
+	for slug, contextWindow := range map[string]float64{"gpt-6.2-sol": 500000, "gpt-6.2-astra": 272000, "gpt-6.1-terra": 500000} {
+		index := slices.IndexFunc(body.Models, func(model map[string]any) bool { return model["slug"] == slug })
+		if index < 0 {
+			t.Fatalf("Codex model catalog is missing %s", slug)
+		}
+		model := body.Models[index]
+		if model["context_window"] != contextWindow || model["max_context_window"] != float64(872000) || model["default_reasoning_level"] != "low" {
+			t.Fatalf("%s metadata = %#v", slug, model)
+		}
+		var efforts []string
+		for _, level := range model["supported_reasoning_levels"].([]any) {
+			efforts = append(efforts, level.(map[string]any)["effort"].(string))
+		}
+		if !slices.Equal(efforts, []string{"low", "medium", "high", "xhigh", "max", "ultra"}) {
+			t.Fatalf("%s reasoning levels = %v", slug, efforts)
+		}
 	}
 }
 
