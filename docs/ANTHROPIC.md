@@ -32,6 +32,8 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | User `tool_result` | `function_call_output` |
 | Replayed hosted-search blocks | `web_search_call` |
 | Tool `input_schema` | Normalized function parameters |
+| `defer_loading` tool | Omitted until a `tool_reference` loads it |
+| `tool_reference` in a tool result | Text naming the loaded tool |
 | Hosted web search | Codex `web_search` |
 | Web-search domains and location | Codex search filters and user location |
 | `tool_choice: auto` | `auto` |
@@ -43,7 +45,7 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | Fast service tier | Codex priority tier |
 | Ultrafast service tier | Codex ultrafast tier |
 
-Claude Code's attribution-only system block is filtered from model instructions. Its adaptive-thinking `display` and `context_management` fields are accepted as compatibility metadata. An explicit `output_config.effort` selects Codex reasoning effort; otherwise, enabled-thinking budgets map to `low` through 1,024 tokens, `medium` through 8,192, `high` through 24,576, and `xhigh` above that. Budget-derived effort is clamped to the nearest level supported by the selected model.
+Claude Code's attribution-only system block is filtered from model instructions. Its tool search sends deferred tools with `defer_loading`; as on the Claude API, a deferred tool reaches the model only after a `tool_reference` block in a tool result loads it. Its adaptive-thinking `display` and `context_management` fields are accepted as compatibility metadata. An explicit `output_config.effort` selects Codex reasoning effort; otherwise, enabled-thinking budgets map to `low` through 1,024 tokens, `medium` through 8,192, `high` through 24,576, and `xhigh` above that. Budget-derived effort is clamped to the nearest level supported by the selected model.
 
 Tool names and tool-call IDs longer than the backend limit are shortened deterministically. Original tool names are restored in public responses.
 

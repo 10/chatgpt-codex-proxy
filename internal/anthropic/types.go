@@ -72,6 +72,7 @@ type Block struct {
 	Name             string          `json:"name,omitempty"`
 	Input            json.RawMessage `json:"input,omitempty"`
 	ToolUseID        string          `json:"tool_use_id,omitempty"`
+	ToolName         string          `json:"tool_name,omitempty"`
 	Content          Content         `json:"content,omitempty"`
 	IsError          bool            `json:"is_error,omitempty"`
 	Title            string          `json:"title,omitempty"`
@@ -98,6 +99,7 @@ type Tool struct {
 	BlockedDomains []string        `json:"blocked_domains,omitempty"`
 	UserLocation   map[string]any  `json:"user_location,omitempty"`
 	Cache          json.RawMessage `json:"cache_control,omitempty"`
+	DeferLoading   bool            `json:"defer_loading,omitempty"`
 }
 
 type ToolChoice struct {

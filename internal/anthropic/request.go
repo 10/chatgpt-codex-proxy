@@ -37,11 +37,12 @@ func Normalize(request MessagesRequest, catalog *models.Catalog) (turn.Normalize
 	}
 
 	toolNames := turn.NewToolNames(requestToolNames(request))
-	tools, err := normalizeTools(request.Tools, toolNames)
+	loadedTools := loadedTools(request)
+	tools, err := normalizeTools(loadedTools, toolNames)
 	if err != nil {
 		return turn.NormalizedRequest{}, err
 	}
-	toolChoice, parallelToolCalls, err := normalizeToolChoice(request.ToolChoice, toolNames, request.Tools)
+	toolChoice, parallelToolCalls, err := normalizeToolChoice(request.ToolChoice, toolNames, loadedTools)
 	if err != nil {
 		return turn.NormalizedRequest{}, err
 	}
@@ -177,7 +178,7 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]turn.In
 				if _, ok := knownCalls[callID]; !ok {
 					return nil, errors.New("tool_result references an unknown tool_use id")
 				}
-				text, output, err := normalizeToolResult(block.Content)
+				text, output, err := normalizeToolResult(block.Content, toolNames)
 				if err != nil {
 					return nil, err
 				}
@@ -303,7 +304,7 @@ func normalizeToolInput(input json.RawMessage) (string, error) {
 	return string(trimmed), nil
 }
 
-func normalizeToolResult(content Content) (string, []turn.ContentPart, error) {
+func normalizeToolResult(content Content, toolNames *turn.ToolNames) (string, []turn.ContentPart, error) {
 	parts := make([]turn.ContentPart, 0, len(content))
 	allText := true
 	texts := make([]string, 0, len(content))
@@ -312,6 +313,13 @@ func normalizeToolResult(content Content) (string, []turn.ContentPart, error) {
 		case "text":
 			parts = append(parts, turn.ContentPart{Type: "input_text", Text: block.Text})
 			texts = append(texts, block.Text)
+		case "tool_reference":
+			if strings.TrimSpace(block.ToolName) == "" {
+				return "", nil, errors.New("tool_reference requires tool_name")
+			}
+			text := "Tool loaded: " + toolNames.Shorten(block.ToolName)
+			parts = append(parts, turn.ContentPart{Type: "input_text", Text: text})
+			texts = append(texts, text)
 		case "image":
 			allText = false
 			imageURL, err := normalizeImageSource(block.Source)
@@ -438,6 +446,31 @@ func normalizeServiceTier(raw string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported service tier %q", raw)
 	}
+}
+
+// A defer_loading tool stays hidden from the model until a tool_reference
+// block in a tool result loads it, as with Anthropic tool search.
+func loadedTools(request MessagesRequest) []Tool {
+	referenced := make(map[string]bool)
+	for _, message := range request.Messages {
+		for _, block := range message.Content {
+			if block.Type != "tool_result" {
+				continue
+			}
+			for _, nested := range block.Content {
+				if nested.Type == "tool_reference" {
+					referenced[strings.TrimSpace(nested.ToolName)] = true
+				}
+			}
+		}
+	}
+	tools := make([]Tool, 0, len(request.Tools))
+	for _, tool := range request.Tools {
+		if !tool.DeferLoading || referenced[strings.TrimSpace(tool.Name)] {
+			tools = append(tools, tool)
+		}
+	}
+	return tools
 }
 
 func requestToolNames(request MessagesRequest) []string {

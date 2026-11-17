@@ -319,6 +319,58 @@ func TestNormalizeMessagesPreservesToolErrorSemantics(t *testing.T) {
 	}
 }
 
+func TestNormalizeMessagesLoadsDeferredToolsFromToolReferences(t *testing.T) {
+	t.Parallel()
+
+	tools := `[
+		{"name":"Read","description":"Read a file","input_schema":{"type":"object","properties":{}}},
+		{"name":"ToolSearch","description":"Load deferred tools","input_schema":{"type":"object","properties":{"query":{"type":"string"}}}},
+		{"name":"NotebookEdit","description":"Edit a notebook","input_schema":{"type":"object","properties":{}},"defer_loading":true},
+		{"name":"DeferredToolPlaceholder","description":"Never call","input_schema":{"type":"object","properties":{}},"defer_loading":true}
+	]`
+	for name, test := range map[string]struct {
+		messages  string
+		wantTools []string
+	}{
+		"before search": {
+			messages:  `[{"role":"user","content":"Edit nb.ipynb"}]`,
+			wantTools: []string{"Read", "ToolSearch"},
+		},
+		"after search": {
+			messages: `[
+				{"role":"user","content":"Edit nb.ipynb"},
+				{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"ToolSearch","input":{"query":"select:NotebookEdit"}}]},
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"tool_reference","tool_name":"NotebookEdit"}]}]}
+			]`,
+			wantTools: []string{"Read", "ToolSearch", "NotebookEdit"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			request, err := DecodeMessages([]byte(`{"model":"gpt-5.6-terra","max_tokens":10,"tools":` + tools + `,"messages":` + test.messages + `}`))
+			if err != nil {
+				t.Fatalf("DecodeMessages() error = %v", err)
+			}
+			normalized, err := Normalize(request, models.NewCatalog(models.BootstrapEntries()))
+			if err != nil {
+				t.Fatalf("Normalize() error = %v", err)
+			}
+			var gotTools []string
+			for _, tool := range normalized.Tools {
+				gotTools = append(gotTools, tool.Name)
+			}
+			if !slices.Equal(gotTools, test.wantTools) {
+				t.Fatalf("tools = %v, want %v", gotTools, test.wantTools)
+			}
+			last := normalized.Input[len(normalized.Input)-1]
+			if len(test.wantTools) == 3 && (last.Type != "function_call_output" || last.OutputText != "Tool loaded: NotebookEdit") {
+				t.Fatalf("tool search output = %#v", last)
+			}
+		})
+	}
+}
+
 func TestNormalizeMessagesPreservesLargeToolInputNumbers(t *testing.T) {
 	t.Parallel()
 
