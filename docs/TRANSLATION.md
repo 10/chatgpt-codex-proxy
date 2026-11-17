@@ -402,7 +402,7 @@ When possible, the proxy derives a stable `prompt_cache_key` from:
 
 The conversation prefix stops at the last assistant or tool-call item. Explicit client values are preserved; this derivation is used only when `prompt_cache_key` is omitted.
 
-Upstream requests also carry a `session-id` header, which Codex needs before it serves cached tokens. It hashes the account, model, instructions, and the input items before the first model output, so it stays the same on every turn of a conversation.
+Upstream requests also carry a `session-id` header, which Codex needs before it serves cached tokens. It hashes the proxy account record, model, instructions, and the input items before the first model output, so it stays the same on every turn that sends the conversation in full. A turn that resumes with `previous_response_id` and only new input may get a different id; it continues from the stored response instead.
 
 ## Upstream Transport Translation
 

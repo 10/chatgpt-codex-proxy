@@ -155,7 +155,9 @@ func TestStreamResponseKeepsOneSessionIDPerConversation(t *testing.T) {
 	defer upstream.Close()
 	client := NewHTTPClient(config.Config{CodexBaseURL: upstream.URL, RequestTimeout: 3 * time.Second})
 	defer client.Close()
-	client.sessions["account"] = httpcloak.NewSession(chromiumPreset, httpcloak.WithTimeout(3*time.Second), httpcloak.WithDisableHTTP3(), httpcloak.WithoutRetry(), httpcloak.WithInsecureSkipVerify())
+	for _, id := range []string{"account-a", "account-b"} {
+		client.sessions[id] = httpcloak.NewSession(chromiumPreset, httpcloak.WithTimeout(3*time.Second), httpcloak.WithDisableHTTP3(), httpcloak.WithoutRetry(), httpcloak.WithInsecureSkipVerify())
+	}
 
 	message := func(role, text string) turn.InputItem {
 		return turn.InputItem{Role: role, Content: []turn.ContentPart{{Type: "input_text", Text: text}}}
@@ -166,8 +168,8 @@ func TestStreamResponseKeepsOneSessionIDPerConversation(t *testing.T) {
 	for _, request := range []struct {
 		accountID string
 		input     []turn.InputItem
-	}{{"upstream-a", firstTurn}, {"upstream-a", secondTurn}, {"upstream-a", otherChat}, {"upstream-b", firstTurn}} {
-		stream, err := client.StreamResponse(context.Background(), accounts.Record{ID: "account", AccountID: request.accountID}, turn.Request{Model: "gpt-6.1-sol", Input: request.input}, "")
+	}{{"account-a", firstTurn}, {"account-a", secondTurn}, {"account-a", otherChat}, {"account-b", firstTurn}} {
+		stream, err := client.StreamResponse(context.Background(), accounts.Record{ID: request.accountID, AccountID: "shared-workspace"}, turn.Request{Model: "gpt-6.1-sol", Input: request.input}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -182,7 +184,7 @@ func TestStreamResponseKeepsOneSessionIDPerConversation(t *testing.T) {
 
 func TestResponsesWebSocketWarmupSendsSessionID(t *testing.T) {
 	t.Parallel()
-	sessionIDs := make(chan string, 1)
+	sessionIDs := make(chan string, 2)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessionIDs <- r.Header.Get("Session-Id")
 		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
@@ -197,14 +199,17 @@ func TestResponsesWebSocketWarmupSendsSessionID(t *testing.T) {
 	defer client.Close()
 
 	generate := false
-	stream, err := client.ConnectResponsesWS(context.Background(), accounts.Record{ID: "account"}, turn.NormalizedRequest{
-		Request: turn.Request{Model: "gpt-6.1-sol", PromptCacheKey: "codex-cli-session"}, Generate: &generate,
-	}, "")
-	if err != nil {
-		t.Fatal(err)
+	for _, input := range [][]turn.InputItem{nil, {{Type: "additional_tools"}}} {
+		stream, err := client.ConnectResponsesWS(context.Background(), accounts.Record{ID: "account"}, turn.NormalizedRequest{
+			Request: turn.Request{Model: "gpt-6.1-sol", PromptCacheKey: "codex-cli-session", Input: input}, Generate: &generate,
+		}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		stream.Close()
 	}
-	stream.Close()
-	if got := <-sessionIDs; len(got) != 36 {
-		t.Fatalf("warm-up Session-Id = %q, want one from prompt_cache_key", got)
+	warmup, reconnect := <-sessionIDs, <-sessionIDs
+	if len(warmup) != 36 || warmup != reconnect {
+		t.Fatalf("Session-Id = %q then %q, want one id from prompt_cache_key", warmup, reconnect)
 	}
 }

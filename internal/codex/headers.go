@@ -114,6 +114,7 @@ func sessionID(accountID string, req turn.Request) string {
 	}
 	cacheKey := ""
 	if len(opening) == 0 {
+		opening = nil
 		if cacheKey = strings.TrimSpace(req.PromptCacheKey); cacheKey == "" {
 			return ""
 		}
