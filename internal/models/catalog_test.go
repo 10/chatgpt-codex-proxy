@@ -72,3 +72,22 @@ func TestRegisterRoutePreservesBootstrapVisibilityUntilRouteRefreshes(t *testing
 		t.Fatal("SupportsRecord(free, premium) = true, want false")
 	}
 }
+
+func TestResolveDefaultSkipsHiddenModels(t *testing.T) {
+	t.Parallel()
+
+	record := accounts.Record{ID: "acct_pro"}
+	catalog := NewCatalog(BootstrapEntries())
+	catalog.ApplyRouteModels(RoutingKeyForRecord(record), []Entry{
+		{ID: "gpt-6-chat-thinking", Priority: 1, Hidden: true},
+		{ID: "codex-auto-review", Priority: 3, Hidden: true, IsDefault: true},
+		{ID: "gpt-6.2-sol", Priority: 2},
+	})
+
+	if got := catalog.ResolveDefaultForRecord(record, "unsupported-model"); got != "gpt-6.2-sol" {
+		t.Fatalf("ResolveDefaultForRecord() = %q, want the first listed model", got)
+	}
+	if !catalog.SupportsRecord(record, "gpt-6-chat-thinking") {
+		t.Fatal("hidden model is no longer routable by name")
+	}
+}

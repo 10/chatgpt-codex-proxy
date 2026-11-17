@@ -22,8 +22,8 @@ func TestGetCodexModelsNormalizesBackendMetadata(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"models":[
-			{"slug":"gpt-6-astra","display_name":"Astra","context_window":300000,"max_context_window":900000,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"high"},{"effort":"max"}]},
-			{"id":"other-model","supported_reasoning_efforts":[{"reasoningEffort":"low"},{"reasoning_effort":"low"},{"effort":"high"}]}
+			{"slug":"gpt-6-astra","display_name":"Astra","priority":2,"visibility":"list","context_window":300000,"max_context_window":900000,"default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"high"},{"effort":"max"}]},
+			{"id":"other-model","priority":1,"visibility":"hide","supported_reasoning_efforts":[{"reasoningEffort":"low"},{"reasoning_effort":"low"},{"effort":"high"}]}
 		]}`)
 	}))
 	upstream.EnableHTTP2 = true
@@ -40,6 +40,9 @@ func TestGetCodexModelsNormalizesBackendMetadata(t *testing.T) {
 		t.Fatalf("models = %#v", entries)
 	}
 	astra, other := entries[0], entries[1]
+	if astra.Priority != 2 || astra.Hidden || other.Priority != 1 || !other.Hidden {
+		t.Fatalf("lost upstream order or visibility: %#v %#v", astra, other)
+	}
 	if astra.ID != "gpt-6-astra" || astra.DisplayName != "Astra" || astra.ContextWindow != 300000 || astra.MaxContextWindow != 900000 || astra.DefaultReasoningEffort != "high" || len(astra.SupportedReasoningEfforts) != 2 || astra.SupportedReasoningEfforts[1].ReasoningEffort != "max" {
 		t.Fatalf("lost Astra metadata: %#v", astra)
 	}

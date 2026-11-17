@@ -14,4 +14,6 @@ type Entry struct {
 	IsDefault                 bool              `json:"is_default,omitempty"`
 	DefaultReasoningEffort    string            `json:"default_reasoning_effort,omitempty"`
 	SupportedReasoningEfforts []ReasoningEffort `json:"supported_reasoning_efforts,omitempty"`
+	Priority                  int               `json:"priority,omitempty"`
+	Hidden                    bool              `json:"hidden,omitempty"`
 }

@@ -29,6 +29,8 @@ type backendModelEntry struct {
 	DefaultReasoningLevel     string                   `json:"default_reasoning_level,omitempty"`
 	SupportedReasoningEfforts []backendReasoningEffort `json:"supported_reasoning_efforts,omitempty"`
 	SupportedReasoningLevels  []backendReasoningEffort `json:"supported_reasoning_levels,omitempty"`
+	Priority                  int                      `json:"priority,omitempty"`
+	Visibility                string                   `json:"visibility,omitempty"`
 }
 
 func parseCodexModelsResponse(payload string) ([]models.Entry, error) {
@@ -88,6 +90,8 @@ func normalizeBackendEntry(raw backendModelEntry) models.Entry {
 		IsDefault:                 raw.IsDefault,
 		DefaultReasoningEffort:    defaultEffort,
 		SupportedReasoningEfforts: efforts,
+		Priority:                  raw.Priority,
+		Hidden:                    strings.EqualFold(strings.TrimSpace(raw.Visibility), "hide"),
 	}
 }
 

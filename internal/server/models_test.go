@@ -62,6 +62,69 @@ func TestHandleModelsReturnsCodexClientMetadata(t *testing.T) {
 	}
 }
 
+func TestHandleModelsFollowsUpstreamOrderAndVisibility(t *testing.T) {
+	t.Parallel()
+
+	gin.SetMode(gin.TestMode)
+	catalog := models.NewCatalog(models.BootstrapEntries())
+	catalog.ApplyRouteModels("acct:acct_pro", []models.Entry{
+		{ID: "codex-auto-review", Priority: 3, Hidden: true},
+		{ID: "gpt-6-astra", Priority: 2},
+		{ID: "gpt-6.1-sol", Priority: 1},
+	})
+	app := &App{cfg: config.Config{ProxyAPIKey: "test-key", DefaultModel: "gpt-6.1-sol"}, engine: gin.New(), models: catalog}
+	app.routes()
+	get := func(path, anthropicVersion string) []byte {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer test-key")
+		if anthropicVersion != "" {
+			req.Header.Set("anthropic-version", anthropicVersion)
+		}
+		app.Handler().ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d, body = %s", path, recorder.Code, recorder.Body.String())
+		}
+		return recorder.Body.Bytes()
+	}
+
+	for _, anthropicVersion := range []string{"", "2023-06-01"} {
+		var list struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(get("/v1/models", anthropicVersion), &list); err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for _, model := range list.Data {
+			ids = append(ids, model.ID)
+		}
+		if len(ids) < 2 || ids[0] != "gpt-6.1-sol" || ids[1] != "gpt-6-astra" || slices.Contains(ids, "codex-auto-review") {
+			t.Fatalf("anthropic-version %q: model list = %v", anthropicVersion, ids)
+		}
+	}
+
+	var codexList struct {
+		Models []map[string]any `json:"models"`
+	}
+	if err := json.Unmarshal(get("/v1/models?client_version=0.169.0", ""), &codexList); err != nil {
+		t.Fatal(err)
+	}
+	slugs := make([]any, 0, 3)
+	for _, model := range codexList.Models[:3] {
+		slugs = append(slugs, model["slug"], model["visibility"])
+	}
+	if want := []any{"gpt-6.1-sol", "list", "gpt-6-astra", "list", "codex-auto-review", "hide"}; !slices.Equal(slugs, want) {
+		t.Fatalf("Codex client models = %v, want %v", slugs, want)
+	}
+	if _, ok := catalog.Get("codex-auto-review"); !ok {
+		t.Fatal("hidden model is no longer routable")
+	}
+}
+
 func TestHandleModelsUsesRuntimeCatalog(t *testing.T) {
 	t.Parallel()
 

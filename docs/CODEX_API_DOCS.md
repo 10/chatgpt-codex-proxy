@@ -1140,6 +1140,8 @@ If `/codex/models` returns anything outside that shape, the proxy treats the res
 - `default_reasoning_level`
 - `supported_reasoning_efforts`
 - `supported_reasoning_levels`
+- `priority`, which orders model lists
+- `visibility`; `hide` keeps a model routable but out of public model lists
 
 ### Reasoning effort entry fields recognized
 
