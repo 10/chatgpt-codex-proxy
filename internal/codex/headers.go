@@ -103,7 +103,8 @@ func chromiumSecCHUA(major int) string {
 // conversation's opening, before any model output, keeps that id stable as a
 // chat grows, whether or not the client sends a prompt_cache_key. A WebSocket
 // warm-up has no input yet, so its prompt_cache_key names the conversation.
-func sessionID(req turn.Request) string {
+// The account is part of the seed so rotated accounts never share an id.
+func sessionID(accountID string, req turn.Request) string {
 	opening := req.Input
 	for index, item := range req.Input {
 		if item.Role != "user" && item.Role != "developer" && item.Role != "system" {
@@ -118,11 +119,12 @@ func sessionID(req turn.Request) string {
 		}
 	}
 	seed, err := json.Marshal(struct {
+		Account      string
 		Model        string
 		Instructions string
 		Opening      []turn.InputItem
 		CacheKey     string
-	}{req.Model, req.Instructions, opening, cacheKey})
+	}{accountID, req.Model, req.Instructions, opening, cacheKey})
 	if err != nil {
 		return ""
 	}

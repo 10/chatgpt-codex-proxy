@@ -144,7 +144,7 @@ func TestResponseTransportsPreserveRequestAndEventSemantics(t *testing.T) {
 
 func TestStreamResponseKeepsOneSessionIDPerConversation(t *testing.T) {
 	t.Parallel()
-	sessionIDs := make(chan string, 3)
+	sessionIDs := make(chan string, 4)
 	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessionIDs <- r.Header.Get("Session-Id")
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -163,17 +163,20 @@ func TestStreamResponseKeepsOneSessionIDPerConversation(t *testing.T) {
 	firstTurn := []turn.InputItem{message("developer", "Be brief."), message("user", "Plan a trip")}
 	secondTurn := append(append([]turn.InputItem(nil), firstTurn...), message("assistant", "Where to?"), message("user", "Lisbon"))
 	otherChat := []turn.InputItem{message("developer", "Be brief."), message("user", "Fix my bike")}
-	for _, input := range [][]turn.InputItem{firstTurn, secondTurn, otherChat} {
-		stream, err := client.StreamResponse(context.Background(), accounts.Record{ID: "account"}, turn.Request{Model: "gpt-6.1-sol", Input: input}, "")
+	for _, request := range []struct {
+		accountID string
+		input     []turn.InputItem
+	}{{"upstream-a", firstTurn}, {"upstream-a", secondTurn}, {"upstream-a", otherChat}, {"upstream-b", firstTurn}} {
+		stream, err := client.StreamResponse(context.Background(), accounts.Record{ID: "account", AccountID: request.accountID}, turn.Request{Model: "gpt-6.1-sol", Input: request.input}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
 		stream.Close()
 	}
 
-	first, second, other := <-sessionIDs, <-sessionIDs, <-sessionIDs
-	if first == "" || first != second || first == other {
-		t.Fatalf("session ids = %q, %q, %q; want one per conversation", first, second, other)
+	first, second, other, otherAccount := <-sessionIDs, <-sessionIDs, <-sessionIDs, <-sessionIDs
+	if first == "" || first != second || first == other || first == otherAccount {
+		t.Fatalf("session ids = %q, %q, %q, %q; want one per conversation and account", first, second, other, otherAccount)
 	}
 }
 
