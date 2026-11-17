@@ -15,6 +15,8 @@ Requests require the proxy key in `X-API-Key` or as a Bearer token, plus:
 Anthropic-Version: 2023-06-01
 ```
 
+`2026-10-21`, which current Anthropic SDKs send, is accepted too. Both versions share one response shape.
+
 Model endpoints return the Anthropic envelope when that header is present. They otherwise retain their OpenAI-compatible response.
 
 ## Request mapping
@@ -26,10 +28,14 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | User text | `input_text` |
 | Assistant text or prefill | `output_text` |
 | Base64 or URL image | `input_image` |
+| Base64 PDF or URL document, including in a tool result | `input_file`, after any `title` and `context` as text |
+| Text document | `input_text` |
 | Assistant `tool_use` | `function_call` |
 | User `tool_result` | `function_call_output` |
 | Replayed hosted-search blocks | `web_search_call` |
 | Tool `input_schema` | Normalized function parameters |
+| `defer_loading` tool | Omitted until a `tool_reference`, a named `tool_choice`, or an earlier call loads it |
+| `tool_reference` in a tool result | Text naming the loaded tool |
 | Hosted web search | Codex `web_search` |
 | Web-search domains and location | Codex search filters and user location |
 | `tool_choice: auto` | `auto` |
@@ -41,7 +47,7 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | Fast service tier | Codex priority tier |
 | Ultrafast service tier | Codex ultrafast tier |
 
-Claude Code's attribution-only system block is filtered from model instructions. Its adaptive-thinking `display` and `context_management` fields are accepted as compatibility metadata. An explicit `output_config.effort` selects Codex reasoning effort; otherwise, enabled-thinking budgets map to `low` through 1,024 tokens, `medium` through 8,192, `high` through 24,576, and `xhigh` above that. Budget-derived effort is clamped to the nearest level supported by the selected model.
+Claude Code's attribution-only system block is filtered from model instructions. Its tool search sends deferred tools with `defer_loading`; as on the Claude API, a deferred tool reaches the model only after a `tool_reference` block in a tool result loads it. A named `tool_choice` or an earlier `tool_use` or `server_tool_use` of the tool also loads it, and `tool_choice: any` with no loaded tool is rejected. Its adaptive-thinking `display` and `context_management` fields are accepted as compatibility metadata. An explicit `output_config.effort` selects Codex reasoning effort; otherwise, enabled-thinking budgets map to `low` through 1,024 tokens, `medium` through 8,192, `high` through 24,576, and `xhigh` above that. Budget-derived effort is clamped to the nearest level supported by the selected model.
 
 Tool names and tool-call IDs longer than the backend limit are shortened deterministically. Original tool names are restored in public responses.
 
@@ -68,14 +74,15 @@ If a request fails before streaming begins, the endpoint returns a normal JSON e
 
 `/v1/messages/count_tokens` normalizes the request through the same mapper used by `/v1/messages`, then tokenizes the effective Codex instructions, transcript, tools, and output schema locally.
 
-The result is a Codex-oriented estimate. It is not an Anthropic billing-token guarantee. Image references use a bounded per-image allowance instead of counting URL or base64 payload bytes as text because exact image costs require an upstream counting endpoint.
+The result is a Codex-oriented estimate. It is not an Anthropic billing-token guarantee. Image references use a bounded per-image allowance instead of counting URL or base64 payload bytes as text because exact image costs require an upstream counting endpoint. PDF documents are not counted.
 
 ## Current compatibility limits
 
 - Use actual Codex model IDs returned by `/v1/models`. The proxy does not create synthetic Claude model aliases.
 - `max_tokens` is required by Messages and accepted, but positive values do not currently enforce exact output truncation. `max_tokens: 0` maps to the Codex WebSocket `generate: false` control.
 - `temperature`, `top_p`, `top_k`, and `stop_sequences` are accepted but are not forwarded because the Codex backend does not expose equivalent request fields.
-- Hosted-search `max_uses` and `blocked_domains` are rejected because the Codex backend cannot enforce them. Use `allowed_domains` for domain filtering.
+- Document `citations` are accepted, but Codex does not return citation blocks.
+- Hosted-search `max_uses` must be positive and is advisory, so Claude Code's WebSearch tool works; Codex cannot cap searches per request. `blocked_domains` is rejected because Codex cannot enforce it. Use `allowed_domains` for domain filtering.
 - `thinking.budget_tokens` maps to a discrete Codex reasoning effort, not an exact token cap. A zero or omitted budget uses the model catalog's default reasoning effort.
 - Prompt caching controls are accepted as content metadata. Reported cache-read usage comes from Codex cached-token counters when available.
 - Anthropic client-side tools and hosted web search are supported. Other Anthropic server-tool families are rejected until their state can be round-tripped faithfully through Codex.

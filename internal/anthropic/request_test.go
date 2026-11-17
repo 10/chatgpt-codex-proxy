@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"slices"
@@ -319,6 +320,173 @@ func TestNormalizeMessagesPreservesToolErrorSemantics(t *testing.T) {
 	}
 }
 
+func TestNormalizeMessagesLoadsDeferredToolsFromToolReferences(t *testing.T) {
+	t.Parallel()
+
+	tools := `[
+		{"name":"Read","description":"Read a file","input_schema":{"type":"object","properties":{}}},
+		{"name":"ToolSearch","description":"Load deferred tools","input_schema":{"type":"object","properties":{"query":{"type":"string"}}}},
+		{"name":"NotebookEdit","description":"Edit a notebook","input_schema":{"type":"object","properties":{}},"defer_loading":true},
+		{"name":"DeferredToolPlaceholder","description":"Never call","input_schema":{"type":"object","properties":{}},"defer_loading":true},
+		{"type":"web_search_20250305","name":"web_search","defer_loading":true}
+	]`
+	for name, test := range map[string]struct {
+		messages  string
+		extra     string
+		wantTools []string
+	}{
+		"loaded by an earlier call": {
+			messages: `[
+				{"role":"user","content":"Edit nb.ipynb"},
+				{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"NotebookEdit","input":{}}]},
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"done"}]}
+			]`,
+			wantTools: []string{"Read", "ToolSearch", "NotebookEdit"},
+		},
+		"loaded by an earlier hosted search": {
+			messages: `[
+				{"role":"user","content":"Find the Go release"},
+				{"role":"assistant","content":[
+					{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{"query":"Go release"}},
+					{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]},
+					{"type":"text","text":"Go 1.27.4"}
+				]},
+				{"role":"user","content":"And the one before?"}
+			]`,
+			extra:     `,"tool_choice":{"type":"any"}`,
+			wantTools: []string{"Read", "ToolSearch", "web_search"},
+		},
+		"forced by tool_choice": {
+			messages:  `[{"role":"user","content":"Edit nb.ipynb"}]`,
+			extra:     `,"tool_choice":{"type":"tool","name":"NotebookEdit"}`,
+			wantTools: []string{"Read", "ToolSearch", "NotebookEdit"},
+		},
+		"before search": {
+			messages:  `[{"role":"user","content":"Edit nb.ipynb"}]`,
+			wantTools: []string{"Read", "ToolSearch"},
+		},
+		"after search": {
+			messages: `[
+				{"role":"user","content":"Edit nb.ipynb"},
+				{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"ToolSearch","input":{"query":"select:NotebookEdit"}}]},
+				{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[{"type":"tool_reference","tool_name":"NotebookEdit"}]}]}
+			]`,
+			wantTools: []string{"Read", "ToolSearch", "NotebookEdit"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			request, err := DecodeMessages([]byte(`{"model":"gpt-5.6-terra","max_tokens":10,"tools":` + tools + `,"messages":` + test.messages + test.extra + `}`))
+			if err != nil {
+				t.Fatalf("DecodeMessages() error = %v", err)
+			}
+			normalized, err := Normalize(request, models.NewCatalog(models.BootstrapEntries()))
+			if err != nil {
+				t.Fatalf("Normalize() error = %v", err)
+			}
+			var gotTools []string
+			for _, tool := range normalized.Tools {
+				gotTools = append(gotTools, cmp.Or(tool.Name, tool.Type))
+			}
+			if !slices.Equal(gotTools, test.wantTools) {
+				t.Fatalf("tools = %v, want %v", gotTools, test.wantTools)
+			}
+			last := normalized.Input[len(normalized.Input)-1]
+			if name == "after search" && (last.Type != "function_call_output" || last.OutputText != "Tool loaded: NotebookEdit") {
+				t.Fatalf("tool search output = %#v", last)
+			}
+		})
+	}
+}
+
+func TestNormalizeMessagesValidatesDeferredTools(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		body    string
+		wantErr string
+	}{
+		"unloaded hosted search with zero max_uses": {
+			`"tools":[{"type":"web_search_20250305","name":"web_search","max_uses":0,"defer_loading":true}]`,
+			"max_uses must be greater than 0",
+		},
+		"tool_choice any with nothing loaded": {
+			`"tools":[{"name":"NotebookEdit","input_schema":{"type":"object","properties":{}},"defer_loading":true}],"tool_choice":{"type":"any"}`,
+			"tool_choice any requires at least one loaded tool",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			request, err := DecodeMessages([]byte(`{"model":"gpt-5.6-terra","max_tokens":10,"messages":[{"role":"user","content":"hi"}],` + test.body + `}`))
+			if err != nil {
+				t.Fatalf("DecodeMessages() error = %v", err)
+			}
+			if _, err := Normalize(request, models.NewCatalog(models.BootstrapEntries())); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("Normalize() error = %v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
+func TestNormalizeMessagesSendsDocumentsAsCodexFiles(t *testing.T) {
+	t.Parallel()
+
+	request, err := DecodeMessages([]byte(`{"model":"gpt-5.6-terra","max_tokens":10,"messages":[
+		{"role":"user","content":[
+			{"type":"document","title":"notes","source":{"type":"text","media_type":"text/plain","data":"Ship on Friday."}},
+			{"type":"text","text":"Read invoice.pdf"}
+		]},
+		{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"invoice.pdf"}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[
+			{"type":"text","text":"PDF file read: invoice.pdf (14.1KB)"},
+			{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjM="}}
+		]}]}
+	]}`))
+	if err != nil {
+		t.Fatalf("DecodeMessages() error = %v", err)
+	}
+	normalized, err := Normalize(request, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if got := normalized.Input[0].Content[0]; got.Type != "input_text" || got.Text != "notes\n\nShip on Friday." {
+		t.Fatalf("text document = %#v", got)
+	}
+	output := normalized.Input[len(normalized.Input)-1]
+	if output.Type != "function_call_output" || len(output.OutputContent) != 2 {
+		t.Fatalf("tool output = %#v", output)
+	}
+	if file := output.OutputContent[1]; file.Type != "input_file" || file.Filename != "document.pdf" || file.FileData != "data:application/pdf;base64,JVBERi0xLjM=" {
+		t.Fatalf("PDF tool output = %#v", file)
+	}
+
+	titled, err := DecodeMessages([]byte(`{"model":"gpt-5.6-terra","max_tokens":10,"messages":[{"role":"user","content":[
+		{"type":"document","title":"Q3 report","context":"Figures are in thousands.","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjM="}}
+	]}]}`))
+	if err != nil {
+		t.Fatalf("DecodeMessages() error = %v", err)
+	}
+	normalized, err = Normalize(titled, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if parts := normalized.Input[0].Content; len(parts) != 2 || parts[0].Text != "Q3 report\n\nFigures are in thousands." || parts[1].Filename != "document.pdf" {
+		t.Fatalf("titled document = %#v", parts)
+	}
+
+	notPDF, err := DecodeMessages([]byte(`{"model":"gpt-5.6-terra","max_tokens":10,"messages":[{"role":"user","content":[
+		{"type":"document","source":{"type":"base64","media_type":"text/plain","data":"aGk="}}
+	]}]}`))
+	if err != nil {
+		t.Fatalf("DecodeMessages() error = %v", err)
+	}
+	if _, err := Normalize(notPDF, models.NewCatalog(models.BootstrapEntries())); err == nil {
+		t.Fatal("Normalize() accepted a base64 document that is not a PDF")
+	}
+}
+
 func TestNormalizeMessagesPreservesLargeToolInputNumbers(t *testing.T) {
 	t.Parallel()
 
@@ -546,27 +714,33 @@ func TestNormalizeMessagesReplaysHostedWebSearchBlocks(t *testing.T) {
 	}
 }
 
-func TestNormalizeMessagesRejectsUnsupportedHostedWebSearchLimits(t *testing.T) {
+func TestNormalizeMessagesHostedWebSearchLimits(t *testing.T) {
 	t.Parallel()
 
-	maxTokens := 10
-	maxUses := 1
-	for name, tool := range map[string]Tool{
-		"max_uses":        {Type: "web_search_20250305", Name: "web_search", MaxUses: &maxUses},
-		"blocked_domains": {Type: "web_search_20250305", Name: "web_search", BlockedDomains: []string{"example.com"}},
+	for name, test := range map[string]struct {
+		tool    string
+		wantErr string
+	}{
+		"claude code max_uses is advisory": {`{"type":"web_search_20250305","name":"web_search","allowed_domains":["go.dev"],"blocked_domains":[],"max_uses":8}`, ""},
+		"zero max_uses is rejected":        {`{"type":"web_search_20250305","name":"web_search","max_uses":0}`, "max_uses must be greater than 0"},
+		"blocked_domains is rejected":      {`{"type":"web_search_20250305","name":"web_search","blocked_domains":["example.com"]}`, "blocked_domains is not supported"},
 	} {
-		name, tool := name, tool
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := Normalize(MessagesRequest{
-				Model:     "gpt-5.6-terra",
-				MaxTokens: &maxTokens,
-				Messages:  []Message{{Role: "user", Content: Content{{Type: "text", Text: "search"}}}},
-				Tools:     []Tool{tool},
-			}, models.NewCatalog(models.BootstrapEntries()))
-			if err == nil || !strings.Contains(err.Error(), name+" is not supported") {
-				t.Fatalf("Normalize() error = %v", err)
+			request, err := DecodeMessages([]byte(`{"model":"gpt-5.6-terra","max_tokens":10,"messages":[{"role":"user","content":"search"}],"tools":[` + test.tool + `]}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			normalized, err := Normalize(request, models.NewCatalog(models.BootstrapEntries()))
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("Normalize() error = %v, want %q", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil || len(normalized.Tools) != 1 || normalized.Tools[0].Type != "web_search" {
+				t.Fatalf("Normalize() = %#v, %v", normalized.Tools, err)
 			}
 		})
 	}
