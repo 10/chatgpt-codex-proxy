@@ -204,16 +204,27 @@ func (a *App) respondStreamError(c *gin.Context, endpoint, accountID, responseID
 // from response.failed; an error event reaches it as a dropped stream, which
 // it retries, or on a WebSocket as a failed connection. Codex's own
 // response.failed is passed through with the classified message; other Codex
-// failures become one only when they carry a code. It returns nil otherwise.
+// failures become one only when they carry an explicit code. It returns nil
+// otherwise.
 func responsesFailedEvent(err error, responseID, message string) []byte {
 	var upstreamErr *codex.UpstreamError
 	if !errors.As(err, &upstreamErr) || upstreamErr.Event == nil {
 		return nil
 	}
-	failure := map[string]any{"code": upstreamErr.Code, "message": strings.TrimSpace(message)}
+	response, _ := upstreamErr.Event["response"].(map[string]any)
+	failure, _ := response["error"].(map[string]any)
+	if failure == nil {
+		failure, _ = upstreamErr.Event["error"].(map[string]any)
+	}
+	explicitCode := jsonutil.FirstNonEmpty(jsonutil.StringValue(failure["code"]), jsonutil.StringValue(upstreamErr.Event["code"]))
+	failure = maps.Clone(failure)
+	if failure == nil {
+		failure = map[string]any{}
+	}
+	failure["code"] = upstreamErr.Code
+	failure["message"] = strings.TrimSpace(message)
 	if upstreamErr.Event["type"] == "response.failed" {
 		event := maps.Clone(upstreamErr.Event)
-		response, _ := event["response"].(map[string]any)
 		response = maps.Clone(response)
 		if response == nil {
 			response = map[string]any{}
@@ -222,7 +233,7 @@ func responsesFailedEvent(err error, responseID, message string) []byte {
 		event["response"] = response
 		return responseEventJSON("response.failed", responseID, event)
 	}
-	if strings.TrimSpace(upstreamErr.Code) == "" {
+	if strings.TrimSpace(explicitCode) == "" {
 		return nil
 	}
 	sequence := any(0)

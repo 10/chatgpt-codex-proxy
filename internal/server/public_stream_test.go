@@ -607,6 +607,7 @@ func TestStreamResponsesFailureShapes(t *testing.T) {
 		failure   *turn.StreamEvent
 		wantEvent string
 		wantCode  string
+		wantReset any
 	}{
 		"top-level error on response.failed": {
 			failure:   &turn.StreamEvent{Type: "response.failed", Raw: map[string]any{"type": "response.failed", "response": map[string]any{"id": "resp_x", "status": "failed"}, "error": map[string]any{"code": "context_length_exceeded", "message": "too long"}}},
@@ -621,6 +622,16 @@ func TestStreamResponsesFailureShapes(t *testing.T) {
 		"codeless 403 keeps the retryable error event": {
 			failure:   &turn.StreamEvent{Type: "error", Raw: map[string]any{"type": "error", "status": 403, "message": "forbidden"}},
 			wantEvent: "error",
+		},
+		"error type without a code keeps the retryable error event": {
+			failure:   &turn.StreamEvent{Type: "error", Raw: map[string]any{"type": "error", "error": map[string]any{"type": "invalid_request_error", "code": nil, "message": "bad request"}}},
+			wantEvent: "error",
+		},
+		"Codex's other error fields are kept": {
+			failure:   &turn.StreamEvent{Type: "response.failed", Raw: map[string]any{"type": "response.failed", "response": map[string]any{"id": "resp_x", "status": "failed", "error": map[string]any{"code": "usage_limit_reached", "message": "limit", "resets_in_seconds": 30}}}},
+			wantEvent: "response.failed",
+			wantCode:  "usage_limit_reached",
+			wantReset: float64(30),
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -643,6 +654,9 @@ func TestStreamResponsesFailureShapes(t *testing.T) {
 			}
 			if test.wantCode != "" && nestedMapFromAny(nestedMapFromAny(last.Data["response"])["error"])["code"] != test.wantCode {
 				t.Fatalf("last event = %#v, want code %s", last, test.wantCode)
+			}
+			if test.wantReset != nil && nestedMapFromAny(nestedMapFromAny(last.Data["response"])["error"])["resets_in_seconds"] != test.wantReset {
+				t.Fatalf("last event = %#v, want resets_in_seconds %v", last, test.wantReset)
 			}
 			if model := nestedMapFromAny(test.failure.Raw["response"])["model"]; model != nil && (last.Data["sequence_number"] != float64(7) || nestedMapFromAny(last.Data["response"])["model"] != model) {
 				t.Fatalf("last event = %#v, want Codex's event passed through", last)
