@@ -68,6 +68,11 @@ func (a *App) resolveAndOpenRequest(c *gin.Context, endpoint string, normalized 
 	}
 	if err != nil {
 		a.setRequestAccount(c, account)
+		if endpoint == "responses" && resolution.Request.Stream && responsesFailedEvent(err, "", "") != nil {
+			prepareStreamResponse(c)
+			a.respondStreamError(c, endpoint, account.ID, "", "error", err, true)
+			return openedRequest{}, false
+		}
 		reportedAccountID := jsonutil.FirstNonEmpty(account.ID, resolution.PreferredAccountID)
 		a.handleOpenStreamError(c, endpoint, account.ID, reportedAccountID, err)
 		return openedRequest{}, false
