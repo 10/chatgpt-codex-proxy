@@ -828,3 +828,24 @@ func TestResponsesForwardsCodexReasoningContext(t *testing.T) {
 		t.Fatalf("upstream request = %s", wire)
 	}
 }
+
+func TestChatCompletionsTurnsWebSearchOptionsIntoWebSearchTool(t *testing.T) {
+	t.Parallel()
+
+	var request ChatCompletionsRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-6.1-sol","messages":[{"role":"user","content":"news?"}],
+		"web_search_options":{"search_context_size":"low","user_location":{"type":"approximate","approximate":{"country":"GB","city":"London"}}}}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := ChatCompletions(request, nil)
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	wire, err := json.Marshal(normalized.Tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `[{"type":"web_search","search_context_size":"low","user_location":{"city":"London","country":"GB","type":"approximate"}}]`; string(wire) != want {
+		t.Fatalf("tools = %s, want %s", wire, want)
+	}
+}

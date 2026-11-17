@@ -1,8 +1,11 @@
 package openai
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"chatgpt-codex-proxy/internal/jsonutil"
@@ -26,6 +29,9 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 	tools := req.Tools
 	if len(tools) == 0 && len(req.Functions) > 0 {
 		tools = legacyFunctionsAsTools(req.Functions)
+	}
+	if req.WebSearchOptions != nil {
+		tools = append(slices.Clone(tools), webSearchOptionsTool(*req.WebSearchOptions))
 	}
 	toolNames := turn.NewToolNames(toolNamesForChat(req, tools))
 	toolChoice := json.RawMessage(nil)
@@ -82,6 +88,20 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 	}
 	out.Input = turn.PrependDeveloperInstructions(out.Input, strings.Join(instructions, "\n\n"))
 	return out, nil
+}
+
+// Chat nests the location under `approximate`; the Responses web_search tool
+// takes those fields beside `type`.
+func webSearchOptionsTool(options WebSearchOptions) ToolDefinition {
+	tool := ToolDefinition{Type: "web_search", SearchContextSize: options.SearchContextSize}
+	if location := options.UserLocation; location != nil {
+		tool.UserLocation = maps.Clone(location.Approximate)
+		if tool.UserLocation == nil {
+			tool.UserLocation = map[string]any{}
+		}
+		tool.UserLocation["type"] = cmp.Or(location.Type, "approximate")
+	}
+	return tool
 }
 
 func chatCustomToolNames(tools []ToolDefinition) map[string]bool {
