@@ -61,6 +61,7 @@ func TestParseQuotaFromHeaders(t *testing.T) {
 				headers.Set("X-Codex-Primary-Window-Minutes", "10080")
 				headers.Set("X-Codex-Secondary-Used-Percent", "0")
 				headers.Set("X-Codex-Secondary-Window-Minutes", "0")
+				headers.Set("X-Codex-Secondary-Reset-At", "0")
 			},
 			assert: func(t *testing.T, snapshot *accounts.QuotaSnapshot) {
 				t.Helper()

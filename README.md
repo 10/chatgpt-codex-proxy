@@ -128,9 +128,9 @@ token is missing, or its quota is spent. `code_review_rate_limit` is tracked but
 does not affect routing.
 
 A failed OAuth refresh only expires an account when the refresh token is
-rejected: a `401` other than `invalid_client`, `invalid_grant`,
-`invalid_refresh_token*`, or Codex CLI's `refresh_token_*` codes. Anything else keeps it active behind a 60-second
-cooldown.
+rejected: a `401` other than `invalid_client` or `unauthorized_client`,
+`invalid_grant`, `invalid_refresh_token*`, or Codex CLI's `refresh_token_*`
+codes. Anything else keeps it active behind a 60-second cooldown.
 
 Details: [docs/MULTI_ACCOUNT_ROTATION_STRATEGY.md](docs/MULTI_ACCOUNT_ROTATION_STRATEGY.md).
 

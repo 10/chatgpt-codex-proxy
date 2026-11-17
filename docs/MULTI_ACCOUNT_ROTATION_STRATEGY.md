@@ -373,7 +373,7 @@ The server's `selectReadyAccount` selects through the rotation service, then cal
 2. Check the current token state
 3. If the token is close to expiry, refresh it
 4. If refresh succeeds, update the stored auth state while preserving the existing refresh token when the provider does not return a replacement
-5. If refresh fails with `401` (other than `invalid_client`), OAuth `invalid_grant`, OpenAI `invalid_refresh_token*`, or `refresh_token_expired`/`_reused`/`_invalidated`, mark the account `expired`
+5. If refresh fails with `401` (other than `invalid_client` or `unauthorized_client`), OAuth `invalid_grant`, OpenAI `invalid_refresh_token*`, or `refresh_token_expired`/`_reused`/`_invalidated`, mark the account `expired`
 6. For other refresh failures, keep the account active and apply the built-in 60-second cooldown
 
 This means the routing service decides eligibility based on current record state, and the account manager performs last-mile readiness before the upstream request is sent.

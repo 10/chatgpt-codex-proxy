@@ -79,14 +79,15 @@ func parseOAuthTokenError(status int, body string) *oauthTokenError {
 }
 
 // Codex CLI treats a 401 and its three refresh_token_* codes as permanent.
-// invalid_client blames the proxy's OAuth client, not the account's token.
+// invalid_client and unauthorized_client blame the proxy's OAuth client, not
+// the account's token.
 func IsTerminalCredentialFailure(err error) bool {
 	var oauthErr *oauthTokenError
 	if !errors.As(err, &oauthErr) {
 		return false
 	}
 	switch code := strings.ToLower(oauthErr.Code); {
-	case code == "invalid_client":
+	case code == "invalid_client", code == "unauthorized_client":
 		return false
 	case oauthErr.Status == http.StatusUnauthorized, code == "invalid_grant", strings.HasPrefix(code, "invalid_refresh_token"):
 		return true

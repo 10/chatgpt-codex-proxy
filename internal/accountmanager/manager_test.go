@@ -116,6 +116,7 @@ func TestRefreshExpiresAccountAfterRejectedRefreshToken(t *testing.T) {
 		"reused refresh token":           {http.StatusBadRequest, `{"error":{"message":"Refresh token was already used.","code":"refresh_token_reused"}}`, "Refresh token was already used."},
 		"unauthorized refresh":           {http.StatusUnauthorized, `{"error":{"message":"Unauthorized"}}`, "Unauthorized"},
 		"rejected oauth client":          {http.StatusUnauthorized, `{"error":"invalid_client","error_description":"client authentication failed"}`, ""},
+		"unauthorized oauth client":      {http.StatusUnauthorized, `{"error":"unauthorized_client"}`, ""},
 		"openai malformed refresh token": {http.StatusBadRequest, `{"error":{"message":"Invalid refresh token.","type":"invalid_request_error","param":null,"code":"invalid_refresh_token_ciphertext_header"}}`, "Invalid refresh token."},
 		"openai invalid_refresh_token":   {http.StatusUnauthorized, `{"error":{"message":"Could not validate your refresh token. Please try signing in again.","type":"invalid_request_error","param":null,"code":"invalid_refresh_token"}}`, "Could not validate your refresh token. Please try signing in again."},
 	} {
