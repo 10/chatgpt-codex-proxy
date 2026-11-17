@@ -627,6 +627,11 @@ func TestStreamResponsesFailureShapes(t *testing.T) {
 			failure:   &turn.StreamEvent{Type: "error", Raw: map[string]any{"type": "error", "error": map[string]any{"type": "invalid_request_error", "code": nil, "message": "bad request"}}},
 			wantEvent: "error",
 		},
+		"explicit top-level code wins over the error type": {
+			failure:   &turn.StreamEvent{Type: "error", Raw: map[string]any{"type": "error", "code": "context_length_exceeded", "error": map[string]any{"type": "invalid_request_error", "code": nil, "message": "too long"}}},
+			wantEvent: "response.failed",
+			wantCode:  "context_length_exceeded",
+		},
 		"Codex's other error fields are kept": {
 			failure:   &turn.StreamEvent{Type: "response.failed", Raw: map[string]any{"type": "response.failed", "response": map[string]any{"id": "resp_x", "status": "failed", "error": map[string]any{"code": "usage_limit_reached", "message": "limit", "resets_in_seconds": 30}}}},
 			wantEvent: "response.failed",

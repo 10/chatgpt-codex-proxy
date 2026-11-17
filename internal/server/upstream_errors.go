@@ -221,7 +221,7 @@ func responsesFailedEvent(err error, responseID, message string) []byte {
 	if failure == nil {
 		failure = map[string]any{}
 	}
-	failure["code"] = upstreamErr.Code
+	failure["code"] = cmp.Or(explicitCode, upstreamErr.Code)
 	failure["message"] = strings.TrimSpace(message)
 	if upstreamErr.Event["type"] == "response.failed" {
 		event := maps.Clone(upstreamErr.Event)
