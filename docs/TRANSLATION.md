@@ -269,7 +269,7 @@ Tool definitions are normalized into Codex tools like this:
 - Function tool schemas are run through `NormalizeSchema`, which ensures `type = object` schemas have a `properties` map.
 - `web_search_preview` is rewritten to `web_search`.
 - `web_search` stays `web_search`.
-- Chat Completions `web_search_options` adds a `web_search` tool with its `search_context_size` and approximate `user_location`, unless `tools` already has one, and honors `tool_choice`.
+- Chat Completions `web_search_options` adds a `web_search` tool with its `search_context_size` and approximate `user_location`, unless `tools` already has one, and honors a non-null `tool_choice` ahead of legacy `function_call`.
 - Custom tools and unknown tool types are passed through as-is.
 - Tool names longer than 64 characters are shortened deterministically before the upstream request and restored in Chat Completions and Responses output. Colliding shortened names receive numeric suffixes.
 

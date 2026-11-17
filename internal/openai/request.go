@@ -39,8 +39,9 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 	toolChoice := json.RawMessage(nil)
 	if len(req.Tools) > 0 || req.WebSearchOptions != nil && len(req.ToolChoice) > 0 {
 		toolChoice = normalizeToolChoice(req.ToolChoice, toolNames)
-	} else if choice := normalizeLegacyFunctionChoice(req.FunctionCall, toolNames); choice != nil {
-		toolChoice = choice
+	}
+	if toolChoice == nil && len(req.Tools) == 0 {
+		toolChoice = normalizeLegacyFunctionChoice(req.FunctionCall, toolNames)
 	}
 	out := newNormalizedRequest(
 		model,

@@ -869,4 +869,18 @@ func TestChatCompletionsTurnsWebSearchOptionsIntoWebSearchTool(t *testing.T) {
 			t.Fatalf("%s: got %s, want %s", body, got, want)
 		}
 	}
+
+	var legacy ChatCompletionsRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-6.1-sol","messages":[{"role":"user","content":"news?"}],
+		"functions":[{"name":"lookup","parameters":{"type":"object"}}],"function_call":{"name":"lookup"},
+		"web_search_options":{},"tool_choice":null}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err = ChatCompletions(legacy, nil)
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	if got := string(normalized.ToolChoice); got != `{"type":"function","name":"lookup"}` {
+		t.Fatalf("legacy function_call with null tool_choice = %s", got)
+	}
 }
