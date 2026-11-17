@@ -113,6 +113,7 @@ func (a *App) streamChatCompletion(c *gin.Context, account accounts.Record, norm
 	}
 
 	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
+	setRequestUsage(c, accumulator)
 
 	finalDelta := map[string]any{}
 	if !textSent {

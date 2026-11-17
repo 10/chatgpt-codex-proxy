@@ -106,6 +106,7 @@ x-client-request-id: req_<timestamp>_<counter>
 ChatGPT-Account-Id: <chatgpt account id>
 Cookie: <serialized cookies>
 x-codex-turn-state: <turn state from previous response>
+session-id: <uuid derived from the conversation's opening items>
 OpenAI-Beta: responses_websockets=2026-02-06
 Content-Type: application/json
 Accept: text/event-stream
@@ -115,6 +116,7 @@ Accept: text/event-stream
 
 - `OpenAI-Beta: responses_websockets=2026-02-06` is sent for HTTP response creation, compact requests, and every upstream WebSocket connection.
 - `x-codex-turn-state` is reused on continuation requests.
+- `session-id` is what makes Codex serve a repeated prefix from its prompt cache; `prompt_cache_key` alone gets no cached tokens. Codex CLI sends one per conversation; the proxy hashes the proxy account record, model, instructions, and input items before the first model output, so every turn that sends the chat in full shares it. A WebSocket warm-up with no input uses its `prompt_cache_key` instead.
 - The proxy preserves a specific header ordering when talking to upstream.
 
 ## Data Types

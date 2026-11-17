@@ -1,6 +1,8 @@
 package codex
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"strings"
 
 	"chatgpt-codex-proxy/internal/clientidentity"
+	"chatgpt-codex-proxy/internal/turn"
 )
 
 const (
@@ -27,6 +30,7 @@ type headerOptions struct {
 	Cookies        map[string]string
 	ContentType    string
 	TurnState      string
+	SessionID      string
 	RequestID      string
 	Accept         string
 	AcceptEncoding string
@@ -46,6 +50,9 @@ func buildHeaders(token string, opts headerOptions) http.Header {
 	}
 	if opts.TurnState != "" {
 		headers.Set("x-codex-turn-state", opts.TurnState)
+	}
+	if opts.SessionID != "" {
+		headers.Set("session-id", opts.SessionID)
 	}
 	if opts.IncludeBeta {
 		headers.Set("OpenAI-Beta", openAIBeta)
@@ -89,6 +96,43 @@ func chromiumSecCHUA(major int) string {
 		brands[0], brands[1] = brands[1], brands[0]
 	}
 	return strings.Join(brands, ", ")
+}
+
+// Codex serves repeated prefixes from its prompt cache only to requests that
+// share a session-id header, which Codex CLI sends once per conversation. The
+// conversation's opening, before any model output, keeps that id stable as a
+// chat grows, whether or not the client sends a prompt_cache_key. A WebSocket
+// warm-up has no input yet, so its prompt_cache_key names the conversation.
+// The account is part of the seed so rotated accounts never share an id.
+func sessionID(accountID string, req turn.Request) string {
+	opening := req.Input
+	for index, item := range req.Input {
+		if item.Role != "user" && item.Role != "developer" && item.Role != "system" {
+			opening = req.Input[:index]
+			break
+		}
+	}
+	cacheKey := ""
+	if len(opening) == 0 {
+		opening = nil
+		if cacheKey = strings.TrimSpace(req.PromptCacheKey); cacheKey == "" {
+			return ""
+		}
+	}
+	seed, err := json.Marshal(struct {
+		Account      string
+		Model        string
+		Instructions string
+		Opening      []turn.InputItem
+		CacheKey     string
+	}{accountID, req.Model, req.Instructions, opening, cacheKey})
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(seed)
+	sum[6] = sum[6]&0x0f | 0x40
+	sum[8] = sum[8]&0x3f | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
 
 func cookieHeader(cookies map[string]string) string {

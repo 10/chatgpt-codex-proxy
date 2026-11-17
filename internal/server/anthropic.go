@@ -107,6 +107,7 @@ func (a *App) handleAnthropicMessages(c *gin.Context) {
 		return
 	}
 	a.claudeReplays.Remember(replayScope, request.Model, account.ID, accumulator)
+	setRequestUsage(c, accumulator)
 	c.JSON(http.StatusOK, anthropic.BuildMessage(accumulator))
 }
 
@@ -171,6 +172,7 @@ func (a *App) streamAnthropicMessage(c *gin.Context, account accounts.Record, no
 	}
 	a.claudeReplays.Remember(replayScope, replayModel, account.ID, accumulator)
 	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
+	setRequestUsage(c, accumulator)
 	c.Writer.Flush()
 }
 

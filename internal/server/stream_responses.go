@@ -39,6 +39,7 @@ func (a *App) streamResponses(c *gin.Context, account accounts.Record, normalize
 	}
 
 	a.finalizeSuccessfulStream(account.ID, accumulator, stream)
+	setRequestUsage(c, accumulator)
 	c.Writer.Flush()
 }
 

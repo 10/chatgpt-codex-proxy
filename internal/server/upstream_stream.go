@@ -13,6 +13,7 @@ import (
 	"chatgpt-codex-proxy/internal/accounts"
 	"chatgpt-codex-proxy/internal/codex"
 	"chatgpt-codex-proxy/internal/jsonutil"
+	"chatgpt-codex-proxy/internal/middleware"
 	"chatgpt-codex-proxy/internal/turn"
 )
 
@@ -276,6 +277,18 @@ func (a *App) nextStreamEvent(ctx context.Context, account accounts.Record, accu
 		}
 		return event, false, nil
 	}
+}
+
+func setRequestUsage(c *gin.Context, accumulator *turn.Accumulator) {
+	if accumulator == nil || accumulator.Usage == nil {
+		return
+	}
+	usage := accumulator.Usage
+	var cached int64
+	if usage.CachedTokens != nil {
+		cached = *usage.CachedTokens
+	}
+	middleware.SetRequestUsage(c, usage.InputTokens, cached, usage.OutputTokens)
 }
 
 func (a *App) finalizeSuccessfulStream(accountID string, accumulator *turn.Accumulator, stream eventStream) {

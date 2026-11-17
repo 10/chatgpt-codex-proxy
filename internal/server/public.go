@@ -78,6 +78,7 @@ func (a *App) handlePublicRequest(
 		a.respondOpenAIUpstreamStreamError(c, endpoint, opened.Account.ID, "", err)
 		return
 	}
+	setRequestUsage(c, accumulator)
 	response := buildResponse(accumulator)
 	if err := patchTuple(response, normalized.TupleSchema); err != nil {
 		a.logTupleReconversionWarning(c, endpoint, accumulator.ResponseID, err)

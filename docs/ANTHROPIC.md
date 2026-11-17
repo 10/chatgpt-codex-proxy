@@ -66,6 +66,8 @@ Streaming responses use named Anthropic SSE events:
 5. `message_delta`
 6. `message_stop`
 
+`message_start` reports a local input-token estimate; the final `message_delta` carries Codex's input, cache-read, and output token counts.
+
 Text uses `text_delta`, thinking uses `thinking_delta` and `signature_delta`, and tool input uses `input_json_delta`. Hosted search emits paired `server_tool_use` and `web_search_tool_result` blocks. The proxy does not emit an OpenAI `[DONE]` sentinel.
 
 If a request fails before streaming begins, the endpoint returns a normal JSON error and HTTP status. A failure after SSE headers have been committed is emitted as an `event: error` frame and is not followed by `message_stop`.
@@ -84,6 +86,6 @@ The result is a Codex-oriented estimate. It is not an Anthropic billing-token gu
 - Document `citations` are accepted, but Codex does not return citation blocks.
 - Hosted-search `max_uses` must be positive and is advisory, so Claude Code's WebSearch tool works; Codex cannot cap searches per request. `blocked_domains` is rejected because Codex cannot enforce it. Use `allowed_domains` for domain filtering.
 - `thinking.budget_tokens` maps to a discrete Codex reasoning effort, not an exact token cap. A zero or omitted budget uses the model catalog's default reasoning effort.
-- Prompt caching controls are accepted as content metadata. Reported cache-read usage comes from Codex cached-token counters when available.
+- Prompt caching controls are accepted as content metadata. Codex caches automatically per conversation; reported cache-read usage comes from Codex cached-token counters when available.
 - Anthropic client-side tools and hosted web search are supported. Other Anthropic server-tool families are rejected until their state can be round-tripped faithfully through Codex.
 - Claude Code replay sessions share the proxy's single configured API-key trust boundary. Do not share one proxy key between mutually untrusted users.

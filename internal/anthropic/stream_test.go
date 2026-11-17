@@ -35,6 +35,27 @@ func TestStreamEncoderBuffersAndCleansStructuredOutput(t *testing.T) {
 	}
 }
 
+func TestStreamEncoderReportsCodexUsageInFinalDelta(t *testing.T) {
+	t.Parallel()
+
+	accumulator := turn.NewAccumulator(turn.NormalizedRequest{Request: turn.Request{Model: "gpt-5.4"}})
+	events := applyAndEncode(accumulator, NewStreamEncoder(9000),
+		&turn.StreamEvent{Type: "response.output_text.delta", Raw: map[string]any{"delta": "ok"}},
+		&turn.StreamEvent{Type: "response.completed", Raw: map[string]any{"response": map[string]any{
+			"id": "resp_usage", "status": "completed", "output_text": "ok",
+			"usage": map[string]any{"input_tokens": 8040, "output_tokens": 5, "input_tokens_details": map[string]any{"cached_tokens": 7808}},
+		}}},
+	)
+
+	delta := events[len(events)-2]
+	if delta["type"] != "message_delta" {
+		t.Fatalf("events = %#v", events)
+	}
+	if usage, ok := delta["usage"].(Usage); !ok || usage != (Usage{InputTokens: 232, OutputTokens: 5, CacheReadInputTokens: 7808}) {
+		t.Fatalf("message_delta usage = %#v", delta["usage"])
+	}
+}
+
 func TestStreamEncoderEmitsThinkingSignatureBeforeBlockStop(t *testing.T) {
 	t.Parallel()
 
