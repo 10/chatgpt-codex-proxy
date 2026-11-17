@@ -828,3 +828,59 @@ func TestResponsesForwardsCodexReasoningContext(t *testing.T) {
 		t.Fatalf("upstream request = %s", wire)
 	}
 }
+
+func TestChatCompletionsTurnsWebSearchOptionsIntoWebSearchTool(t *testing.T) {
+	t.Parallel()
+
+	var request ChatCompletionsRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-6.1-sol","messages":[{"role":"user","content":"news?"}],
+		"web_search_options":{"search_context_size":"low","user_location":{"type":"approximate","approximate":{"country":"GB","city":"London"}}}}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := ChatCompletions(request, nil)
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	wire, err := json.Marshal(normalized.Tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `[{"type":"web_search","search_context_size":"low","user_location":{"city":"London","country":"GB","type":"approximate"}}]`; string(wire) != want {
+		t.Fatalf("tools = %s, want %s", wire, want)
+	}
+
+	for body, want := range map[string]string{
+		`"tools":[{"type":"web_search_preview","search_context_size":"high"}],"web_search_options":{"search_context_size":"low"}`: `tools=[{"type":"web_search","search_context_size":"high"}] choice=`,
+		`"web_search_options":{},"tool_choice":"none"`: `tools=[{"type":"web_search"}] choice="none"`,
+	} {
+		var request ChatCompletionsRequest
+		if err := json.Unmarshal([]byte(`{"model":"gpt-6.1-sol","messages":[{"role":"user","content":"news?"}],`+body+`}`), &request); err != nil {
+			t.Fatal(err)
+		}
+		normalized, err := ChatCompletions(request, nil)
+		if err != nil {
+			t.Fatalf("ChatCompletions() error = %v", err)
+		}
+		wire, err := json.Marshal(normalized.Tools)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := "tools=" + string(wire) + " choice=" + string(normalized.ToolChoice); got != want {
+			t.Fatalf("%s: got %s, want %s", body, got, want)
+		}
+	}
+
+	var legacy ChatCompletionsRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-6.1-sol","messages":[{"role":"user","content":"news?"}],
+		"functions":[{"name":"lookup","parameters":{"type":"object"}}],"function_call":{"name":"lookup"},
+		"web_search_options":{},"tool_choice":null}`), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err = ChatCompletions(legacy, nil)
+	if err != nil {
+		t.Fatalf("ChatCompletions() error = %v", err)
+	}
+	if got := string(normalized.ToolChoice); got != `{"type":"function","name":"lookup"}` {
+		t.Fatalf("legacy function_call with null tool_choice = %s", got)
+	}
+}

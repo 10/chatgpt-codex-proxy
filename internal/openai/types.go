@@ -22,6 +22,15 @@ type ChatCompletionsRequest struct {
 	Text               *ResponsesText             `json:"text,omitempty"`
 	Functions          []LegacyFunctionDefinition `json:"functions,omitempty"`
 	FunctionCall       *LegacyFunctionCallChoice  `json:"function_call,omitempty"`
+	WebSearchOptions   *WebSearchOptions          `json:"web_search_options,omitempty"`
+}
+
+type WebSearchOptions struct {
+	SearchContextSize string `json:"search_context_size,omitempty"`
+	UserLocation      *struct {
+		Type        string         `json:"type"`
+		Approximate map[string]any `json:"approximate,omitempty"`
+	} `json:"user_location,omitempty"`
 }
 
 type ChatMessage struct {
