@@ -180,7 +180,7 @@ func (a *App) validateAnthropicVersion(c *gin.Context) bool {
 		a.writeAnthropicError(c, http.StatusBadRequest, "anthropic-version header is required")
 		return false
 	}
-	if version != anthropic.Version {
+	if !anthropic.SupportsVersion(version) {
 		a.writeAnthropicError(c, http.StatusBadRequest, "unsupported anthropic-version "+version)
 		return false
 	}

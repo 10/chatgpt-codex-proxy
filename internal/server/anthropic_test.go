@@ -608,6 +608,27 @@ func TestAnthropicCountTokensDoesNotOpenUpstream(t *testing.T) {
 	}
 }
 
+func TestAnthropicAcceptsCurrentSDKVersions(t *testing.T) {
+	t.Parallel()
+
+	app := newFailoverTestApp(t)
+	for version, want := range map[string]int{
+		"2023-06-01": http.StatusOK,
+		"2026-10-21": http.StatusOK,
+		"2024-10-22": http.StatusBadRequest,
+	} {
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(`{"model":"gpt-5.6-terra","messages":[{"role":"user","content":"Count me"}]}`))
+		ctx.Request.Header.Set("anthropic-version", version)
+		app.handleAnthropicCountTokens(ctx)
+
+		if recorder.Code != want {
+			t.Fatalf("anthropic-version %s: status = %d, body = %s", version, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
 func TestAnthropicModelsUseAnthropicEnvelope(t *testing.T) {
 	t.Parallel()
 

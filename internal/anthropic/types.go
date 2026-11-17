@@ -3,9 +3,15 @@ package anthropic
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 )
 
-const Version = "2023-06-01"
+// 2026-10-21 only rejects more request fields; Messages responses keep the 2023-06-01 shape.
+var versions = []string{"2023-06-01", "2026-10-21"}
+
+func SupportsVersion(version string) bool {
+	return slices.Contains(versions, version)
+}
 
 type MessagesRequest struct {
 	Model             string          `json:"model"`

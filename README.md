@@ -102,7 +102,7 @@ Gotchas:
 - `GET /v1/responses` is a WebSocket, not SSE. First message must be `response.create`; later turns use `response.create` or `response.append`. No `[DONE]` marker.
 - `/v1/chat/completions` also accepts a Responses-shaped body when `messages` is omitted.
 - Images default to `gpt-image-2`. If the native endpoint returns `404`, `405`, or `501`, it falls back to the Responses image tool — one image, data URL.
-- Anthropic requests need `Anthropic-Version: 2023-06-01`. Sampling controls, stop sequences, `max_tokens` truncation, and thinking budgets are accepted but advisory; Codex has no equivalent.
+- Anthropic requests need `Anthropic-Version` `2023-06-01` or `2026-10-21`. Sampling controls, stop sequences, `max_tokens` truncation, and thinking budgets are accepted but advisory; Codex has no equivalent.
 - Audio input is rejected. Request bodies must be identity or zstd.
 
 Exact rules: [docs/TRANSLATION.md](docs/TRANSLATION.md),

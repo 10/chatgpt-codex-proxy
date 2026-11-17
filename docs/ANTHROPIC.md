@@ -15,6 +15,8 @@ Requests require the proxy key in `X-API-Key` or as a Bearer token, plus:
 Anthropic-Version: 2023-06-01
 ```
 
+`2026-10-21`, which current Anthropic SDKs send, is accepted too. Both versions share one response shape.
+
 Model endpoints return the Anthropic envelope when that header is present. They otherwise retain their OpenAI-compatible response.
 
 ## Request mapping
