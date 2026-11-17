@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"slices"
@@ -326,7 +327,8 @@ func TestNormalizeMessagesLoadsDeferredToolsFromToolReferences(t *testing.T) {
 		{"name":"Read","description":"Read a file","input_schema":{"type":"object","properties":{}}},
 		{"name":"ToolSearch","description":"Load deferred tools","input_schema":{"type":"object","properties":{"query":{"type":"string"}}}},
 		{"name":"NotebookEdit","description":"Edit a notebook","input_schema":{"type":"object","properties":{}},"defer_loading":true},
-		{"name":"DeferredToolPlaceholder","description":"Never call","input_schema":{"type":"object","properties":{}},"defer_loading":true}
+		{"name":"DeferredToolPlaceholder","description":"Never call","input_schema":{"type":"object","properties":{}},"defer_loading":true},
+		{"type":"web_search_20250305","name":"web_search","defer_loading":true}
 	]`
 	for name, test := range map[string]struct {
 		messages  string
@@ -340,6 +342,19 @@ func TestNormalizeMessagesLoadsDeferredToolsFromToolReferences(t *testing.T) {
 				{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"done"}]}
 			]`,
 			wantTools: []string{"Read", "ToolSearch", "NotebookEdit"},
+		},
+		"loaded by an earlier hosted search": {
+			messages: `[
+				{"role":"user","content":"Find the Go release"},
+				{"role":"assistant","content":[
+					{"type":"server_tool_use","id":"srvtoolu_1","name":"web_search","input":{"query":"Go release"}},
+					{"type":"web_search_tool_result","tool_use_id":"srvtoolu_1","content":[]},
+					{"type":"text","text":"Go 1.27.4"}
+				]},
+				{"role":"user","content":"And the one before?"}
+			]`,
+			extra:     `,"tool_choice":{"type":"any"}`,
+			wantTools: []string{"Read", "ToolSearch", "web_search"},
 		},
 		"forced by tool_choice": {
 			messages:  `[{"role":"user","content":"Edit nb.ipynb"}]`,
@@ -372,7 +387,7 @@ func TestNormalizeMessagesLoadsDeferredToolsFromToolReferences(t *testing.T) {
 			}
 			var gotTools []string
 			for _, tool := range normalized.Tools {
-				gotTools = append(gotTools, tool.Name)
+				gotTools = append(gotTools, cmp.Or(tool.Name, tool.Type))
 			}
 			if !slices.Equal(gotTools, test.wantTools) {
 				t.Fatalf("tools = %v, want %v", gotTools, test.wantTools)

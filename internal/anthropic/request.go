@@ -526,7 +526,7 @@ func loadedToolNames(request MessagesRequest) map[string]bool {
 	for _, message := range request.Messages {
 		for _, block := range message.Content {
 			switch block.Type {
-			case "tool_use":
+			case "tool_use", "server_tool_use":
 				loaded[strings.TrimSpace(block.Name)] = true
 			case "tool_result":
 				for _, nested := range block.Content {
