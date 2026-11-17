@@ -42,6 +42,7 @@ type oauthTokenResponse struct {
 }
 
 type oauthTokenError struct {
+	Status      int
 	Code        string
 	Description string
 	Body        string
@@ -55,9 +56,40 @@ func (e *oauthTokenError) Error() string {
 	return fmt.Sprintf("oauth token exchange failed: %s", message)
 }
 
+// OAuth servers send `{"error":"invalid_grant"}`; OpenAI sends
+// `{"error":{"code":"invalid_refresh_token","message":"..."}}`, with
+// suffixed codes such as `invalid_refresh_token_ciphertext_header`.
+func parseOAuthTokenError(status int, body string) *oauthTokenError {
+	var payload struct {
+		Error            json.RawMessage `json:"error"`
+		ErrorDescription string          `json:"error_description"`
+	}
+	_ = json.Unmarshal([]byte(body), &payload)
+	result := &oauthTokenError{Status: status, Description: strings.TrimSpace(payload.ErrorDescription), Body: strings.TrimSpace(body)}
+	var nested struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal(payload.Error, &result.Code) != nil && json.Unmarshal(payload.Error, &nested) == nil {
+		result.Code = nested.Code
+		result.Description = jsonutil.FirstNonEmpty(result.Description, strings.TrimSpace(nested.Message))
+	}
+	result.Code = strings.TrimSpace(result.Code)
+	return result
+}
+
+// Codex CLI treats a 401 and its three refresh_token_* codes as permanent.
 func IsTerminalCredentialFailure(err error) bool {
 	var oauthErr *oauthTokenError
-	return errors.As(err, &oauthErr) && strings.EqualFold(strings.TrimSpace(oauthErr.Code), "invalid_grant")
+	if !errors.As(err, &oauthErr) {
+		return false
+	}
+	switch code := strings.ToLower(oauthErr.Code); {
+	case oauthErr.Status == http.StatusUnauthorized, code == "invalid_grant", strings.HasPrefix(code, "invalid_refresh_token"):
+		return true
+	default:
+		return code == "refresh_token_expired" || code == "refresh_token_reused" || code == "refresh_token_invalidated"
+	}
 }
 
 type oauthClaims struct {
@@ -269,16 +301,7 @@ func doForm(ctx context.Context, client *http.Client, endpoint string, values ur
 	defer resp.Body.Close()
 	bodyText := httpbody.ReadLimitedErrorBody(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		var payload struct {
-			Error            string `json:"error"`
-			ErrorDescription string `json:"error_description"`
-		}
-		_ = json.Unmarshal([]byte(bodyText), &payload)
-		return oauthTokenResponse{}, &oauthTokenError{
-			Code:        strings.TrimSpace(payload.Error),
-			Description: strings.TrimSpace(payload.ErrorDescription),
-			Body:        strings.TrimSpace(bodyText),
-		}
+		return oauthTokenResponse{}, parseOAuthTokenError(resp.StatusCode, bodyText)
 	}
 	var decoded oauthTokenResponse
 	if err := json.Unmarshal([]byte(bodyText), &decoded); err != nil {
