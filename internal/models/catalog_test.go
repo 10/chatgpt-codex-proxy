@@ -80,6 +80,7 @@ func TestResolveDefaultSkipsHiddenModels(t *testing.T) {
 	catalog := NewCatalog(BootstrapEntries())
 	catalog.ApplyRouteModels(RoutingKeyForRecord(record), []Entry{
 		{ID: "gpt-6-chat-thinking", Priority: 1, Hidden: true},
+		{ID: "codex-auto-review", Priority: 3, Hidden: true, IsDefault: true},
 		{ID: "gpt-6.2-sol", Priority: 2},
 	})
 
