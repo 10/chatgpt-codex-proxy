@@ -15,6 +15,9 @@ func TestLoadRequiresProxyAPIKey(t *testing.T) {
 func TestLoadDefaultsToGPT62Sol(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("PROXY_API_KEY", "test-key")
+	for _, name := range []string{"DATA_DIR", "PORT", "DEBUG_LOG_PAYLOADS"} {
+		t.Setenv(name, "")
+	}
 
 	cfg, err := Load()
 	if err != nil {
