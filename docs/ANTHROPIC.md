@@ -28,7 +28,7 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | User text | `input_text` |
 | Assistant text or prefill | `output_text` |
 | Base64 or URL image | `input_image` |
-| Base64 or URL document, including in a tool result | `input_file` |
+| Base64 PDF or URL document, including in a tool result | `input_file`, after any `title` and `context` as text |
 | Text document | `input_text` |
 | Assistant `tool_use` | `function_call` |
 | User `tool_result` | `function_call_output` |
@@ -81,7 +81,8 @@ The result is a Codex-oriented estimate. It is not an Anthropic billing-token gu
 - Use actual Codex model IDs returned by `/v1/models`. The proxy does not create synthetic Claude model aliases.
 - `max_tokens` is required by Messages and accepted, but positive values do not currently enforce exact output truncation. `max_tokens: 0` maps to the Codex WebSocket `generate: false` control.
 - `temperature`, `top_p`, `top_k`, and `stop_sequences` are accepted but are not forwarded because the Codex backend does not expose equivalent request fields.
-- Hosted-search `max_uses` is accepted but advisory, so Claude Code's WebSearch tool works; Codex cannot cap searches per request. `blocked_domains` is rejected because Codex cannot enforce it. Use `allowed_domains` for domain filtering.
+- Document `citations` are accepted, but Codex does not return citation blocks.
+- Hosted-search `max_uses` must be positive and is advisory, so Claude Code's WebSearch tool works; Codex cannot cap searches per request. `blocked_domains` is rejected because Codex cannot enforce it. Use `allowed_domains` for domain filtering.
 - `thinking.budget_tokens` maps to a discrete Codex reasoning effort, not an exact token cap. A zero or omitted budget uses the model catalog's default reasoning effort.
 - Prompt caching controls are accepted as content metadata. Reported cache-read usage comes from Codex cached-token counters when available.
 - Anthropic client-side tools and hosted web search are supported. Other Anthropic server-tool families are rejected until their state can be round-tripped faithfully through Codex.

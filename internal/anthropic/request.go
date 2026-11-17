@@ -155,11 +155,11 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]turn.In
 				if role != "user" {
 					return nil, errors.New("document blocks are only supported in user messages")
 				}
-				part, err := normalizeDocument(block)
+				document, err := normalizeDocument(block)
 				if err != nil {
 					return nil, err
 				}
-				content = append(content, part)
+				content = append(content, document...)
 			case "tool_use":
 				if role != "assistant" {
 					return nil, errors.New("tool_use blocks require the assistant role")
@@ -302,36 +302,38 @@ func normalizeImageSource(source *ImageSource) (string, error) {
 	}
 }
 
-func normalizeDocument(block Block) (turn.ContentPart, error) {
+func normalizeDocument(block Block) ([]turn.ContentPart, error) {
 	source := block.Source
 	if source == nil {
-		return turn.ContentPart{}, errors.New("document source is required")
+		return nil, errors.New("document source is required")
 	}
+	var label []string
+	for _, value := range []string{block.Title, block.Context} {
+		if value = strings.TrimSpace(value); value != "" {
+			label = append(label, value)
+		}
+	}
+	var file turn.ContentPart
 	switch strings.TrimSpace(source.Type) {
 	case "base64":
-		mediaType := strings.TrimSpace(source.MediaType)
-		if mediaType == "" || strings.TrimSpace(source.Data) == "" {
-			return turn.ContentPart{}, errors.New("base64 document source requires media_type and data")
+		if strings.TrimSpace(source.MediaType) != "application/pdf" || strings.TrimSpace(source.Data) == "" {
+			return nil, errors.New("base64 document source requires application/pdf data")
 		}
-		return turn.ContentPart{
-			Type:     "input_file",
-			Filename: cmp.Or(strings.TrimSpace(block.Title), "document.pdf"),
-			FileData: "data:" + mediaType + ";base64," + strings.TrimSpace(source.Data),
-		}, nil
+		file = turn.ContentPart{Type: "input_file", Filename: "document.pdf", FileData: "data:application/pdf;base64," + strings.TrimSpace(source.Data)}
 	case "url":
 		if strings.TrimSpace(source.URL) == "" {
-			return turn.ContentPart{}, errors.New("URL document source requires url")
+			return nil, errors.New("URL document source requires url")
 		}
-		return turn.ContentPart{Type: "input_file", FileURL: strings.TrimSpace(source.URL)}, nil
+		file = turn.ContentPart{Type: "input_file", FileURL: strings.TrimSpace(source.URL)}
 	case "text":
-		text := source.Data
-		if title := strings.TrimSpace(block.Title); title != "" {
-			text = title + "\n\n" + text
-		}
-		return turn.ContentPart{Type: "input_text", Text: text}, nil
+		return []turn.ContentPart{{Type: "input_text", Text: strings.Join(append(label, source.Data), "\n\n")}}, nil
 	default:
-		return turn.ContentPart{}, fmt.Errorf("unsupported document source type %q", source.Type)
+		return nil, fmt.Errorf("unsupported document source type %q", source.Type)
 	}
+	if len(label) == 0 {
+		return []turn.ContentPart{file}, nil
+	}
+	return []turn.ContentPart{{Type: "input_text", Text: strings.Join(label, "\n\n")}, file}, nil
 }
 
 func normalizeToolInput(input json.RawMessage) (string, error) {
@@ -369,15 +371,17 @@ func normalizeToolResult(content Content, toolNames *turn.ToolNames) (string, []
 			}
 			parts = append(parts, turn.ContentPart{Type: "input_image", ImageURL: imageURL})
 		case "document":
-			part, err := normalizeDocument(block)
+			document, err := normalizeDocument(block)
 			if err != nil {
 				return "", nil, err
 			}
-			parts = append(parts, part)
-			if part.Type == "input_text" {
-				texts = append(texts, part.Text)
-			} else {
-				allText = false
+			for _, part := range document {
+				parts = append(parts, part)
+				if part.Type == "input_text" {
+					texts = append(texts, part.Text)
+				} else {
+					allText = false
+				}
 			}
 		default:
 			return "", nil, fmt.Errorf("unsupported tool result block type %q", block.Type)
@@ -501,9 +505,13 @@ func normalizeServiceTier(raw string) (string, error) {
 }
 
 // A defer_loading tool stays hidden from the model until a tool_reference
-// block in a tool result loads it, as with Anthropic tool search.
+// block in a tool result loads it, as with Anthropic tool search, or
+// tool_choice names it.
 func loadedTools(request MessagesRequest) []Tool {
 	referenced := make(map[string]bool)
+	if request.ToolChoice != nil {
+		referenced[strings.TrimSpace(request.ToolChoice.Name)] = true
+	}
 	for _, message := range request.Messages {
 		for _, block := range message.Content {
 			if block.Type != "tool_result" {

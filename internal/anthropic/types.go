@@ -76,6 +76,7 @@ type Block struct {
 	Content          Content         `json:"content,omitempty"`
 	IsError          bool            `json:"is_error,omitempty"`
 	Title            string          `json:"title,omitempty"`
+	Context          string          `json:"context,omitempty"`
 	URL              string          `json:"url,omitempty"`
 	EncryptedContent string          `json:"encrypted_content,omitempty"`
 	PageAge          json.RawMessage `json:"page_age,omitempty"`
