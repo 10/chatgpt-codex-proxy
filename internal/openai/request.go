@@ -30,12 +30,14 @@ func ChatCompletions(req ChatCompletionsRequest, catalog *models.Catalog) (turn.
 	if len(tools) == 0 && len(req.Functions) > 0 {
 		tools = legacyFunctionsAsTools(req.Functions)
 	}
-	if req.WebSearchOptions != nil {
+	if req.WebSearchOptions != nil && !slices.ContainsFunc(tools, func(tool ToolDefinition) bool {
+		return tool.Type == "web_search" || tool.Type == "web_search_preview"
+	}) {
 		tools = append(slices.Clone(tools), webSearchOptionsTool(*req.WebSearchOptions))
 	}
 	toolNames := turn.NewToolNames(toolNamesForChat(req, tools))
 	toolChoice := json.RawMessage(nil)
-	if len(req.Tools) > 0 {
+	if len(req.Tools) > 0 || req.WebSearchOptions != nil && len(req.ToolChoice) > 0 {
 		toolChoice = normalizeToolChoice(req.ToolChoice, toolNames)
 	} else if choice := normalizeLegacyFunctionChoice(req.FunctionCall, toolNames); choice != nil {
 		toolChoice = choice
