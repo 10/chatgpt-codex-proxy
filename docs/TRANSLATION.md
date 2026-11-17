@@ -182,7 +182,7 @@ Reasoning effort on Chat Completions is converted to:
 - `reasoning.effort = <value>`
 - `reasoning.summary = "auto"`
 
-Reasoning on Responses uses the request's explicit reasoning object. If `effort` is set and `summary` is empty, `summary` is forced to `"auto"`.
+Reasoning on Responses uses the request's explicit reasoning object, including Codex CLI's `context` (`current_turn` or `all_turns`). If `effort` is set and `summary` is empty, `summary` is forced to `"auto"`.
 
 Whenever reasoning is enabled, the proxy also sends:
 

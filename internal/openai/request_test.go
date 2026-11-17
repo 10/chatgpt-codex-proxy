@@ -808,3 +808,23 @@ func marshalTextConfig(t *testing.T, text *turn.TextConfig) map[string]any {
 	}
 	return decoded
 }
+
+func TestResponsesForwardsCodexReasoningContext(t *testing.T) {
+	t.Parallel()
+
+	var request ResponsesRequest
+	if err := json.Unmarshal([]byte(`{"model":"gpt-6.1-sol","input":"hi","reasoning":{"effort":"low","context":"all_turns"}}`), &request); err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := Responses(request, nil)
+	if err != nil {
+		t.Fatalf("Responses() error = %v", err)
+	}
+	wire, err := json.Marshal(normalized.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wire), `"reasoning":{"effort":"low","summary":"auto","context":"all_turns"}`) {
+		t.Fatalf("upstream request = %s", wire)
+	}
+}

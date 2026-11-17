@@ -187,6 +187,7 @@ func normalizeResponsesReasoning(explicit *Reasoning, fallback *turn.Reasoning) 
 	reasoning := &turn.Reasoning{
 		Effort:  explicit.Effort,
 		Summary: explicit.Summary,
+		Context: explicit.Context,
 	}
 	if reasoning.Effort != "" && reasoning.Summary == "" {
 		reasoning.Summary = "auto"
