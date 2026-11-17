@@ -187,6 +187,36 @@ func TestResponsesWebSocketReturnsProtocolErrorsWithoutClosing(t *testing.T) {
 	assertResponsesWebSocketEventTypes(t, events, "response.created", "response.output_text.delta", "response.completed")
 }
 
+func TestResponsesWebSocketSendsCodexWarmupInputAsEmptyList(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	fakeStream := &fakeResponsesWebSocketStream{
+		turns: [][]*turn.StreamEvent{responsesWebSocketTextEvents("resp_ws_warmup", "gpt-5.6-terra", "")},
+	}
+	app := newResponsesWebSocketTestApp(t, fakeStream)
+	server := httptest.NewServer(app.Handler())
+	defer server.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(websocketTestURL(server.URL)+"/v1/responses", http.Header{
+		"Authorization": []string{"Bearer test-key"},
+	})
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{"type": "response.create", "model": "gpt-5.6-terra", "generate": false, "input": []any{}}); err != nil {
+		t.Fatalf("WriteJSON() error = %v", err)
+	}
+	readResponsesWebSocketTurn(t, conn)
+
+	fakeStream.mu.Lock()
+	defer fakeStream.mu.Unlock()
+	if input, ok := fakeStream.requests[0]["input"].([]any); !ok || len(input) != 0 {
+		t.Fatalf("upstream input = %#v, want []", fakeStream.requests[0]["input"])
+	}
+}
+
 func TestNormalizeResponsesWebSocketMessagePreservesGenerateAndIgnoresStream(t *testing.T) {
 	generate := false
 	normalized, err := normalizeResponsesWebSocketMessage([]byte(`{
