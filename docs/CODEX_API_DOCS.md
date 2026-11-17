@@ -125,7 +125,7 @@ This is the canonical request shape the proxy sends to the HTTP Codex responses 
 
 ```json
 {
-  "model": "gpt-6.1-sol",
+  "model": "gpt-6.2-sol",
   "instructions": "",
   "input": [],
   "stream": true,
@@ -180,7 +180,7 @@ This is the canonical compact request accepted by the proxy before transport tra
 
 ```json
 {
-  "model": "gpt-6.1-sol",
+  "model": "gpt-6.2-sol",
   "instructions": "Summarize the thread state.",
   "input": [
     {
@@ -466,7 +466,7 @@ Example:
 
 ```json
 {
-  "model": "gpt-6.1-sol",
+  "model": "gpt-6.2-sol",
   "instructions": "Be concise.",
   "input": [
     {
@@ -483,7 +483,7 @@ Example with tool calls:
 
 ```json
 {
-  "model": "gpt-6.1-sol",
+  "model": "gpt-6.2-sol",
   "instructions": "Be concise.",
   "input": [
     {
@@ -527,7 +527,7 @@ curl -sS -N "${CODEX_BASE_URL}/codex/responses" \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
   -d '{
-    "model": "gpt-6.1-sol",
+    "model": "gpt-6.2-sol",
     "instructions": "Be concise.",
     "input": [
       {
@@ -784,7 +784,7 @@ Observed payload:
   "type": "response.completed",
   "response": {
     "id": "resp_123",
-    "model": "gpt-6.1-sol",
+    "model": "gpt-6.2-sol",
     "status": "completed",
     "output": [],
     "output_text": "final text",
@@ -926,7 +926,7 @@ The proxy sends one JSON message immediately after connecting. Persistent public
 ```json
 {
   "type": "response.create",
-  "model": "gpt-6.1-sol",
+  "model": "gpt-6.2-sol",
   "input": [],
   "instructions": "Be concise.",
   "tools": [],
@@ -1105,8 +1105,8 @@ The proxy now accepts only the Codex-specific top-level shape observed in live t
 {
   "models": [
     {
-      "slug": "gpt-6.1-sol",
-      "display_name": "GPT-6.1-Sol",
+      "slug": "gpt-6.2-sol",
+      "display_name": "GPT-6.2-Sol",
       "description": "Model description",
       "default_reasoning_level": "low",
       "supported_reasoning_levels": [
