@@ -69,6 +69,7 @@ The Codex request fields used by the proxy are:
 - `previous_response_id`
 - `prompt_cache_key`
 - `include`
+- `parallel_tool_calls`
 
 The translation-only fields are:
 
@@ -211,7 +212,7 @@ OpenAI content parts are normalized into Codex content parts as follows:
 - `file_url`
 - `file_id`
 
-Chat-style `file` parts may put those fields under a nested `file` object. Audio input is rejected locally because the current Codex upstream rejects both `input_audio` and audio MIME types supplied as files.
+Chat-style `file` parts may put those fields under a nested `file` object. `input_audio` parts are rejected locally; audio MIME types supplied as files reach Codex, which rejects them.
 
 Unsupported content parts return `400` with an `unsupported_content_part` error message.
 
@@ -316,7 +317,6 @@ Chat Completions ignored fields:
 - `frequency_penalty`
 - `stop`
 - `user`
-- `parallel_tool_calls`
 - `stream_options`
 
 Responses ignored fields:
@@ -324,7 +324,6 @@ Responses ignored fields:
 - `temperature`
 - `top_p`
 - `max_output_tokens`
-- `parallel_tool_calls`
 - `store`
 - `background` on `POST /v1/responses`; the WebSocket endpoint rejects `background: true`
 - `user`

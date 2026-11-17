@@ -1204,7 +1204,7 @@ Implementation note:
 The proxy classifies these upstream statuses specially:
 
 - `401` -> upstream unauthorized / account marked expired
-- `403` -> account banned unless the body looks like HTML/Cloudflare
+- `403` -> 60-second cooldown unless the body looks like HTML/Cloudflare
 - `402` -> quota exhausted / cooldown applied
 - `429` -> rate limited / cooldown applied
 
