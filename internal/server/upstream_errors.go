@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"errors"
 	"io"
 	"net/http"
@@ -46,7 +47,7 @@ func (a *App) classifyUpstreamError(accountID string, err error) (int, string, s
 			a.setAccountCooldown(accountID, a.rateLimitCooldownUntil(accountID, err, time.Now().UTC()), err)
 			return http.StatusTooManyRequests, "rate_limited", "upstream account rate limited"
 		}
-		return clampUpstreamStatus(upstreamErr.StatusCode), "upstream_error", upstreamErr.Message()
+		return clampUpstreamStatus(upstreamErr.StatusCode), cmp.Or(upstreamErr.Code, "upstream_error"), upstreamErr.Message()
 	}
 	return http.StatusBadGateway, "upstream_error", err.Error()
 }

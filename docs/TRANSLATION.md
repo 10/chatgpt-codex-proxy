@@ -647,10 +647,12 @@ On the public Responses WebSocket, the equivalent error message has status `400`
 Upstream failures are classified into OpenAI-style proxy errors:
 
 - upstream `401` or auth-like error code -> `401`, `upstream_unauthorized`
-- upstream `403` -> `403`, `upstream_error`; generic access denials temporarily cool down the account
+- upstream `403` -> `403`, the upstream error code or `upstream_error`; generic access denials temporarily cool down the account
 - upstream `402` or quota-like error code -> `402`, `quota_exhausted`
 - upstream `429` or rate-limit-like error code -> `429`, `rate_limited`
-- other upstream failures -> clamped upstream status, `upstream_error`
+- other upstream failures -> clamped upstream status, the upstream error code or `upstream_error`
+
+The message is the upstream `error.message` (or `detail`) when the body has one, otherwise the raw body.
 
 During streaming, classified errors are sent as SSE error payloads instead of raw upstream error objects. Responses streams use top-level `{type, code, message, sequence_number}` error events; Chat and legacy Completions retain the OpenAI error wrapper.
 

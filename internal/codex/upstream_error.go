@@ -19,6 +19,8 @@ type UpstreamError struct {
 	Body       string
 	Code       string
 	RetryAfter int
+
+	message string
 }
 
 func (e *UpstreamError) Error() string {
@@ -42,6 +44,9 @@ func (e *UpstreamError) Message() string {
 	if e == nil {
 		return ""
 	}
+	if e.message != "" {
+		return e.message
+	}
 	if body := strings.TrimSpace(e.Body); body != "" {
 		return body
 	}
@@ -57,19 +62,19 @@ func NewUpstreamError(op string, statusCode int, body string, headers http.Heade
 		StatusCode: statusCode,
 		Body:       strings.TrimSpace(body),
 	}
-	err.Code, err.RetryAfter = parseUpstreamErrorBody(err.Body)
+	err.Code, err.message, err.RetryAfter = parseUpstreamErrorBody(err.Body)
 	err.RetryAfter = max(err.RetryAfter, parseRetryAfterHeaders(headers))
 	return err
 }
 
-func parseUpstreamErrorBody(body string) (string, int) {
+func parseUpstreamErrorBody(body string) (string, string, int) {
 	if strings.TrimSpace(body) == "" {
-		return "", 0
+		return "", "", 0
 	}
 
 	var payload upstreamErrorEnvelope
 	if err := json.Unmarshal([]byte(body), &payload); err != nil {
-		return "", 0
+		return "", "", 0
 	}
 
 	nested := upstreamErrorFields{}
@@ -87,7 +92,10 @@ func parseUpstreamErrorBody(body string) (string, int) {
 		nested.ResetsAt = payload.ResetsAt
 	}
 
-	return strings.TrimSpace(nested.Code), retryAfterSeconds(nested.ResetsInSeconds, nested.RetryAfter, nested.ResetsAt)
+	var detail string
+	_ = json.Unmarshal(payload.Detail, &detail)
+	message := strings.TrimSpace(cmp.Or(nested.Message, detail))
+	return strings.TrimSpace(nested.Code), message, retryAfterSeconds(nested.ResetsInSeconds, nested.RetryAfter, nested.ResetsAt)
 }
 
 func retryAfterSeconds(resetsInSeconds, retryAfter, resetsAt any) int {
@@ -122,6 +130,7 @@ func parseRetryAfterHeaders(headers http.Header) int {
 type upstreamErrorEnvelope struct {
 	Error           *upstreamErrorFields `json:"error"`
 	Code            string               `json:"code"`
+	Detail          json.RawMessage      `json:"detail"`
 	ResetsInSeconds json.RawMessage      `json:"resets_in_seconds"`
 	RetryAfter      json.RawMessage      `json:"retry_after"`
 	ResetsAt        json.RawMessage      `json:"resets_at"`
@@ -129,6 +138,7 @@ type upstreamErrorEnvelope struct {
 
 type upstreamErrorFields struct {
 	Code            string          `json:"code"`
+	Message         string          `json:"message"`
 	ResetsInSeconds json.RawMessage `json:"resets_in_seconds"`
 	RetryAfter      json.RawMessage `json:"retry_after"`
 	ResetsAt        json.RawMessage `json:"resets_at"`

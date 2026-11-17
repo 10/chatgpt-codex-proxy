@@ -42,6 +42,12 @@ func TestNewUpstreamErrorParsesRetryAfter(t *testing.T) {
 			wantExact: 11,
 		},
 		{
+			name:      "object detail keeps code and reset",
+			body:      `{"error":{"code":"rate_limit_exceeded","resets_in_seconds":120},"detail":{"message":"x"}}`,
+			wantCode:  "rate_limit_exceeded",
+			wantExact: 120,
+		},
+		{
 			name:      "from retry-after header",
 			body:      `{"error":{"message":"rate limited"}}`,
 			headers:   http.Header{"Retry-After": []string{"9"}},
