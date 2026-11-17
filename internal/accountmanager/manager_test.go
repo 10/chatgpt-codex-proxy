@@ -104,33 +104,60 @@ func TestRefreshKeepsAccountActiveAfterTransientFailure(t *testing.T) {
 	}
 }
 
-func TestRefreshExpiresAccountAfterInvalidGrant(t *testing.T) {
+func TestRefreshExpiresAccountAfterRejectedRefreshToken(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"refresh token is invalid"}`))
-	}))
-	defer server.Close()
+	for name, test := range map[string]struct {
+		status    int
+		body      string
+		wantError string
+	}{
+		"oauth invalid_grant":            {http.StatusBadRequest, `{"error":"invalid_grant","error_description":"refresh token is invalid"}`, "refresh token is invalid"},
+		"reused refresh token":           {http.StatusBadRequest, `{"error":{"message":"Refresh token was already used.","code":"refresh_token_reused"}}`, "Refresh token was already used."},
+		"unauthorized refresh":           {http.StatusUnauthorized, `{"error":{"message":"Unauthorized"}}`, "Unauthorized"},
+		"rejected oauth client":          {http.StatusUnauthorized, `{"error":"invalid_client","error_description":"client authentication failed"}`, ""},
+		"unauthorized oauth client":      {http.StatusUnauthorized, `{"error":"unauthorized_client"}`, ""},
+		"openai malformed refresh token": {http.StatusBadRequest, `{"error":{"message":"Invalid refresh token.","type":"invalid_request_error","param":null,"code":"invalid_refresh_token_ciphertext_header"}}`, "Invalid refresh token."},
+		"openai invalid_refresh_token":   {http.StatusUnauthorized, `{"error":{"message":"Could not validate your refresh token. Please try signing in again.","type":"invalid_request_error","param":null,"code":"invalid_refresh_token"}}`, "Could not validate your refresh token. Please try signing in again."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	manager, accountsSvc, _ := newRefreshTestManager(t, server.URL, "acct_invalid_grant")
-	if _, err := manager.Refresh(context.Background(), "acct_invalid_grant"); err == nil {
-		t.Fatal("Refresh() error = nil, want invalid_grant failure")
-	}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
 
-	record, ok, err := accountsSvc.Get("acct_invalid_grant")
-	if err != nil {
-		t.Fatalf("accounts.Get() error = %v", err)
-	}
-	if !ok {
-		t.Fatal("account missing after refresh failure")
-	}
-	if record.Status != accounts.StatusExpired {
-		t.Fatalf("account status = %q, want expired", record.Status)
-	}
-	if record.CooldownUntil != nil {
-		t.Fatalf("cooldown until = %v, want none for terminal failure", record.CooldownUntil)
+			manager, accountsSvc, _ := newRefreshTestManager(t, server.URL, "acct_rejected_refresh")
+			if _, err := manager.Refresh(context.Background(), "acct_rejected_refresh"); err == nil {
+				t.Fatal("Refresh() error = nil, want rejected refresh token")
+			}
+
+			record, ok, err := accountsSvc.Get("acct_rejected_refresh")
+			if err != nil {
+				t.Fatalf("accounts.Get() error = %v", err)
+			}
+			if !ok {
+				t.Fatal("account missing after refresh failure")
+			}
+			if test.wantError == "" {
+				if record.Status != accounts.StatusActive || record.CooldownUntil == nil {
+					t.Fatalf("account = %q until %v, want active behind a cooldown", record.Status, record.CooldownUntil)
+				}
+				return
+			}
+			if record.Status != accounts.StatusExpired {
+				t.Fatalf("account status = %q, want expired", record.Status)
+			}
+			if record.CooldownUntil != nil {
+				t.Fatalf("cooldown until = %v, want none for terminal failure", record.CooldownUntil)
+			}
+			if record.LastError != "oauth token exchange failed: "+test.wantError {
+				t.Fatalf("last error = %q", record.LastError)
+			}
+		})
 	}
 }
 

@@ -1376,7 +1376,7 @@ Notes:
 
 - `expires_in` may be numeric or string-like
 - a successful refresh response may omit `refresh_token`; the proxy preserves the existing refresh token in that case
-- an OAuth `invalid_grant` response expires the account; other refresh failures keep it active behind a 60-second cooldown
+- a `401` other than `invalid_client` or `unauthorized_client`, an OAuth `invalid_grant`, or an OpenAI `{"error":{"code":...}}` response with `invalid_refresh_token*`, `refresh_token_expired`, `refresh_token_reused`, or `refresh_token_invalidated` expires the account; other refresh failures keep it active behind a 60-second cooldown
 - The proxy extracts `chatgpt_account_id` from either:
   - `id_token`
   - `access_token`

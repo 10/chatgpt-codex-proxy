@@ -55,6 +55,49 @@ func TestParseQuotaFromHeaders(t *testing.T) {
 			},
 		},
 		{
+			name: "drops an empty secondary window like the usage endpoint",
+			header: func(headers http.Header) {
+				headers.Set("X-Codex-Primary-Used-Percent", "28")
+				headers.Set("X-Codex-Primary-Window-Minutes", "10080")
+				headers.Set("X-Codex-Secondary-Used-Percent", "0")
+				headers.Set("X-Codex-Secondary-Window-Minutes", "0")
+				headers.Set("X-Codex-Secondary-Reset-At", "0")
+			},
+			assert: func(t *testing.T, snapshot *accounts.QuotaSnapshot) {
+				t.Helper()
+				if snapshot == nil || snapshot.SecondaryRateLimit != nil || *snapshot.RateLimit.LimitWindowSeconds != 604800 {
+					t.Fatalf("ParseQuotaFromHeaders() = %#v, want only the weekly window", snapshot)
+				}
+			},
+		},
+		{
+			name: "drops an empty secondary window without a reset time",
+			header: func(headers http.Header) {
+				headers.Set("X-Codex-Primary-Used-Percent", "28")
+				headers.Set("X-Codex-Primary-Window-Minutes", "10080")
+				headers.Set("X-Codex-Secondary-Used-Percent", "0")
+				headers.Set("X-Codex-Secondary-Window-Minutes", "0")
+			},
+			assert: func(t *testing.T, snapshot *accounts.QuotaSnapshot) {
+				t.Helper()
+				if snapshot == nil || snapshot.SecondaryRateLimit != nil || *snapshot.RateLimit.LimitWindowSeconds != 604800 {
+					t.Fatalf("ParseQuotaFromHeaders() = %#v, want only the weekly window", snapshot)
+				}
+			},
+		},
+		{
+			name: "keeps a primary window at zero usage",
+			header: func(headers http.Header) {
+				headers.Set("X-Codex-Primary-Used-Percent", "0")
+			},
+			assert: func(t *testing.T, snapshot *accounts.QuotaSnapshot) {
+				t.Helper()
+				if snapshot == nil || snapshot.RateLimit.UsedPercent == nil || *snapshot.RateLimit.UsedPercent != 0 {
+					t.Fatalf("ParseQuotaFromHeaders() = %#v, want the 0%% primary window", snapshot)
+				}
+			},
+		},
+		{
 			name: "ignores credits-only headers",
 			header: func(headers http.Header) {
 				headers.Set("X-Codex-Credits-Has-Credits", "true")
