@@ -371,6 +371,39 @@ func TestNormalizeMessagesLoadsDeferredToolsFromToolReferences(t *testing.T) {
 	}
 }
 
+func TestNormalizeMessagesSendsDocumentsAsCodexFiles(t *testing.T) {
+	t.Parallel()
+
+	request, err := DecodeMessages([]byte(`{"model":"gpt-5.6-terra","max_tokens":10,"messages":[
+		{"role":"user","content":[
+			{"type":"document","title":"notes","source":{"type":"text","media_type":"text/plain","data":"Ship on Friday."}},
+			{"type":"text","text":"Read invoice.pdf"}
+		]},
+		{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"invoice.pdf"}}]},
+		{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":[
+			{"type":"text","text":"PDF file read: invoice.pdf (14.1KB)"},
+			{"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0xLjM="}}
+		]}]}
+	]}`))
+	if err != nil {
+		t.Fatalf("DecodeMessages() error = %v", err)
+	}
+	normalized, err := Normalize(request, models.NewCatalog(models.BootstrapEntries()))
+	if err != nil {
+		t.Fatalf("Normalize() error = %v", err)
+	}
+	if got := normalized.Input[0].Content[0]; got.Type != "input_text" || got.Text != "notes\n\nShip on Friday." {
+		t.Fatalf("text document = %#v", got)
+	}
+	output := normalized.Input[len(normalized.Input)-1]
+	if output.Type != "function_call_output" || len(output.OutputContent) != 2 {
+		t.Fatalf("tool output = %#v", output)
+	}
+	if file := output.OutputContent[1]; file.Type != "input_file" || file.Filename != "document.pdf" || file.FileData != "data:application/pdf;base64,JVBERi0xLjM=" {
+		t.Fatalf("PDF tool output = %#v", file)
+	}
+}
+
 func TestNormalizeMessagesPreservesLargeToolInputNumbers(t *testing.T) {
 	t.Parallel()
 

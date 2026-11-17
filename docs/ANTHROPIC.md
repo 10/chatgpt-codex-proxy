@@ -28,6 +28,8 @@ Model endpoints return the Anthropic envelope when that header is present. They 
 | User text | `input_text` |
 | Assistant text or prefill | `output_text` |
 | Base64 or URL image | `input_image` |
+| Base64 or URL document, including in a tool result | `input_file` |
+| Text document | `input_text` |
 | Assistant `tool_use` | `function_call` |
 | User `tool_result` | `function_call_output` |
 | Replayed hosted-search blocks | `web_search_call` |
@@ -72,7 +74,7 @@ If a request fails before streaming begins, the endpoint returns a normal JSON e
 
 `/v1/messages/count_tokens` normalizes the request through the same mapper used by `/v1/messages`, then tokenizes the effective Codex instructions, transcript, tools, and output schema locally.
 
-The result is a Codex-oriented estimate. It is not an Anthropic billing-token guarantee. Image references use a bounded per-image allowance instead of counting URL or base64 payload bytes as text because exact image costs require an upstream counting endpoint.
+The result is a Codex-oriented estimate. It is not an Anthropic billing-token guarantee. Image references use a bounded per-image allowance instead of counting URL or base64 payload bytes as text because exact image costs require an upstream counting endpoint. PDF documents are not counted.
 
 ## Current compatibility limits
 

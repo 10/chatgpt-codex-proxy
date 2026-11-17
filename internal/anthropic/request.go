@@ -151,6 +151,15 @@ func normalizeMessages(messages []Message, toolNames *turn.ToolNames) ([]turn.In
 					return nil, err
 				}
 				content = append(content, turn.ContentPart{Type: "input_image", ImageURL: imageURL})
+			case "document":
+				if role != "user" {
+					return nil, errors.New("document blocks are only supported in user messages")
+				}
+				part, err := normalizeDocument(block)
+				if err != nil {
+					return nil, err
+				}
+				content = append(content, part)
 			case "tool_use":
 				if role != "assistant" {
 					return nil, errors.New("tool_use blocks require the assistant role")
@@ -293,6 +302,38 @@ func normalizeImageSource(source *ImageSource) (string, error) {
 	}
 }
 
+func normalizeDocument(block Block) (turn.ContentPart, error) {
+	source := block.Source
+	if source == nil {
+		return turn.ContentPart{}, errors.New("document source is required")
+	}
+	switch strings.TrimSpace(source.Type) {
+	case "base64":
+		mediaType := strings.TrimSpace(source.MediaType)
+		if mediaType == "" || strings.TrimSpace(source.Data) == "" {
+			return turn.ContentPart{}, errors.New("base64 document source requires media_type and data")
+		}
+		return turn.ContentPart{
+			Type:     "input_file",
+			Filename: cmp.Or(strings.TrimSpace(block.Title), "document.pdf"),
+			FileData: "data:" + mediaType + ";base64," + strings.TrimSpace(source.Data),
+		}, nil
+	case "url":
+		if strings.TrimSpace(source.URL) == "" {
+			return turn.ContentPart{}, errors.New("URL document source requires url")
+		}
+		return turn.ContentPart{Type: "input_file", FileURL: strings.TrimSpace(source.URL)}, nil
+	case "text":
+		text := source.Data
+		if title := strings.TrimSpace(block.Title); title != "" {
+			text = title + "\n\n" + text
+		}
+		return turn.ContentPart{Type: "input_text", Text: text}, nil
+	default:
+		return turn.ContentPart{}, fmt.Errorf("unsupported document source type %q", source.Type)
+	}
+}
+
 func normalizeToolInput(input json.RawMessage) (string, error) {
 	trimmed := bytes.TrimSpace(input)
 	if len(trimmed) == 0 {
@@ -327,6 +368,17 @@ func normalizeToolResult(content Content, toolNames *turn.ToolNames) (string, []
 				return "", nil, err
 			}
 			parts = append(parts, turn.ContentPart{Type: "input_image", ImageURL: imageURL})
+		case "document":
+			part, err := normalizeDocument(block)
+			if err != nil {
+				return "", nil, err
+			}
+			parts = append(parts, part)
+			if part.Type == "input_text" {
+				texts = append(texts, part.Text)
+			} else {
+				allText = false
+			}
 		default:
 			return "", nil, fmt.Errorf("unsupported tool result block type %q", block.Type)
 		}
