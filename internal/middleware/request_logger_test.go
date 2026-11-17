@@ -69,6 +69,22 @@ func TestRequestLoggerDoesNotLogBodyContents(t *testing.T) {
 	}
 }
 
+func TestRequestLoggerReportsTokenUsage(t *testing.T) {
+	t.Parallel()
+
+	engine, logs := newLoggedEngine(t)
+	engine.POST("/v1/messages", func(c *gin.Context) {
+		SetRequestUsage(c, 8040, 7808, 5)
+		c.Status(http.StatusOK)
+	})
+	engine.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/messages", nil))
+
+	entries := decodeLogEntries(t, logs)
+	if len(entries) != 1 || entries[0]["input_tokens"] != float64(8040) || entries[0]["cached_tokens"] != float64(7808) || entries[0]["output_tokens"] != float64(5) {
+		t.Fatalf("request log = %#v", entries)
+	}
+}
+
 func newLoggedEngine(t *testing.T) (*gin.Engine, *bytes.Buffer) {
 	t.Helper()
 

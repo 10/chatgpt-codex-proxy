@@ -13,6 +13,7 @@ const (
 	RequestErrorCodeKey    = "request_error_code"
 	RequestErrorMessageKey = "request_error_message"
 	RequestResponseIDKey   = "request_response_id"
+	RequestUsageKey        = "request_usage"
 )
 
 const maxLoggedErrorLength = 2048
@@ -28,6 +29,14 @@ func SetRequestError(c *gin.Context, code, message string) {
 
 func SetRequestResponseID(c *gin.Context, responseID string) {
 	c.Set(RequestResponseIDKey, strings.TrimSpace(responseID))
+}
+
+type requestUsage struct {
+	input, cached, output int64
+}
+
+func SetRequestUsage(c *gin.Context, input, cached, output int64) {
+	c.Set(RequestUsageKey, requestUsage{input: input, cached: cached, output: output})
 }
 
 func RequestLogger(logger *slog.Logger) gin.HandlerFunc {
@@ -74,6 +83,10 @@ func RequestLogger(logger *slog.Logger) gin.HandlerFunc {
 		}
 		if responseID := c.GetString(RequestResponseIDKey); responseID != "" {
 			attrs = append(attrs, "response_id", responseID)
+		}
+		if value, ok := c.Get(RequestUsageKey); ok {
+			usage := value.(requestUsage)
+			attrs = append(attrs, "input_tokens", usage.input, "cached_tokens", usage.cached, "output_tokens", usage.output)
 		}
 		if errorCode := c.GetString(RequestErrorCodeKey); errorCode != "" {
 			attrs = append(attrs, "error_code", errorCode)
